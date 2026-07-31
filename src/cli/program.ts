@@ -1,5 +1,10 @@
 import { Command } from 'commander';
 import { VERSION } from '../version';
+import { registerAuthCommands } from './commands/auth';
+import { registerMetaCommands } from './commands/meta';
+import { registerProjectCommands } from './commands/project';
+import { registerWorkItemCommands } from './commands/workItem';
+import { addGlobalOptions } from './globals';
 
 /**
  * Global flags, as parsed by commander. `--no-cache` yields `cache: false`.
@@ -13,8 +18,11 @@ export type RawGlobalOptions = {
   verbose?: boolean | undefined;
 };
 
+/** A fixed help width keeps `--help` output identical everywhere (and snapshottable). */
+export const HELP_WIDTH = 100;
+
 /**
- * Build the root program. Commands are registered by `cli/commands/*`.
+ * Build the root program, with every command group registered.
  *
  * `exitOverride()` makes commander throw a `CommanderError` instead of calling
  * `process.exit()`, so `bin/pingcode.ts` owns every exit code (design §5.2).
@@ -27,16 +35,22 @@ export function buildProgram(): Command {
     .name('pingcode')
     .description('Command-line client for the PingCode Open API')
     .version(VERSION, '--version', 'output the CLI version')
-    .option(
-      '--host <url>',
-      'PingCode host (default https://open.pingcode.com; self-hosted: https://pingcode.example.com)',
-    )
-    .option('--json', 'emit machine-readable JSON on stdout')
-    .option('--dry-run', 'preview mutating requests without sending them')
-    .option('--no-cache', 'bypass the on-disk metadata cache')
-    .option('--verbose', 'log requests to stderr (secrets redacted)')
+    .configureHelp({ helpWidth: HELP_WIDTH })
     .showHelpAfterError()
     .exitOverride();
+
+  addGlobalOptions(program);
+
+  program.addHelpText(
+    'after',
+    '\nGlobal flags may be given before or after the subcommand.\n' +
+      'Agents: prefer --json (stdout is JSON only) and run --dry-run before any write.\n',
+  );
+
+  registerAuthCommands(program);
+  registerProjectCommands(program);
+  registerWorkItemCommands(program);
+  registerMetaCommands(program);
 
   return program;
 }

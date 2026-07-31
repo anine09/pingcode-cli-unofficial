@@ -1,4 +1,4 @@
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import {
   loadConfig,
   resolveSettings,
@@ -25,16 +25,62 @@ export type GlobalOptions = {
   verbose: boolean;
 };
 
-/** Read the root-level flags from any (sub)command. */
+/**
+ * The global flags, defined once. commander binds an option to the command it
+ * *follows*, so `pingcode work-item list --json` would otherwise be an unknown
+ * option. Every leaf command therefore repeats these (hidden from its own help,
+ * which keeps the root as the single place they are documented) and
+ * `readGlobalOptions` picks the innermost value that was actually typed.
+ */
+const GLOBAL_FLAGS: { flags: string; description: string }[] = [
+  {
+    flags: '--host <url>',
+    description:
+      'PingCode host (default https://open.pingcode.com; self-hosted: https://pingcode.example.com)',
+  },
+  { flags: '--json', description: 'emit machine-readable JSON on stdout' },
+  { flags: '--dry-run', description: 'preview mutating requests without sending them' },
+  { flags: '--no-cache', description: 'bypass the on-disk metadata cache' },
+  { flags: '--verbose', description: 'log requests to stderr (secrets redacted)' },
+];
+
+export function addGlobalOptions(command: Command, options: { hidden?: boolean } = {}): Command {
+  for (const spec of GLOBAL_FLAGS) {
+    const option = new Option(spec.flags, spec.description);
+    if (options.hidden === true) option.hideHelp();
+    command.addOption(option);
+  }
+  return command;
+}
+
+/**
+ * Read a global flag from the innermost command that actually carries a typed
+ * value, falling back to the outermost default (`--no-cache` defaults to `true`).
+ */
+function readGlobalFlag(command: Command, key: keyof RawGlobalOptions): unknown {
+  let fallback: unknown;
+  let cursor: Command | null = command;
+  while (cursor !== null) {
+    const source = cursor.getOptionValueSource(key);
+    if (source !== undefined) {
+      if (source !== 'default' && source !== 'implied') return cursor.getOptionValue(key);
+      if (fallback === undefined) fallback = cursor.getOptionValue(key);
+    }
+    cursor = cursor.parent;
+  }
+  return fallback;
+}
+
+/** Read the global flags from any (sub)command, wherever on the line they appeared. */
 export function readGlobalOptions(command: Command): GlobalOptions {
-  const raw = command.optsWithGlobals<RawGlobalOptions>();
+  const host = readGlobalFlag(command, 'host');
   return {
-    host: raw.host,
-    json: raw.json === true,
-    dryRun: raw.dryRun === true,
+    host: typeof host === 'string' ? host : undefined,
+    json: readGlobalFlag(command, 'json') === true,
+    dryRun: readGlobalFlag(command, 'dryRun') === true,
     // commander maps `--no-cache` to `cache: false`; the default is `true`.
-    useCache: raw.cache !== false,
-    verbose: raw.verbose === true,
+    useCache: readGlobalFlag(command, 'cache') !== false,
+    verbose: readGlobalFlag(command, 'verbose') === true,
   };
 }
 
