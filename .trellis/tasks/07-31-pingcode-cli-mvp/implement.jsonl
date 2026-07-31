@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/07-31-pingcode-cli-mvp/research/pingcode-api.md", "reason": "Authoritative PingCode API contract: auth flow (GET token endpoint), base URLs, response envelope, pagination, error shape, MVP endpoint table, and 26 gotchas. Every API call must trace to this."}
+{"file": ".trellis/tasks/07-31-pingcode-cli-mvp/design.md", "reason": "Technical design: layering, config/host derivation, token freshness, transport responsibilities, error-to-exit-code table, metadata cache, command surface, output contract."}
+{"file": ".trellis/tasks/07-31-pingcode-cli-mvp/implement.md", "reason": "Ordered slices S1-S9 with per-slice validation commands, review gates G1-G5, and rollback points."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "This CLI spans cli/ -> api/ -> core/ layers; guide covers data-flow and payload-typing discipline across boundaries."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Transport, pagination, metadata resolution, and output rendering are shared helpers; guide covers avoiding duplicated patterns and searching before adding utilities."}

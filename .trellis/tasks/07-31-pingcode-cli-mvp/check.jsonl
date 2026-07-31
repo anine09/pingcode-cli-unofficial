@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/07-31-pingcode-cli-mvp/prd.md", "reason": "Acceptance criteria AC1-AC11 are the checklist to verify against; also defines MVP non-goals to catch scope creep."}
+{"file": ".trellis/tasks/07-31-pingcode-cli-mvp/design.md", "reason": "Verify implementation matches the design contracts: one-way layering, error-to-exit-code table, stdout-pure-JSON rule, dry-run enforced in transport, ids never shape-validated."}
+{"file": ".trellis/tasks/07-31-pingcode-cli-mvp/implement.md", "reason": "Per-slice validation commands and review gates G1-G5 define what must be green before reporting completion."}
+{"file": ".trellis/tasks/07-31-pingcode-cli-mvp/research/pingcode-api.md", "reason": "Ground truth for API-fact review: check no call site contradicts the documented params, id shapes, timestamp units, or pagination semantics."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check for duplicated helpers and constants introduced across command files."}
