@@ -1,0 +1,120 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`--help snapshots > auth 1`] = `
+"Usage: pingcode auth [options] [command]
+
+authenticate against PingCode (Client Credentials app)
+
+Options:
+  -h, --help        display help for command
+
+Commands:
+  login [options]   acquire an org token and verify it against a real capability
+  status [options]  show host, masked client id and token state
+  logout [options]  remove the stored token and credentials, and clear the metadata cache
+  help [command]    display help for command
+"
+`;
+
+exports[`--help snapshots > meta 1`] = `
+"Usage: pingcode meta [options] [command]
+
+project-scoped ids you need before creating or updating work items
+
+Options:
+  -h, --help            display help for command
+
+Commands:
+  types [options]       work-item types of a project (values for --type / type_id)
+  states [options]      work-item states of one (project, type) pair — both are required
+  priorities [options]  work-item priorities of a project
+  sprints [options]     sprints of a project (scrum/hybrid only)
+  users [options]       organisation members (scope pcp:read:global:team)
+  help [command]        display help for command
+"
+`;
+
+exports[`--help snapshots > project 1`] = `
+"Usage: pingcode project [options] [command]
+
+projects (scope pcp:read:pjm:project)
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           list projects
+  get [options] <project>  show one project
+  help [command]           display help for command
+"
+`;
+
+exports[`--help snapshots > root 1`] = `
+"Usage: pingcode [options] [command]
+
+Command-line client for the PingCode Open API
+
+Options:
+  --version       output the CLI version
+  --host <url>    PingCode host (default https://open.pingcode.com; self-hosted:
+                  https://pingcode.example.com)
+  --json          emit machine-readable JSON on stdout
+  --dry-run       preview mutating requests without sending them
+  --no-cache      bypass the on-disk metadata cache
+  --verbose       log requests to stderr (secrets redacted)
+  -h, --help      display help for command
+
+Commands:
+  auth            authenticate against PingCode (Client Credentials app)
+  project         projects (scope pcp:read:pjm:project)
+  work-item       work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
+  meta            project-scoped ids you need before creating or updating work items
+  help [command]  display help for command
+"
+`;
+
+exports[`--help snapshots > work-item 1`] = `
+"Usage: pingcode work-item [options] [command]
+
+work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
+
+Options:
+  -h, --help                        display help for command
+
+Commands:
+  list [options]                    list work items of a project
+  get [options] <work-item>         show one work item
+  create [options]                  create a work item (ids are project-scoped: run \`pingcode meta\`
+                                    first)
+  update [options] <work-item>      patch a work item — only the fields you pass are sent, and they
+                                    replace
+  transition [options] <work-item>  move a work item to another state (workflow-validated by the
+                                    server)
+  help [command]                    display help for command
+"
+`;
+
+exports[`--help snapshots > work-item update (the widest flag set) 1`] = `
+"Usage: pingcode work-item update [options] <work-item>
+
+patch a work item — only the fields you pass are sent, and they replace
+
+Arguments:
+  work-item                 id, short_id, identifier such as SCR-5, or a pasted URL
+
+Options:
+  --title <text>            new title
+  --description <text>      new description (replaces the old one)
+  --assignee <name|id>      new assignee
+  --priority <name|id>      new priority
+  --parent <ref>            new parent work item
+  --start-at <when>         unix seconds or a date like 2026-01-31
+  --end-at <when>           unix seconds or a date like 2026-01-31
+  --story-points <n>        story points
+  --estimated-workload <n>  estimated workload in hours
+  --remaining-workload <n>  remaining workload in hours
+  --state <name>            new state, resolved by name (the type is read from the work item)
+  --state-id <id>           new state, given as an id (no lookup, no --type needed)
+  -h, --help                display help for command
+"
+`;
