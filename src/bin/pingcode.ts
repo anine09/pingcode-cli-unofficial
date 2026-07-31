@@ -1,6 +1,17 @@
 #!/usr/bin/env node
-import { CommanderError } from 'commander';
-import { buildProgram } from '../cli/program';
+import { CommanderError, type Command } from 'commander';
+import { printDryRun, printError } from '../cli/output';
+import { buildProgram, type RawGlobalOptions } from '../cli/program';
+import { DryRunHalt, exitCodeFor } from '../core/errors';
+
+function detectJsonMode(program: Command, argv: string[]): boolean {
+  try {
+    if (program.opts<RawGlobalOptions>().json === true) return true;
+  } catch {
+    // Options may be unparsed if the failure happened early.
+  }
+  return argv.includes('--json');
+}
 
 async function main(argv: string[]): Promise<number> {
   const program = buildProgram();
@@ -8,11 +19,21 @@ async function main(argv: string[]): Promise<number> {
     await program.parseAsync(argv);
     return 0;
   } catch (error) {
+    const mode = { json: detectJsonMode(program, argv) };
+
+    // A refused mutation under --dry-run is a success (design D8).
+    if (error instanceof DryRunHalt) {
+      printDryRun(error.plan, mode);
+      return 0;
+    }
+
+    // `--help` / `--version` exit 0; commander's own usage errors exit 2 (design §5.2).
     if (error instanceof CommanderError) {
-      // `--help` / `--version` exit 0; commander's own usage errors exit 2 (design §5.2).
       return error.exitCode === 0 ? 0 : 2;
     }
-    throw error;
+
+    printError(error, mode);
+    return exitCodeFor(error);
   }
 }
 
@@ -21,7 +42,7 @@ main(process.argv).then(
     process.exitCode = code;
   },
   (error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
+    printError(error, { json: process.argv.includes('--json') });
+    process.exitCode = exitCodeFor(error);
   },
 );
