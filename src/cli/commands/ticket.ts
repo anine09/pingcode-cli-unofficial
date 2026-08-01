@@ -12,6 +12,9 @@ import {
 import type { Ctx } from '../../core/context';
 import { NotFoundError, PingcodeError, UsageError } from '../../core/errors';
 import {
+  findTicketStatePlanId,
+  invalidateCacheKey,
+  loadTicketStateFlows,
   resolveProduct,
   resolveProductMember,
   resolveShipRef,
@@ -20,7 +23,9 @@ import {
   resolveTicketProperty,
   resolveTicketState,
   resolveTicketType,
+  withoutCache,
   type ShipLocator,
+  type StateFlowEdge,
 } from '../../core/metadata';
 import { collect, type SearchPayload } from '../../core/paginate';
 import type { Ref, ShipTicket } from '../../types/api';
@@ -401,9 +406,14 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   };
 
   try {
-    const ticket = await runWrite(ctx, resolve, (attemptCtx, patch) =>
-      updateTicket(attemptCtx, locator.id, patch),
-    );
+    const ticket = await runWrite(ctx, resolve, async (attemptCtx, patch) => {
+      // Pre-validation runs inside the write attempt so the retry pass — which
+      // has the cache bypassed — re-checks against freshly read flows.
+      if (patch.state_id !== undefined) {
+        await verifyTicketTransition(attemptCtx, locator, patch.state_id);
+      }
+      return await updateTicket(attemptCtx, locator.id, patch);
+    });
     printTicket(ticket, ctx, 'updated');
   } catch (error) {
     if (wantsState) await explainTicketStates(ctx, locator, error);
@@ -411,9 +421,137 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   }
 }
 
+// ---------------------------------------------------------------------------
+// transition pre-validation (design §13.2) — the ticket/idea asymmetry
+// ---------------------------------------------------------------------------
+
 /**
- * When the server rejects a state change, name the states the product actually
- * has: the server message rarely does.
+ * Refuse a transition the state plan does not allow, **before** sending it.
+ *
+ * This is the one thing tickets can do that ideas cannot: ship publishes
+ * `GET /v1/ship/ticket_state_plans/{plan}/ticket_state_flows`, and a `state_id`
+ * on `PATCH /v1/ship/tickets` is only accepted if a matching edge exists
+ * (ship GOTCHA #20). Ideas have no flow endpoint at all, so `idea update
+ * --state` can only ever be judged by the server.
+ *
+ * The failure mode is asymmetric on purpose: an *illegal transition* is refused
+ * locally with exit 2 and the reachable states named, but a *failed lookup* —
+ * no plan found, 403 on the configuration scope, an undocumented shape — only
+ * warns and lets the write proceed. Losing the ability to move a ticket because
+ * a lookup failed is worse than a server-side rejection.
+ */
+export async function verifyTicketTransition(
+  ctx: Ctx,
+  locator: ShipLocator,
+  targetStateId: string,
+): Promise<void> {
+  const currentStateId = locator.stateId;
+  if (currentStateId !== undefined && currentStateId === targetStateId) {
+    throw new UsageError(
+      `${locator.identifier ?? locator.id} is already in state ${locator.stateName ?? targetStateId}`,
+      { hint: 'nothing to do — drop --state, or pick a different target state' },
+    );
+  }
+
+  const productId = locator.productId;
+  if (productId === undefined || productId === '') {
+    ctx.logger.warn(
+      'the ticket did not report a product, so the state plan cannot be located; ' +
+        'sending the transition and letting the server decide',
+    );
+    return;
+  }
+
+  let planId: string | undefined;
+  let flows: Awaited<ReturnType<typeof loadTicketStateFlows>>;
+  try {
+    // The ticket schema documents no state-plan reference, so this is almost
+    // always the O(all plans) scan. `statePlanId` is read opportunistically in
+    // case the wire is richer than the docs.
+    planId = locator.statePlanId ?? (await findTicketStatePlanId(ctx, productId));
+    if (planId === undefined) {
+      ctx.logger.warn(
+        'no ticket state plan could be matched to this product, so the transition cannot be ' +
+          'checked locally; sending it and letting the server decide',
+      );
+      return;
+    }
+    flows = await loadTicketStateFlows(ctx, planId);
+  } catch (error) {
+    ctx.logger.warn(
+      `could not read the ticket state flows (${describe(error)}); sending the transition and ` +
+        'letting the server decide. Reading them needs pcp:read:ship:configuration',
+    );
+    return;
+  }
+
+  if (flows.edges.length === 0) {
+    ctx.logger.warn(
+      `state plan ${planId} reported no transitions, so the move cannot be checked locally; ` +
+        'sending it and letting the server decide',
+    );
+    return;
+  }
+
+  if (isReachable(flows.edges, currentStateId, targetStateId)) return;
+
+  // A stale flow cache must never produce a false local rejection: drop it and
+  // check once more against the live plan before refusing.
+  if (flows.fromCache) {
+    invalidateCacheKey(ctx, flows.cacheKey);
+    try {
+      const fresh = await loadTicketStateFlows(withoutCache(ctx), planId);
+      if (fresh.edges.length === 0 || isReachable(fresh.edges, currentStateId, targetStateId)) {
+        return;
+      }
+      flows = fresh;
+    } catch {
+      // Keep the cached view and refuse below rather than masking the reason.
+    }
+  }
+
+  const reachable = flows.edges
+    .filter((edge) => edge.fromId === undefined || edge.fromId === currentStateId)
+    .map((edge) => `${edge.toName ?? '(unnamed)'} (${edge.toId})`);
+
+  // The reachable set goes in the **message**, not the hint: `--json` errors are
+  // `{kind,message,code,exit}` and drop the hint entirely, so anything an agent
+  // has to act on must survive that shape.
+  const options =
+    reachable.length === 0
+      ? 'no transition out of the current state is configured — this ticket cannot be moved'
+      : `reachable from here: ${reachable.join(', ')}`;
+
+  throw new UsageError(
+    `the state plan does not allow ${locator.identifier ?? locator.id} to move from ` +
+      `${locator.stateName ?? currentStateId ?? '(unknown)'} to ${targetStateId}. ${options}`,
+    {
+      hint: 'run `pingcode meta ticket-states --product <p>` to see every state, or --no-cache if the plan was just reconfigured',
+    },
+  );
+}
+
+/** An edge with no source is an entry transition and is not treated as a barrier. */
+function isReachable(
+  edges: StateFlowEdge[],
+  currentStateId: string | undefined,
+  targetStateId: string,
+): boolean {
+  return edges.some(
+    (edge) =>
+      edge.toId === targetStateId &&
+      (edge.fromId === undefined || currentStateId === undefined || edge.fromId === currentStateId),
+  );
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * When the **server** rejects a state change, name the states the product has:
+ * the server message rarely does. A local refusal already explains itself, so
+ * `usage` is not in the list.
  */
 async function explainTicketStates(
   ctx: Ctx,
@@ -421,7 +559,7 @@ async function explainTicketStates(
   error: unknown,
 ): Promise<void> {
   if (!(error instanceof PingcodeError)) return;
-  if (!['api', 'usage', 'not_found', 'permission'].includes(error.kind)) return;
+  if (!['api', 'not_found', 'permission'].includes(error.kind)) return;
   const productId = locator.productId;
   if (productId === undefined) return;
 

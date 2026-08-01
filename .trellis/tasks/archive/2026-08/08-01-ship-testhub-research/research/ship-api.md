@@ -502,6 +502,11 @@ Relation response: `{id, url, principal_type, principal, target_type, target}` w
 30. **`POST /v1/ship/ideas`' response example is invalid JSON** (missing comma after `"html_url"`) and both idea write endpoints lack a `success.fields` table entirely — they are the only 2 of 101 ship records with no documented response schema. Derive the idea write response shape from `GET /v1/ship/ideas/{idea_id}`.
 31. **Reviews of ideas require a *product* write scope, not an idea scope** (`/v1/reviews` with `principal_type=idea` → `pcp:write:ship:product`), and `pilot_id` there means product id. Easy to get 403 on.
 32. **Workloads accept `idea` but not `ticket`.** If your CLI offers `--log-time`, it must be an idea-only flag.
+33. **A ticket does not tell you which state plan governs it.** Added 2026-08-01 while implementing `08-01-ship-cli`, from a re-read of this file rather than from the live API. §3.3's field list for `GET /v1/ship/tickets/{ticket_id}` contains **no** state-plan reference — not `state_plan`, not `ticket_state_plan`, not `state_plan_id` — and `state` is only `{id, url, name, type, color}`. But `GET /v1/ship/ticket_state_plans/{plan}/ticket_state_flows` (the only way to know which transitions are legal, GOTCHA #20) is addressed **by plan id**. So the two halves of transition validation do not connect: you are told transitions are plan-constrained and given no documented way to get from a ticket to its plan.
+
+    The only route the docs leave open is the one described in §9.11 and GOTCHA #23: list **all** `ticket_state_plans` and match the embedded `product.id`, skipping the `product: null` org-default rows, with no `?product_id=` filter and no documented pagination. That is O(all plans) per product and is what `pingcode ticket transition` does — cached under the product id, with the plan-keyed flow list cached separately.
+
+    Consequence for anyone building on this: **do not treat a failed plan lookup as a failed transition.** The CLI warns and sends the PATCH anyway, because a missing `pcp:read:ship:configuration` scope would otherwise make tickets unmovable. Whether the wire response is in fact richer than §3.3 is **unverified** — the CLI reads the three plausible key spellings opportunistically and falls back to the scan. Settle it during a live smoke run.
 
 ---
 

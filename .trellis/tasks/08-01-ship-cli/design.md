@@ -195,6 +195,44 @@ If the ticket response does not actually carry a state-plan reference, that is a
 contradiction: record it in `research/ship-api.md` and fall back to step 3's warn-and-continue path.
 Do not invent a plan id.
 
+### §13.2a Resolution of the state-plan gap (recorded during S5b)
+
+It does not. `ship-api.md` §3.3 lists no state-plan reference on the ticket schema, so step 1 above
+cannot be satisfied as written; this is now **GOTCHA #33** in the research file. Step 1 is amended to:
+
+1. Read `state_plan` / `ticket_state_plan` / `state_plan_id` off the ticket **opportunistically** —
+   the docs are hand-maintained and the wire may be richer. Nothing is invented if they are absent.
+2. Otherwise locate the plan the way §9.11 and GOTCHA #23 describe: list every
+   `GET /v1/ship/ticket_state_plans`, skip the `product: null` org-default rows, and match the
+   embedded `product.id`. O(all plans), no `?product_id=` filter exists. Cached under the product id
+   (kind `ship-ticket-state-plan`).
+3. If neither yields a plan → warn on stderr and send the PATCH. This is the §13.2 step-3 rule
+   applied one level earlier.
+
+Two further refinements settled while implementing:
+
+- The reachable-state list goes in the error **`message`**, not the `hint`, because `--json` errors
+  are `{kind,message,code,exit}` and drop the hint — an agent would otherwise be told "no" with no
+  way to learn "then what".
+- A local refusal is re-checked once against a **cache-bypassed** flow read before it is raised. A
+  stale 24 h flow cache must never be able to invent an illegal transition.
+- `ticket update --state` is validated on the same path as `ticket transition`; `--state-id` is
+  validated too, so the escape hatch skips the *name lookup*, not the *plan*.
+
+### §13.2b Corrections to this design found while implementing
+
+- **§9 is wrong about `product list` columns.** It specifies `identifier, name, state, owner`, but a
+  ship product has neither a `state` nor an `owner` field (`ship-api.md` §3.1). The implemented
+  columns are `identifier, name, visibility, id`.
+- **§6's URL rule cannot work for ship.** A pasted `html_url` ends in the `short_id`, and
+  `ship-api.md` §25 is explicit that **no ship endpoint accepts `short_id` or `identifier` as a
+  lookup key**. The trailing segment is therefore passed through as an id and allowed to fail
+  honestly; identifiers such as `SLC-1` go through `POST …/search` plus a client-side exact match.
+- **`POST …/search` collides with the dry-run gate.** The gate keys off the HTTP verb, so a search
+  would print a request plan instead of listing. Bypassed for those two paths only, in
+  `core/paginate.ts` — `core/http.ts` was not touched.
+
+
 ### §13.3 Metadata kinds
 
 Adds `ship-ticket-state`, `ship-ticket-priority`, `ship-ticket-type`, `ship-ticket-channel`,

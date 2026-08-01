@@ -914,11 +914,11 @@ export type StateFlowEdge = {
 export async function loadTicketStateFlows(
   ctx: Ctx,
   statePlanId: string,
-): Promise<{ edges: StateFlowEdge[]; cacheKey: string }> {
+): Promise<{ edges: StateFlowEdge[]; cacheKey: string; fromCache: boolean }> {
   const cacheKey = shipKey(ctx, 'ship-ticket-state-flow', statePlanId);
   const cached = readCache(ctx, cacheKey);
   if (cached !== undefined) {
-    return { edges: cached.map(decodeEdge), cacheKey };
+    return { edges: cached.map(decodeEdge), cacheKey, fromCache: true };
   }
 
   const rows = await collect(
@@ -942,7 +942,7 @@ export async function loadTicketStateFlows(
   }
 
   writeCache(ctx, cacheKey, 'ship-ticket-state-flow', edges.map(encodeEdge));
-  return { edges, cacheKey };
+  return { edges, cacheKey, fromCache: false };
 }
 
 /** Edges ride in the `Candidate` cache file: `id` is `from>to`, `name` is the target's name. */
@@ -971,6 +971,14 @@ export type ShipLocator = {
   stateName: string | undefined;
   /** Tickets only. */
   typeId: string | undefined;
+  /**
+   * Tickets only, and **not documented to exist**: `research/ship-api.md` §3.3
+   * lists no state-plan reference on the ticket schema. It is read here under
+   * the three plausible spellings anyway, because if the wire does carry one it
+   * saves an O(all plans) scan — and if it does not, `findTicketStatePlanId`
+   * takes over. No plan id is ever invented.
+   */
+  statePlanId: string | undefined;
 };
 
 /**
@@ -1051,6 +1059,10 @@ function shipLocatorOf(raw: unknown): ShipLocator {
     stateId: str(state?.id),
     stateName: str(state?.name),
     typeId: str(refRecord(record.type)?.id),
+    statePlanId:
+      str(refRecord(record.state_plan)?.id) ??
+      str(refRecord(record.ticket_state_plan)?.id) ??
+      str(record.state_plan_id),
   };
 }
 

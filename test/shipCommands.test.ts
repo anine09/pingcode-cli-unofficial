@@ -597,6 +597,186 @@ describe('ticket commands', () => {
   });
 });
 
+describe('ticket transition pre-validation (Gate G3b)', () => {
+  const ticketDetail = () =>
+    jsonResponse({
+      id: 't1',
+      identifier: 'SLC-7',
+      title: 'cannot log in',
+      product: { id: 'prod-1' },
+      state: { id: 'ts-pending', name: '待处理' },
+      is_archived: 0,
+    });
+
+  const ticketStatesPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 3,
+      values: [
+        { id: 'ts-pending', name: '待处理', type: 'pending' },
+        { id: 'ts-doing', name: '处理中', type: 'in_progress' },
+        { id: 'ts-closed', name: '已关闭', type: 'closed' },
+      ],
+    });
+
+  const plansPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 2,
+      values: [
+        { id: 'plan-org', product: null },
+        { id: 'plan-1', product: { id: 'prod-1' } },
+      ],
+    });
+
+  const flowsPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 1,
+      values: [
+        {
+          id: 'flow-1',
+          form_state: { id: 'ts-pending', name: '待处理' },
+          to_state: { id: 'ts-doing', name: '处理中' },
+        },
+      ],
+    });
+
+  it('sends a legal transition', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state', '处理中', '--json'],
+      [
+        ticketDetail,
+        ticketStatesPage,
+        plansPage,
+        flowsPage,
+        () => jsonResponse({ id: 't1', state: { id: 'ts-doing', name: '处理中' }, is_archived: 0 }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(mutations(run)).toHaveLength(1);
+    expect(mutations(run)[0]?.method).toBe('PATCH');
+    expect(mutations(run)[0]?.body).toEqual({ state_id: 'ts-doing' });
+  });
+
+  it('refuses an illegal transition locally with exit 2 and lists what IS reachable', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
+      [ticketDetail, ticketStatesPage, plansPage, flowsPage],
+    );
+    expect(run.exit).toBe(2);
+    // nothing was written — the whole point of pre-validation
+    expect(mutations(run)).toHaveLength(0);
+    const payload = JSON.parse(run.stderr.split('\n').filter((line) => line.startsWith('{'))[0] ?? '{}') as {
+      error: { kind: string; message: string };
+    };
+    expect(payload.error.kind).toBe('usage');
+    expect(payload.error.message).toContain('state plan does not allow');
+    // the reachable set must survive --json, which drops the hint
+    expect(payload.error.message).toContain('reachable from here');
+    expect(payload.error.message).toContain('处理中');
+    expect(run.stdout).toBe('');
+  });
+
+  it('warns and proceeds when the flows lookup fails — a lookup must not block a write', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
+      [
+        ticketDetail,
+        ticketStatesPage,
+        plansPage,
+        () => jsonResponse({ code: '100001', message: '无权限' }, { status: 403 }),
+        () => jsonResponse({ id: 't1', state: { id: 'ts-closed' }, is_archived: 0 }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stderr).toContain('letting the server decide');
+    expect(run.stderr).toContain('pcp:read:ship:configuration');
+    expect(mutations(run)).toHaveLength(1);
+    expect(mutations(run)[0]?.body).toEqual({ state_id: 'ts-closed' });
+  });
+
+  it('warns and proceeds when no state plan matches the product', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
+      [
+        ticketDetail,
+        ticketStatesPage,
+        () => jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'plan-org', product: null }] }),
+        () => jsonResponse({ id: 't1', is_archived: 0 }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stderr).toContain('no ticket state plan could be matched');
+    expect(mutations(run)).toHaveLength(1);
+  });
+
+  it('warns and proceeds when the plan declares no transitions at all', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
+      [
+        ticketDetail,
+        ticketStatesPage,
+        plansPage,
+        () => jsonResponse({ page_index: 0, page_size: 100, total: 0, values: [] }),
+        () => jsonResponse({ id: 't1', is_archived: 0 }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stderr).toContain('no transitions');
+    expect(mutations(run)).toHaveLength(1);
+  });
+
+  it('checks --state-id too, so the escape hatch is not a way around the plan', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state-id', 'ts-closed', '--json'],
+      [ticketDetail, plansPage, flowsPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(mutations(run)).toHaveLength(0);
+  });
+
+  it('refuses a no-op transition to the current state', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state-id', 'ts-pending', '--json'],
+      [ticketDetail],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('already in state');
+    expect(mutations(run)).toHaveLength(0);
+  });
+
+  it('validates ticket update --state as well, not just transition', async () => {
+    const run = await runCli(
+      ['ticket', 'update', 't1', '--state', '已关闭', '--json'],
+      [ticketDetail, ticketStatesPage, plansPage, flowsPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(mutations(run)).toHaveLength(0);
+  });
+
+  it('leaves idea update --state unvalidated: ship has no idea flow endpoint', async () => {
+    // The asymmetry, asserted rather than described: the idea PATCH goes out
+    // with no plan or flow lookup in between.
+    const run = await runCli(
+      ['idea', 'update', 'i1', '--state-id', 'st-anything', '--json'],
+      [
+        () => jsonResponse({ id: 'i1', product: { id: 'prod-1' }, state: { id: 'st-old' }, is_archived: 0 }),
+        () => jsonResponse({ id: 'i1', is_archived: 0 }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls.map((call) => new URL(call.url).pathname)).toEqual([
+      '/v1/ship/ideas/i1',
+      '/v1/ship/ideas/i1',
+    ]);
+    expect(mutations(run)).toHaveLength(1);
+  });
+});
+
 describe('meta lookups', () => {
   const cases: Array<[string, string]> = [
     ['idea-states', '/v1/ship/idea/states'],
