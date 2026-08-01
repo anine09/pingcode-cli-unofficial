@@ -597,7 +597,7 @@ describe('ticket commands', () => {
   });
 });
 
-describe('ticket transition pre-validation (Gate G3b)', () => {
+describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () => {
   const ticketDetail = () =>
     jsonResponse({
       id: 't1',
@@ -645,101 +645,109 @@ describe('ticket transition pre-validation (Gate G3b)', () => {
       ],
     });
 
-  it('sends a legal transition', async () => {
+  const rejectState = () =>
+    jsonResponse({ code: '100702', message: '工单状态不存在' }, { status: 400 });
+
+  const errorPayload = (run: CliRun): { kind: string; message: string; exit: number } =>
+    (
+      JSON.parse(run.stderr.split('\n').filter((line) => line.startsWith('{'))[0] ?? '{}') as {
+        error: { kind: string; message: string; exit: number };
+      }
+    ).error;
+
+  it('sends a legal transition with no plan or flow lookup on the happy path', async () => {
     const run = await runCli(
       ['ticket', 'transition', 't1', '--state', '处理中', '--json'],
       [
         ticketDetail,
         ticketStatesPage,
-        plansPage,
-        flowsPage,
         () => jsonResponse({ id: 't1', state: { id: 'ts-doing', name: '处理中' }, is_archived: 0 }),
       ],
     );
     expect(run.exit).toBe(0);
     expect(mutations(run)).toHaveLength(1);
-    expect(mutations(run)[0]?.method).toBe('PATCH');
     expect(mutations(run)[0]?.body).toEqual({ state_id: 'ts-doing' });
+    // the whole point of S7b: GET ticket → resolve state → PATCH, nothing else
+    expect(run.calls.map((call) => new URL(call.url).pathname)).toEqual([
+      '/v1/ship/tickets/t1',
+      '/v1/ship/ticket/states',
+      '/v1/ship/tickets/t1',
+    ]);
   });
 
-  it('refuses an illegal transition locally with exit 2 and lists what IS reachable', async () => {
+  it('sends an illegal transition and enriches the server refusal with the reachable set', async () => {
     const run = await runCli(
       ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
-      [ticketDetail, ticketStatesPage, plansPage, flowsPage],
+      [ticketDetail, ticketStatesPage, rejectState, ticketStatesPage, plansPage, flowsPage],
     );
-    expect(run.exit).toBe(2);
-    // nothing was written — the whole point of pre-validation
-    expect(mutations(run)).toHaveLength(0);
-    const payload = JSON.parse(run.stderr.split('\n').filter((line) => line.startsWith('{'))[0] ?? '{}') as {
-      error: { kind: string; message: string };
-    };
-    expect(payload.error.kind).toBe('usage');
-    expect(payload.error.message).toContain('state plan does not allow');
-    // the reachable set must survive --json, which drops the hint
-    expect(payload.error.message).toContain('reachable from here');
-    expect(payload.error.message).toContain('处理中');
+    // the server refuses atomically, so exit is its call, not ours
+    expect(run.exit).toBe(7);
+    expect(mutations(run)).toHaveLength(1);
+    const error = errorPayload(run);
+    expect(error.kind).toBe('api');
+    // the server's verbatim message survives …
+    expect(error.message).toContain('工单状态不存在');
+    // … and the enrichment rides in `message`, because --json drops the hint
+    expect(error.message).toContain('states configured for this product');
+    expect(error.message).toContain('current state: 待处理');
+    expect(error.message).toContain('reachable from 待处理: 处理中 (ts-doing)');
     expect(run.stdout).toBe('');
   });
 
-  it('warns and proceeds when the flows lookup fails — a lookup must not block a write', async () => {
+  it('still reports the refusal when the plan cannot be read', async () => {
     const run = await runCli(
       ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
       [
         ticketDetail,
         ticketStatesPage,
-        plansPage,
+        rejectState,
+        ticketStatesPage,
         () => jsonResponse({ code: '100001', message: '无权限' }, { status: 403 }),
-        () => jsonResponse({ id: 't1', state: { id: 'ts-closed' }, is_archived: 0 }),
       ],
     );
+    expect(run.exit).toBe(7);
+    expect(mutations(run)).toHaveLength(1);
+    const error = errorPayload(run);
+    expect(error.message).toContain('states configured for this product');
+    // no plan, no suggestion — and no crash
+    expect(error.message).not.toContain('reachable from');
+  });
+
+  it('sends exactly one PATCH when a cached state id is refused (S7b id-diff gate)', async () => {
+    // Warm the resolver cache with a successful transition first…
+    const warm = await runCli(
+      ['ticket', 'transition', 't1', '--state', '处理中', '--json'],
+      [
+        ticketDetail,
+        ticketStatesPage,
+        () => jsonResponse({ id: 't1', state: { id: 'ts-doing' }, is_archived: 0 }),
+      ],
+    );
+    expect(warm.exit).toBe(0);
+
+    // …so this run resolves 已关闭 from the cache and hits the retry path.
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
+      [ticketDetail, rejectState, ticketStatesPage, ticketStatesPage, plansPage, flowsPage],
+    );
+    expect(run.exit).toBe(7);
+    expect(run.stderr).toContain('refreshing it and retrying once');
+    // re-resolution produced the same id, so the second write was skipped
+    expect(mutations(run)).toHaveLength(1);
+    expect(errorPayload(run).message).toContain('工单状态不存在');
+  });
+
+  it('--state-id goes straight to the PATCH: nothing validates the plan any more', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state-id', 'ts-closed', '--json'],
+      [ticketDetail, () => jsonResponse({ id: 't1', state: { id: 'ts-closed' }, is_archived: 0 })],
+    );
     expect(run.exit).toBe(0);
-    expect(run.stderr).toContain('letting the server decide');
-    expect(run.stderr).toContain('pcp:read:ship:configuration');
     expect(mutations(run)).toHaveLength(1);
     expect(mutations(run)[0]?.body).toEqual({ state_id: 'ts-closed' });
   });
 
-  it('warns and proceeds when no state plan matches the product', async () => {
-    const run = await runCli(
-      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
-      [
-        ticketDetail,
-        ticketStatesPage,
-        () => jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'plan-org', product: null }] }),
-        () => jsonResponse({ id: 't1', is_archived: 0 }),
-      ],
-    );
-    expect(run.exit).toBe(0);
-    expect(run.stderr).toContain('no ticket state plan could be matched');
-    expect(mutations(run)).toHaveLength(1);
-  });
-
-  it('warns and proceeds when the plan declares no transitions at all', async () => {
-    const run = await runCli(
-      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
-      [
-        ticketDetail,
-        ticketStatesPage,
-        plansPage,
-        () => jsonResponse({ page_index: 0, page_size: 100, total: 0, values: [] }),
-        () => jsonResponse({ id: 't1', is_archived: 0 }),
-      ],
-    );
-    expect(run.exit).toBe(0);
-    expect(run.stderr).toContain('no transitions');
-    expect(mutations(run)).toHaveLength(1);
-  });
-
-  it('checks --state-id too, so the escape hatch is not a way around the plan', async () => {
-    const run = await runCli(
-      ['ticket', 'transition', 't1', '--state-id', 'ts-closed', '--json'],
-      [ticketDetail, plansPage, flowsPage],
-    );
-    expect(run.exit).toBe(2);
-    expect(mutations(run)).toHaveLength(0);
-  });
-
-  it('refuses a no-op transition to the current state', async () => {
+  it('refuses a no-op transition to the current state — the one local refusal left', async () => {
     const run = await runCli(
       ['ticket', 'transition', 't1', '--state-id', 'ts-pending', '--json'],
       [ticketDetail],
@@ -749,18 +757,62 @@ describe('ticket transition pre-validation (Gate G3b)', () => {
     expect(mutations(run)).toHaveLength(0);
   });
 
-  it('validates ticket update --state as well, not just transition', async () => {
+  it('--dry-run previews the reachable states on stderr and writes nothing', async () => {
     const run = await runCli(
-      ['ticket', 'update', 't1', '--state', '已关闭', '--json'],
-      [ticketDetail, ticketStatesPage, plansPage, flowsPage],
+      ['ticket', 'transition', 't1', '--state', '已关闭', '--json', '--dry-run'],
+      [ticketDetail, plansPage, flowsPage, ticketStatesPage],
     );
-    expect(run.exit).toBe(2);
+    expect(run.exit).toBe(0);
+    expect(mutations(run)).toHaveLength(0);
+    expect(run.stderr).toContain('reachable from 待处理: 处理中 (ts-doing)');
+    expect(run.stderr).not.toContain('could not read the state plan');
+    const plan = parseStdout(run) as { dry_run: boolean; request: { body: unknown } };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.body).toEqual({ state_id: 'ts-closed' });
+  });
+
+  it('--dry-run distinguishes "the plan says nowhere" from "I could not read the plan"', async () => {
+    // A closed ticket in a plan with no outgoing edge is a definite answer.
+    const closedTicket = () =>
+      jsonResponse({
+        id: 't1',
+        identifier: 'SLC-7',
+        product: { id: 'prod-1' },
+        state: { id: 'ts-closed', name: '已关闭' },
+        is_archived: 0,
+      });
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state-id', 'ts-doing', '--json', '--dry-run'],
+      [closedTicket, plansPage, flowsPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stderr).toContain('no transition out of 已关闭');
+    expect(run.stderr).not.toContain('could not read the state plan');
     expect(mutations(run)).toHaveLength(0);
   });
 
-  it('leaves idea update --state unvalidated: ship has no idea flow endpoint', async () => {
-    // The asymmetry, asserted rather than described: the idea PATCH goes out
-    // with no plan or flow lookup in between.
+  it('--dry-run says so plainly when the plan is unreadable, and still shows the plan', async () => {
+    const run = await runCli(
+      ['ticket', 'transition', 't1', '--state-id', 'ts-closed', '--json', '--dry-run'],
+      [ticketDetail, () => jsonResponse({ code: '100001', message: '无权限' }, { status: 403 })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stderr).toContain('pcp:read:ship:configuration');
+    expect((parseStdout(run) as { dry_run: boolean }).dry_run).toBe(true);
+  });
+
+  it('treats ticket update --state exactly like transition', async () => {
+    const run = await runCli(
+      ['ticket', 'update', 't1', '--state', '已关闭', '--json'],
+      [ticketDetail, ticketStatesPage, rejectState, ticketStatesPage, plansPage, flowsPage],
+    );
+    expect(run.exit).toBe(7);
+    expect(mutations(run)).toHaveLength(1);
+    expect(errorPayload(run).message).toContain('reachable from');
+  });
+
+  it('leaves idea update --state unenriched by any flow read: ship has no idea flow endpoint', async () => {
+    // The surviving asymmetry: ideas cannot even be explained from a plan.
     const run = await runCli(
       ['idea', 'update', 'i1', '--state-id', 'st-anything', '--json'],
       [

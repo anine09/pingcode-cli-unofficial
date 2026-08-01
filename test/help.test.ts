@@ -142,7 +142,7 @@ describe('--help snapshots', () => {
     expect(group(group(program, 'ticket'), 'create').helpInformation()).toMatchSnapshot();
   });
 
-  it('ticket transition (pre-validated against the state plan)', () => {
+  it('ticket transition (advisory: the server decides)', () => {
     expect(group(group(program, 'ticket'), 'transition').helpInformation()).toMatchSnapshot();
   });
 });
@@ -188,13 +188,20 @@ describe('SKILL.md agrees with the CLI (R4.5)', () => {
   });
 
   it('states the idea-vs-ticket transition asymmetry explicitly (Gate G4)', () => {
-    // The single most dangerous thing an agent could get wrong here: assuming an
-    // idea state change is validated the way a ticket's is.
-    expect(skill).toMatch(/ticket transition.{0,200}locally/is);
+    // Since S7b the asymmetry is about *explanation*, not enforcement — and the
+    // most dangerous thing an agent could now believe is that an illegal ticket
+    // transition fails locally with exit 2. It does not; the server decides.
+    expect(skill).toMatch(/no state change is refused locally/i);
+    expect(skill).toMatch(/does \*\*not\*\* refuse a transition/i);
+    expect(skill).toMatch(/expect the server's exit code, not exit 2/i);
+    // the ticket half: a refusal is explained, and --dry-run previews it
+    expect(skill).toMatch(/reachable from the current one/i);
+    expect(skill).toMatch(/--dry-run.{0,120}reachable set/is);
+    // the idea half: no flow endpoint exists at all, so no reachable set ever
     expect(skill).toMatch(/no\s+idea\s+state-flow\s+endpoint/i);
     expect(skill).toMatch(/idea\s+update\s+--state/);
-    // and the failed-lookup escape valve, which is the other half of the rule
-    expect(skill).toMatch(/warns\s+and\s+sends\s+the\s+transition/i);
+    // and the one surviving local refusal, so it is not a surprise
+    expect(skill).toMatch(/state it is already in/i);
   });
 
   it('states the ship rules that have no pjm equivalent (Gate G4)', () => {

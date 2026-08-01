@@ -84,6 +84,11 @@ from every URL, log line, dry-run plan and error message it emits.
   - every `pingcode meta …` lookup (including `meta users`, which still accepts `--page`/`--page-size`)
     → `{"values":[…],"count":20}`
 - Single-resource commands (`get`, `create`, `update`, `transition`) print the resource object.
+- **Read keys defensively: an absent key means null or empty.** The CLI normalises `null` and `""`
+  to "not present", so a field the API returned as `null` (an unset `plan_at`, `score`, `solution`)
+  or as an empty string (a blank `description`) is simply missing from the JSON. It does **not**
+  distinguish the two, and a missing key is never evidence that the field does not exist. Use
+  `x?.y ?? fallback`, not `'y' in x`.
 - `--dry-run` on a mutating command prints `{"dry_run":true,"request":{…}}` to stdout and exits 0
   without sending anything. Read requests still run, so ids are really resolved.
 - Errors in `--json` mode go to **stderr** as `{"error":{"kind":…,"message":…,"code":…,"exit":…}}`.
@@ -305,16 +310,19 @@ almost every difference is a trap.
    endpoints exist but cannot filter by assignee, date or custom property, so the CLI never uses
    them. Search takes **one operator per field and has no `$and`/`$or`**; multiple filters are
    AND-ed. There is still no sorting anywhere.
-5. **A ticket transition is checked locally; an idea state change is not.** This asymmetry is real
-   and load-bearing:
-   - `pingcode ticket transition` reads the product's state plan and its flows, and **refuses an
-     illegal target state locally with exit 2**, naming the states reachable from the current one.
-     Nothing is sent. `ticket update --state` is checked on the same path.
-   - `pingcode idea update --state` has **no such check**, because ship publishes no idea
-     state-flow endpoint at all. The only way to learn that a transition is illegal is to attempt
-     it; on rejection the CLI prints the product's configured states on stderr.
-   - If the *flow lookup itself* fails (no `pcp:read:ship:configuration`, no plan matched), the CLI
-     warns and sends the transition anyway rather than blocking you on a failed lookup.
+5. **No state change is refused locally — the server decides, and a ticket refusal is explained.**
+   - `pingcode ticket transition` and `ticket update --state` send the PATCH. If the server refuses
+     it, the error `message` names the product's configured states, the current state and — when
+     the state plan can be read — **the states reachable from the current one**. Read it from
+     `message`: `--json` errors are `{kind,message,code,exit}` and carry no hint.
+   - Want to know before you write? `ticket transition <t> --state <s> --dry-run` prints the
+     reachable set on stderr and sends nothing.
+   - `pingcode idea update --state` gets the configured states on rejection but never a reachable
+     set: ship publishes no idea state-flow endpoint at all.
+   - The CLI does **not** refuse a transition on its own (the one exception: moving a ticket to the
+     state it is already in, which is exit 2). The server refuses atomically with no state change,
+     so a local check saves nothing — and a mis-identified state plan would otherwise block a legal
+     move with no escape hatch. Expect the server's exit code, not exit 2, for an illegal target.
 6. **`--set key=value` sends the value verbatim, and select properties want option ids.** For a
    `select`-typed property the API expects the option's `_id`, not the label you see in the UI —
    the docs' own examples only show text properties, which is the trap. Run

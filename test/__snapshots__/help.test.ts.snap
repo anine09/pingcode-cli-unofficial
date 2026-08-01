@@ -184,7 +184,7 @@ Commands:
   create [options]               create a ticket (--type is required by the API, unlike idea)
   update [options] <ticket>      patch a ticket — only the fields you pass are sent, and they
                                  replace
-  transition [options] <ticket>  move a ticket to another state, checking the state plan first
+  transition [options] <ticket>  move a ticket to another state (--dry-run previews the legal ones)
   help [command]                 display help for command
 "
 `;
@@ -208,10 +208,10 @@ Options:
 "
 `;
 
-exports[`--help snapshots > ticket transition (pre-validated against the state plan) 1`] = `
+exports[`--help snapshots > ticket transition (advisory: the server decides) 1`] = `
 "Usage: pingcode ticket transition [options] <ticket>
 
-move a ticket to another state, checking the state plan first
+move a ticket to another state (--dry-run previews the legal ones)
 
 Arguments:
   ticket             id, identifier such as SLC-1, or a pasted ticket URL

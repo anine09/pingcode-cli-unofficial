@@ -349,9 +349,45 @@ describe('ticket state plan and flows', () => {
     expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/ship/ticket_state_plans');
   });
 
-  it('returns undefined rather than throwing when no plan matches', async () => {
+  // S7b / research/s7-smoke.md F5: live, a default org has exactly one plan and
+  // it is the `product: null` row — whose flows are the ones the server actually
+  // enforces. Skipping it (as the docs say) left the advisory path with nothing.
+  it('falls back to the lone org-default plan when no product plan matches', async () => {
     const { ctx } = ctxFor([() => jsonResponse(page([{ id: 'plan-org', product: null }]))]);
-    expect(await findTicketStatePlanId(ctx, 'prod-1')).toBeUndefined();
+    expect(await findTicketStatePlanId(ctx, 'prod-1')).toBe('plan-org');
+  });
+
+  it('prefers a product-scoped plan over the org default', async () => {
+    const { ctx } = ctxFor([
+      () =>
+        jsonResponse(
+          page([
+            { id: 'plan-org', product: null },
+            { id: 'plan-1', product: { id: 'prod-1' } },
+          ]),
+        ),
+    ]);
+    expect(await findTicketStatePlanId(ctx, 'prod-1')).toBe('plan-1');
+  });
+
+  it('returns undefined when the org default is ambiguous or absent', async () => {
+    const twoDefaults = ctxFor([
+      () => jsonResponse(page([{ id: 'plan-a', product: null }, { id: 'plan-b', product: null }])),
+    ]);
+    expect(await findTicketStatePlanId(twoDefaults.ctx, 'prod-1')).toBeUndefined();
+
+    const otherProduct = ctxFor([
+      () => jsonResponse(page([{ id: 'plan-2', product: { id: 'prod-2' } }])),
+    ]);
+    expect(await findTicketStatePlanId(otherProduct.ctx, 'prod-1')).toBeUndefined();
+  });
+
+  it('caches the org-default fallback under the product too', async () => {
+    const first = ctxFor([() => jsonResponse(page([{ id: 'plan-org', product: null }]))]);
+    await findTicketStatePlanId(first.ctx, 'prod-1');
+    const second = ctxFor([() => jsonResponse(page([]))]);
+    expect(await findTicketStatePlanId(second.ctx, 'prod-1')).toBe('plan-org');
+    expect(second.fake.calls).toHaveLength(0);
   });
 
   it('caches the plan lookup under the product', async () => {

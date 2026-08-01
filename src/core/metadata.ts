@@ -865,16 +865,28 @@ async function loadProductMembers(ctx: Ctx, productId: string): Promise<Candidat
 // ---------------------------------------------------------------------------
 
 /**
- * Find the state plan a product uses.
+ * Find the state plan a product uses — **for advisory use only**.
  *
  * The plan list has **no `?product_id=` filter** and neither the product nor the
  * ticket exposes a plan id, so the only documented route is to list every plan
- * and match the embedded `product.id` (ship GOTCHA #23, §9.11). Plans with
- * `product: null` are the org-level default and are skipped: `null` means "the
- * template", not "this product".
+ * and match the embedded `product.id` (ship GOTCHA #23, §9.11).
+ *
+ * The docs say to skip `product: null` rows, because `null` means "the org-level
+ * template", not "this product". Live, that rule leaves nothing at all: a default
+ * org has **exactly one** plan and it is that `null` row, whose flows are
+ * nonetheless the ones the server enforces (`research/s7-smoke.md` F5). So after
+ * failing to match a product we fall back to the lone org-default plan.
+ *
+ * That fallback is sound **because the answer is never authoritative**: since
+ * S7b nothing refuses a transition locally, the plan is used only to *explain* a
+ * rejection or to preview one under `--dry-run`. A guessed plan can therefore
+ * produce a slightly-wrong suggestion inside an already-failing message, which is
+ * harmless; it can no longer produce a terminal refusal, which was not
+ * (design §13.2, §14.3). More than one `null` plan is ambiguous and yields
+ * `undefined` rather than a coin flip.
  *
  * Returns `undefined` rather than throwing — a plan we cannot find must never
- * block a write (design §13.2 step 3).
+ * affect a write.
  */
 export async function findTicketStatePlanId(
   ctx: Ctx,
@@ -887,14 +899,25 @@ export async function findTicketStatePlanId(
   const rows = await collect(
     paginate<unknown>(ctx, ENDPOINTS.shipTicketStatePlans, {}, { pageSize: 100, limit: 1000 }),
   );
+
+  const orgDefaults: string[] = [];
   for (const row of rows) {
     if (typeof row !== 'object' || row === null) continue;
     const record = row as Record<string, unknown>;
     const planProductId = str(refRecord(record.product)?.id);
     const id = str(record.id);
-    if (id === undefined || planProductId !== productId) continue;
-    writeCache(ctx, key, 'ship-ticket-state-plan', [{ id, name: undefined }]);
-    return id;
+    if (id === undefined) continue;
+    if (planProductId === productId) {
+      writeCache(ctx, key, 'ship-ticket-state-plan', [{ id, name: undefined }]);
+      return id;
+    }
+    if (planProductId === undefined) orgDefaults.push(id);
+  }
+
+  const orgDefault = orgDefaults.length === 1 ? orgDefaults[0] : undefined;
+  if (orgDefault !== undefined) {
+    writeCache(ctx, key, 'ship-ticket-state-plan', [{ id: orgDefault, name: undefined }]);
+    return orgDefault;
   }
   return undefined;
 }
