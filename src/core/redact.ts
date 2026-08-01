@@ -22,8 +22,20 @@ const SENSITIVE_HEADERS = ['authorization', 'proxy-authorization', 'cookie', 'se
 /** JSON keys whose values must never be printed (token responses, config dumps). */
 const SENSITIVE_JSON_KEYS = ['access_token', 'refresh_token', 'client_secret'];
 
+/**
+ * A sensitive query value runs to the next `&`, `#` or whitespace — but error
+ * messages embed URLs inside assembled prose, e.g.
+ * `GET https://…?client_secret=SECRET) failed`, and the greedy form swallowed the
+ * closing `)` (research/s8-smoke.md, cosmetic nits).
+ *
+ * So the value is matched lazily and any run of trailing delimiters
+ * (`)`, `"`, `'`, `,`) is handed back after the mask. This is deliberately *not*
+ * a narrowed character class: a secret that happens to contain one of those
+ * characters must still be redacted in full, so only a **trailing** run is
+ * restored. Failing safe beats printing a suffix of a secret.
+ */
 const SENSITIVE_QUERY_RE = new RegExp(
-  `([?&](?:${SENSITIVE_QUERY_PARAMS.join('|')})=)[^&#\\s]*`,
+  `([?&](?:${SENSITIVE_QUERY_PARAMS.join('|')})=)[^&#\\s]*?([)"',]*)(?=[&#\\s]|$)`,
   'gi',
 );
 
@@ -53,7 +65,7 @@ export function redactUrl(url: string): string {
   }
   // Also run the textual pass: it covers relative URLs and repeated params,
   // which `URLSearchParams.set` would collapse rather than mask.
-  return result.replace(SENSITIVE_QUERY_RE, `$1${REDACTED}`);
+  return result.replace(SENSITIVE_QUERY_RE, `$1${REDACTED}$2`);
 }
 
 /** Mask sensitive header values. Header names are matched case-insensitively. */
@@ -70,7 +82,9 @@ export function redactHeaders(headers: Record<string, string>): Record<string, s
  * `TransportError` message.
  */
 export function redactSnippet(text: string): string {
-  return text.replace(SENSITIVE_JSON_RE, `$1${REDACTED}$2`).replace(SENSITIVE_QUERY_RE, `$1${REDACTED}`);
+  return text
+    .replace(SENSITIVE_JSON_RE, `$1${REDACTED}$2`)
+    .replace(SENSITIVE_QUERY_RE, `$1${REDACTED}$2`);
 }
 
 /** Mask a client id for display: `abcd…wxyz` (design §4.3). */

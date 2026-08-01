@@ -152,6 +152,12 @@ function normalizeExpiry(expiresIn: unknown, nowMs: number): { at: number; clamp
 is unit-tested against both shapes, the past-timestamp case, and missing/`NaN` — it is the single
 riskiest piece of arithmetic in the project (gate G2).
 
+**Settled by S8 (`research/s8-smoke.md` G5-2):** production returns an **absolute** unix-seconds
+`expires_in` (observed `1788105520` for a call made at `1785513519`, exactly 30 days out), so the
+`n > 1e9` branch is the one that fires on cloud and the clamp never triggers. The duration branch is
+**defensive** — keep it, along with the clamp and the `NaN` guard, since neither shape is contractual.
+The response also carries **no `scope`** and **no `refresh_token`**.
+
 ### 4.2 Freshness strategy (R1.5)
 
 Two independent guards, because the expiry metadata is untrustworthy:
@@ -264,6 +270,31 @@ the requested `page_index`**.
 `PermissionError` messages carry a scope hint. For generic endpoints the required scope is inherited
 from `principal_type` *(R§6.17)*, which produces confusing server errors — the message says so explicitly.
 
+#### Code-aware overrides on the status-first mapping (S8b)
+
+The live API **does not follow REST status conventions for failures**: missing resources and bad
+credentials both come back as HTTP **400**, so exits 5 and 3 were unreachable for anything the server
+rejected *(evidence: `research/s8-smoke.md` F2/F3)*. Status-first remains the default, with a small
+`code`-keyed allowlist layered on top in `core/wire.ts`:
+
+| `code` | observed on | HTTP | mapped to |
+|---|---|---|---|
+| `100024` | `GET /v1/auth/token` with a wrong client id/secret | 400 | `AuthError` (exit 3) |
+| `100317` | `GET /v1/pjm/work_items/{unknown id}` | 400 | `NotFoundError` (exit 5) |
+| `100303` | `PATCH` carrying an unknown `state_id` | 400 | `NotFoundError` (exit 5) |
+
+Rules that keep this honest:
+- matching is on the **`code` string only** — the API is Chinese-only and message wording is not a
+  contract, so it is never pattern-matched;
+- codes outside the table keep the status-first mapping and still surface `code` **verbatim**;
+- the table lives in exactly one place, annotated with the evidence, so it reads as observed rather
+  than guessed.
+
+**404 is effectively never returned by this API.** The `404 → NotFoundError` branch stays for
+self-hosted builds and future behaviour, but on cloud it is dead code. An invalid *bearer* token on a
+resource endpoint **does** return a real 401, so the reactive re-auth path in §4.2 is live and tested
+against production.
+
 ---
 
 ## 6. Metadata resolution and cache (`core/metadata.ts`)
@@ -306,17 +337,25 @@ only `id`, so mutating commands resolve to a real `id` with one `GET` first.
 pingcode auth login|status [--check]|logout
 pingcode project list [--keywords] [--type scrum|kanban|waterfall|hybrid] [--include-archived]
 pingcode project get <project>
-pingcode work-item list   --project <name|id> [--type] [--state] [--assignee] [--sprint]
+pingcode work-item list   --project <name|id> [--type] [--state|--state-id] [--assignee] [--sprint]
                           [--keywords] [--page] [--page-size] [--all] [--limit]
 pingcode work-item get <id|short_id|identifier|url>
 pingcode work-item create --project <p> --type <t> --title <s> [--description] [--assignee]
-                          [--state] [--priority] [--parent] [--sprint] [--start-at] [--end-at]
-pingcode work-item update <id> [--title] [--description] [--assignee] [--state] [--priority] [--end-at] …
-pingcode work-item transition <id> --state <name|id>
+                          [--state|--state-id] [--priority] [--parent] [--sprint] [--start-at] [--end-at]
+pingcode work-item update <id> [--title] [--description] [--type] [--state|--state-id] [--assignee]
+                          [--priority] [--parent] [--start-at] [--end-at] [--story-points] …
+pingcode work-item transition <id> [--type] --state <name> | --state-id <id>
 pingcode meta types|states|priorities|sprints --project <p>   |   pingcode meta users [--keywords]
 ```
 
 Global flags: `--host`, `--json`, `--dry-run`, `--no-cache`, `--verbose`, `--version`, `--help`.
+They are accepted **before or after** the subcommand: commander binds an option to the command it
+follows, so every leaf repeats them (hidden from its own help) and the innermost typed value wins.
+
+`--state <name>` always resolves by name and therefore **requires `--type`**; `--state-id <id>` is a
+pass-through with no lookup and no `--type`. The two are mutually exclusive. On `update`/`transition`
+the `--type` flag is **only** a lookup aid — it resolves a state name and lists candidate states on
+rejection, and is never sent in the `PATCH` body (there is no `type_id` field to patch).
 
 `pingcode meta` stays in MVP even though it is "lookup" rather than "work items": an agent **cannot
 construct a valid `create`** without discovering project-scoped `type_id`/`state_id` *(R§6.13)*, so it
@@ -327,11 +366,19 @@ is load-bearing for R4, not scope creep.
 State changes are **workflow-validated**: a `state_id` must belong to the type's state scheme *and*
 have a legal transition from the current state *(R§6.12)*. MVP behaviour:
 
-1. `GET` the work item → `project.id` + `type.id` + current `state`.
-2. Resolve the target state via `GET /v1/pjm/work_item/states?project_id=…&work_item_type_id=…`.
+1. `GET` the work item → `project.id` + current `state`. **The payload carries no `type`** — the live
+   API omits the field entirely *(`research/s8-smoke.md` F1)* — so the type must come from `--type`.
+2. Resolve the target state via `GET /v1/pjm/work_item/states?project_id=…&work_item_type_id=…`,
+   using the `--type`-resolved id. Without `--type`, a state *name* is a `UsageError` (exit 2) whose
+   message names `--type <name|id>` and `--state-id <id>`, both of which exist on the command.
 3. `PATCH` `{state_id}`.
-4. On rejection, print the server message **plus** the candidate states for that type, so the user
-   sees why. Pre-validating against `work_item_state_flows` is a documented follow-up, not MVP.
+4. On rejection, print the server message **plus** the candidate states for that type. Because the
+   candidates need `(project_id, work_item_type_id)`, this is only possible when `--type` was given;
+   when it was not, the CLI says so explicitly instead of printing nothing.
+
+Rejected alternative (S8b): inferring the type by finding which type's state list contains the item's
+current `state.id`. It costs N extra requests against a 200/min budget and is ambiguous when two types
+share a state id.
 
 `transition` is `update --state` with better errors; they share one code path.
 
@@ -446,6 +493,23 @@ are deleted or clearly marked as test artifacts.
 ---
 
 ## 13. Revision log
+
+**Rev 3 (S8b)** — applied the live-API evidence in [`research/s8-smoke.md`](./research/s8-smoke.md).
+Three contract changes, each forced by observed behaviour rather than taste:
+
+1. **`--type` added to `work-item update`/`transition`** (§7, §7.1). The API omits `type` from every
+   work-item payload, so a state *name* could not be resolved on those commands at all — the flag is a
+   lookup aid only and is never sent. Inferring the type from the current `state.id` was rejected: N
+   extra requests against a 200/min budget, ambiguous when types share a state id.
+2. **Code-aware overrides on the exit-code mapping** (§5.2). The API answers HTTP 400 for both
+   "not found" and "bad credentials", so exits 5 and 3 were unreachable. A three-entry `code`
+   allowlist (`100024`, `100317`, `100303`) overrides the status; everything else stays status-first
+   with the raw `code` intact. 404 is effectively dead on cloud.
+3. **`expires_in` confirmed absolute in production** (§4.1). Both branches and the clamp stay.
+
+Also: the `--json` list shapes are now uniform per command family, `redactUrl` no longer eats a
+trailing `)` when a URL is embedded in prose, and `auth login` only warns about unsaved credentials
+when they really are unsaved.
 
 **Rev 2** — applied a pre-implementation architecture review. Corrections and cuts:
 

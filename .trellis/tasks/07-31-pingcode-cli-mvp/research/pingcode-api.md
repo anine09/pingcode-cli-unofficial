@@ -295,7 +295,18 @@ Example:
 
 ### 4.2 Key work-item response fields
 
-`id`, `url`, `identifier` (e.g. `SCR-5`), `short_id` (e.g. `1bAqLmTG`), `html_url` (web UI deep link), `title`, `type` (`epic|feature|story|task|bug|issue|…`), `state{}`, `priority{}`, `assignee{}`, `project{}`, `parent{}`/`parent_id`, `sprint{}`, `versions[]`, `board{}`/`entry{}`/`swimlane{}`, `phase{}`, `description`, `start_at`, `end_at`, `completed_at`, `story_points`, `estimated_workload`, `remaining_workload`, `properties{}`, `tags[]`, `participants[]`, `created_at`/`created_by{}`, `updated_at`/`updated_by{}`, `is_archived` (0/1), `is_deleted` (0/1).
+`id`, `url`, `identifier` (e.g. `SCR-5`), `short_id` (e.g. `1bAqLmTG`), `html_url` (web UI deep link), `title`, `state{}`, `priority{}`, `assignee{}`, `project{}`, `parent{}`/`parent_id`, `sprint{}`, `versions[]`, `board{}`/`entry{}`/`swimlane{}`, `phase{}`, `description`, `start_at`, `end_at`, `completed_at`, `story_points`, `estimated_workload`, `remaining_workload`, `properties{}`, `tags[]`, `participants[]`, `created_at`/`created_by{}`, `updated_at`/`updated_by{}`, `is_archived` (0/1), `is_deleted` (0/1).
+
+> ⚠️ **Corrected 2026-08-01 by live observation (`s8-smoke.md` F1): there is NO `type` field.** The
+> docs imply `type` (`epic|feature|story|task|bug|issue|…`) is returned, and an earlier revision of
+> this file listed it. It is absent from both `GET /v1/pjm/work_items` rows and the single-item
+> `GET /v1/pjm/work_items/{id}` (verified on two items in a kanban project). A client that needs the
+> type in order to resolve `state_id` **must take it from the user**; it cannot be read back.
+> Observed key set on a kanban item: `created_at, created_by, description, html_url, id, identifier,
+> is_archived, is_deleted, parent_id, participants, project, properties, short_id, state, tags, title,
+> updated_at, updated_by, url, version, versions`. Note `version: null` **and** `versions: []` are both
+> present, `project{}` includes `type` (the *project* type, e.g. `kanban`) and `state{}` includes a
+> `type` grouping (e.g. `in_progress`) — neither is the work-item type.
 
 > Note the list/search response uses **`versions` (array)** while single-GET docs show **`version` (object)** — a doc inconsistency; code defensively.
 
@@ -355,6 +366,38 @@ Example:
 24. No REST surface for **Insight / Goals / Flow / Plan**, and **webhooks are not manageable via API** (Flow UI only). A CLI cannot offer `pingcode webhook create`.
 25. Self-hosted installs put the API under `<domain>/open` and OAuth under `<domain>/oauth2` → make the base URL a first-class config value (`--host` / `PINGCODE_HOST`), don't hardcode `open.pingcode.com`.
 26. Docs are Chinese-only; enum *values* are English slugs but all descriptions are Chinese — plan for the CLI's own English help text.
+
+**Observed live, 2026-08-01 (public cloud) — see `s8-smoke.md` for the raw evidence**
+
+27. **Work-item payloads carry no `type` field at all** (see the §4.2 correction). This is the single
+    biggest surprise of the smoke run: it breaks any name→id resolution for `state_id` that hoped to
+    read the type back off the resource, because `GET /v1/pjm/work_item/states` requires
+    `work_item_type_id`. The type has to be supplied by the caller.
+28. **Token payload is exactly `{access_token, token_type:"Bearer", expires_in}`** — no `scope`, no
+    `refresh_token`. `expires_in` is an **absolute unix-seconds epoch** in production (observed
+    `1788105520` for a call at `1785513519`, i.e. +30 days), *not* a duration: `now + expires_in` is
+    catastrophically wrong. Repeated `client_credentials` acquisitions **coexist** — a new token does
+    not rotate or revoke the previous one — so parallel CLI invocations cannot 401 each other. (Probed
+    only for two tokens seconds apart; per-app caps and expiry-side revocation were not tested.)
+29. **This API returns HTTP 400 where REST convention uses 401/404.** Observed error codes, all on
+    `400`: `100024` `'client_id'或'client_secret'错误` (token endpoint, wrong credentials),
+    `100317` 工作项资源不存在 (`GET` an unknown work-item id), `100303` `'state'资源不存在` (`PATCH`
+    with an unknown `state_id`). A status-only error mapping therefore never reaches its
+    "unauthenticated" or "not found" branches. An invalid **bearer token on a resource endpoint does
+    return a real 401**, so only failure *classification* is affected, not token refresh.
+30. **2xx responses carry no rate-limit headers** (only `Date`, `traceparent`, HSTS,
+    `Server: openresty`), so the 200 req/min budget is invisible until a `429` actually lands — a
+    client cannot pace itself from response metadata.
+31. **`page_index` / `page_size` are confirmed honoured on `GET` list endpoints** despite being
+    undocumented there (gotcha 20). Verified on `GET /v1/pjm/work_items`: `page_size` really limits the
+    row count, `page_index` is 0-based and really offsets, both are echoed back unchanged, `total`
+    ignores paging, and a page past the end returns an empty `values` rather than an error. Ordering
+    was stable by identifier across calls and pages did not overlap. Server-side filters compose with
+    paging (`total` changes correctly). Full observation table in `s8-smoke.md` G5-1.
+32. Confirmed in passing: system work-item type ids are bare slugs (`epic/feature/story/task/bug/issue`),
+    state and priority ids are 24-hex, user ids are 32-hex (gotcha 8 holds); kanban items carry
+    `board`/`entry`/`swimlane` and `properties.{entry_status,entry_position,operation_time,…}`;
+    `sprints` is empty for a kanban project (gotcha 14 holds).
 
 ---
 

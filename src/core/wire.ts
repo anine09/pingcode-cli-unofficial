@@ -165,6 +165,34 @@ const SCOPE_HINT =
   'participants, relations, activities) inherit their scope from `principal_type`, so the server ' +
   'message can be misleading — check the app\'s scopes in 凭据管理.';
 
+/**
+ * Code-aware overrides on top of the status-first default (design §5.2).
+ *
+ * **Evidence: `research/s8-smoke.md` F2/F3** — these are observed, not guessed.
+ * The live cloud API answers HTTP **400** where REST convention would use 401 or
+ * 404, which made exits 3 and 5 unreachable for server-side failures:
+ *
+ * | code | observed on | HTTP | mapped to |
+ * |---|---|---|---|
+ * | `100024` | `GET /v1/auth/token` with a wrong client id/secret | 400 | `AuthError` (3) |
+ * | `100317` | `GET /v1/pjm/work_items/{unknown id}` | 400 | `NotFoundError` (5) |
+ * | `100303` | `PATCH` with an unknown `state_id` | 400 | `NotFoundError` (5) |
+ *
+ * Matching is on the **`code` string only**: the API is Chinese-only and its
+ * message wording is not a contract. Any code outside this table keeps the
+ * status-first mapping and still surfaces `code` verbatim, so an unknown failure
+ * is never swallowed. Note that an invalid *bearer* token on a resource endpoint
+ * does return a real 401, so the 401 branch below is still live.
+ */
+export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
+  '100024': 'auth',
+  '100317': 'not_found',
+  '100303': 'not_found',
+};
+
+const NOT_FOUND_HINT =
+  'check the id/identifier, and remember that archived or deleted rows are hidden unless you ask for them';
+
 export function errorForResponse(
   res: Response,
   text: string,
@@ -175,6 +203,21 @@ export function errorForResponse(
   const at = `${where.method} ${redactUrl(where.url)}`;
   const options = { code: body.code, status: res.status };
 
+  // The code allowlist wins over the status, because the status is wrong.
+  const override = body.code === undefined ? undefined : ERROR_CODE_OVERRIDES[body.code];
+  if (override === 'auth') {
+    return new AuthError(`${detail} (HTTP ${res.status} code ${body.code ?? '?'} from ${at})`, {
+      ...options,
+      hint: 'the credentials were rejected — check the client id/secret (a reset app secret invalidates them immediately), then run `pingcode auth login`',
+    });
+  }
+  if (override === 'not_found') {
+    return new NotFoundError(`${detail} (HTTP ${res.status} code ${body.code ?? '?'} from ${at})`, {
+      ...options,
+      hint: NOT_FOUND_HINT,
+    });
+  }
+
   switch (res.status) {
     case 401:
       return new AuthError(`${detail} (401 from ${at})`, {
@@ -184,10 +227,9 @@ export function errorForResponse(
     case 403:
       return new PermissionError(`${detail} (403 from ${at})`, { ...options, hint: SCOPE_HINT });
     case 404:
-      return new NotFoundError(`${detail} (404 from ${at})`, {
-        ...options,
-        hint: 'check the id/identifier, and remember that archived or deleted rows are hidden unless you ask for them',
-      });
+      // This API is not observed to return 404 at all (research/s8-smoke.md F2);
+      // the branch stays for self-hosted builds and future behaviour.
+      return new NotFoundError(`${detail} (404 from ${at})`, { ...options, hint: NOT_FOUND_HINT });
     case 429: {
       const retryAfterSeconds = retryAfterFromResponse(res);
       return new RateLimitError(`${detail} (429 from ${at})`, {

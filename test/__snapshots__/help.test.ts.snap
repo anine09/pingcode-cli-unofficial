@@ -94,6 +94,23 @@ Commands:
 "
 `;
 
+exports[`--help snapshots > work-item transition (--type is a lookup aid, not a patched field) 1`] = `
+"Usage: pingcode work-item transition [options] <work-item>
+
+move a work item to another state (workflow-validated by the server)
+
+Arguments:
+  work-item         id, short_id, identifier such as SCR-5, or a pasted URL
+
+Options:
+  --type <name|id>  work-item type — used only to resolve --state <name> and to list candidate
+                    states on rejection; never sent
+  --state <name>    target state, resolved by name (requires --type)
+  --state-id <id>   target state, given as an id (no lookup, no --type needed)
+  -h, --help        display help for command
+"
+`;
+
 exports[`--help snapshots > work-item update (the widest flag set) 1`] = `
 "Usage: pingcode work-item update [options] <work-item>
 
@@ -105,6 +122,8 @@ Arguments:
 Options:
   --title <text>            new title
   --description <text>      new description (replaces the old one)
+  --type <name|id>          work-item type — used only to resolve --state <name> and to list
+                            candidate states on rejection; never sent
   --assignee <name|id>      new assignee
   --priority <name|id>      new priority
   --parent <ref>            new parent work item
@@ -113,7 +132,7 @@ Options:
   --story-points <n>        story points
   --estimated-workload <n>  estimated workload in hours
   --remaining-workload <n>  remaining workload in hours
-  --state <name>            new state, resolved by name (the type is read from the work item)
+  --state <name>            new state, resolved by name (requires --type)
   --state-id <id>           new state, given as an id (no lookup, no --type needed)
   -h, --help                display help for command
 "

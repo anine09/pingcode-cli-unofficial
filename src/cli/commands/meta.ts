@@ -25,7 +25,6 @@ import {
   contextFor,
   modeOf,
   printCollection,
-  printPage,
   readPaging,
   timestampCell,
   type PagingFlags,
@@ -166,6 +165,10 @@ export function registerMetaCommands(program: Command): void {
       pageIndex: paging.pageIndex,
       pageSize: paging.pageSize,
     });
-    printPage(page, USER_COLUMNS, modeOf(ctx));
+    // `meta` commands all emit `{values,count}` in --json, even this paginated one,
+    // so an agent never has to branch on which lookup it asked for
+    // (research/s8-smoke.md, cosmetic nits). `--page`/`--page-size` still control
+    // the request itself.
+    printCollection(page.values, USER_COLUMNS, modeOf(ctx));
   });
 }

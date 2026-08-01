@@ -121,7 +121,12 @@ async function runLogin(flags: LoginFlags, command: Command): Promise<void> {
   if (storeClientSecret) patch.clientSecret = settings.clientSecret;
   saveConfig(patch, process.env);
 
-  const credentialsStored = storeClientId && storeClientSecret;
+  // Credentials that came *from* the config file are already on disk, so
+  // `shouldPersistSecret` correctly declines to rewrite them — but the "not
+  // written to disk" note would then be true of this invocation and misleading in
+  // context (research/s8-smoke.md, cosmetic nits).
+  const alreadyStored = built.file.clientId !== undefined && built.file.clientSecret !== undefined;
+  const credentialsStored = alreadyStored || (storeClientId && storeClientSecret);
 
   if (mode.json) {
     printJson({

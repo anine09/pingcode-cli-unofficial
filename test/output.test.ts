@@ -58,6 +58,26 @@ describe('redactUrl (design §5.0, AC3/AC11)', () => {
     expect(redactUrl(url)).toBe(url);
   });
 
+  it('keeps a trailing delimiter when the URL is embedded in a message (S8b nit)', () => {
+    const message = `GET https://open.pingcode.com/v1/auth/token?client_id=abc&client_secret=${SECRET}) failed`;
+    const redacted = redactUrl(message);
+    expect(redacted).not.toContain(SECRET);
+    // the closing paren used to be eaten along with the secret
+    expect(redacted).toContain(') failed');
+    expect(redacted).toContain('client_id=abc');
+    expect(redactUrl('(?code=abc123)')).toBe('(?code=***REDACTED***)');
+    expect(redactUrl('"?code=abc123"')).toBe('"?code=***REDACTED***"');
+    expect(redactUrl("'?code=abc123'")).toBe("'?code=***REDACTED***'");
+    expect(redactUrl('?code=abc123, next')).toBe('?code=***REDACTED***, next');
+  });
+
+  it('still fails safe when a secret itself contains a delimiter', () => {
+    // Only a *trailing* delimiter run is restored, so no suffix of the value leaks.
+    expect(redactUrl('?client_secret=ab,cd')).toBe('?client_secret=***REDACTED***');
+    expect(redactUrl("?client_secret=ab'cd&x=1")).toBe('?client_secret=***REDACTED***&x=1');
+    expect(redactUrl('?client_secret=a)b)c')).not.toContain('b)c');
+  });
+
   it('never throws on garbage', () => {
     expect(redactUrl('not a url at all')).toBe('not a url at all');
     expect(redactUrl('')).toBe('');

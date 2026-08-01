@@ -189,3 +189,93 @@ as “STOP and report” territory. `npm run typecheck && npm test` are green an
   the scrum projects was out of scope.
 - **Long-horizon token behaviour** (expiry-side revocation, per-app token caps): only the immediate
   two-token window was probed.
+
+---
+
+## S8b resolution (2026-08-01)
+
+The three findings and the four cosmetic nits were decided by the user and implemented in slice S8b.
+This section is the record of what each one became; the sections above stay as the raw evidence.
+
+### F1 → `--type <name|id>` added to `work-item update` and `work-item transition`
+
+Option (a) of the two candidates. Option (b) — inferring the type by finding which type's state list
+contains the item's current `state.id` — was **rejected**: it costs N extra requests against a
+200 req/min budget and is ambiguous when two types share a state id.
+
+- `--type` on `update`/`transition` resolves like `work-item list --type`, and is **never sent**: the
+  `PATCH` body has no `type_id` field. Its help text says it exists only to resolve `--state <name>`
+  and to list candidate states on rejection. It does **not** count as an updatable field, so
+  `update <ref> --type task` alone is still the empty-patch `UsageError`.
+- The type is resolved **only when a state name needs it**, so the `--state-id` path still costs
+  exactly what it did before.
+- `--state <name>` without `--type` stays exit 2, and the message now names flags that exist on that
+  command: *pass `--type <name|id>`, or use `--state-id <id>`*. The old wording, which blamed the
+  payload's missing `type`, is gone.
+- `explainStates()` now fires whenever `--type` was supplied (live: prints all four RDD/task states on
+  a rejected `--state-id`). With no `--type` it says so explicitly instead of printing nothing —
+  except when the failure is a local `UsageError` that already told the user to pass `--type`.
+- Docs: `design.md` §7 / §7.1, `SKILL.md` rules 2 and 6 plus the agent workflow, `--help` snapshots for
+  `work-item update` and (new) `work-item transition`.
+
+### F2/F3 → status-first **plus** a `code` override table in `core/wire.ts`
+
+`ERROR_CODE_OVERRIDES` maps the observed codes onto the exits AC8 requires:
+
+| code | HTTP | → | exit |
+|---|---|---|---|
+| `100024` | 400 | `AuthError` | 3 |
+| `100317` | 400 | `NotFoundError` | 5 |
+| `100303` | 400 | `NotFoundError` | 5 |
+
+Matching is on the **`code` string only** — the Chinese message text is never pattern-matched, since
+the API is CN-only and wording is not a contract. Codes outside the table keep the status-first
+mapping and still surface `code` verbatim. The table lives in one place with a comment citing this
+file as the evidence. `design.md` §5.2 documents it beneath the exit-code table and records that
+**404 is effectively never returned** by this API (the branch stays for self-hosted/future builds),
+while an invalid *bearer* token on a resource endpoint does still return a real 401.
+
+### Cosmetic nits — all four fixed
+
+1. `redactUrl` now matches the value lazily and hands back a trailing run of `)`, `"`, `'`, `,`, so an
+   embedded URL keeps its closing paren. Deliberately **not** a narrowed character class: a secret
+   containing one of those characters is still redacted in full (only a *trailing* run is restored),
+   so it still fails safe. Regression tests cover both properties.
+2. `meta users --json` now emits `{values,count}` like every other `meta` lookup (`--page`/`--page-size`
+   still shape the request). All three shapes are documented in `SKILL.md`: single-page list →
+   `{page_index,page_size,total,values}`; `--all` → `{values,count,all}`; `meta …` → `{values,count}`.
+3. `auth login` prints the "not written to disk (pass `--save`)" note only when the credentials are not
+   already stored, and `credentials_stored` in `--json` reflects the same truth.
+4. `README.md` records that `--verbose` prints the full `client_id` while `auth status` masks it, and
+   that `client_id` is an identifier rather than a secret.
+
+### Docs updated with the S8 facts
+
+- `research/pingcode-api.md`: §4.2 corrected — **work-item payloads carry no `type` field at all**
+  (the earlier revision listed one); new GOTCHAS 27–32 cover the type absence, the token payload
+  (absolute `expires_in`, no `scope`, no `refresh_token`, coexisting tokens), the 400-instead-of-401/404
+  behaviour with the three observed codes, the absence of rate-limit headers on 2xx, and the confirmed
+  `page_index`/`page_size` support on GET lists.
+- `design.md` §4.1: production returns an **absolute** `expires_in`; the duration branch and the clamp
+  stay as defensive code.
+
+### Live re-verification of the changed paths (RDD-26 reused, nothing created)
+
+| check | result |
+|---|---|
+| `transition RDD-26 --type task --state 已完成` (`--no-cache`) | **0** — state moved |
+| `transition RDD-26 --type task --state 进行中` | **0** — moved back, RDD-26 left exactly as found |
+| `transition RDD-26 --state 已完成` (no `--type`) | **2** — message names `--type` / `--state-id`, no duplicate warning |
+| `transition RDD-26 --type task --state-id 000…000` | **5** — plus all four candidate states on stderr |
+| `transition RDD-26 --state-id 000…000` (no `--type`) | **5** — plus the explicit "cannot list candidates" note |
+| `work-item get 000000000000000000000000` | **5** (was 7); `--json` → stdout 0 bytes, `{"error":{…,"exit":5,"code":"100317"}}` on stderr |
+| `auth login --client-id FAKE --client-secret FAKE` (no `--save`) | **3** (was 7); config sha256 **byte-identical**, mode still `600`, fake secret redacted, 0 occurrences in output |
+| `meta users --keywords a --page-size 3 --json` | `{count,values}`, stdout pure JSON, **stderr 0 bytes** |
+| `meta users --all --limit 5 --json` | `{all,count,values}`, stderr 0 bytes |
+| `--verbose auth status --check` | no secret, and no 8-char substring of it, anywhere in stdout+stderr |
+| `npm run typecheck && npm test` | 13 files / **213 tests** green |
+
+**RDD-26 still exists and is back in state 进行中** — deletion is deferred to S9 by the user's
+instruction. Nothing in the "Not verified" list above became verifiable: 429 and 403 were not
+provoked (deliberately), and self-hosted derivation and sprint writes remain unit-tested only.
+

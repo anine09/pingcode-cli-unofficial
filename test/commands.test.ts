@@ -16,7 +16,7 @@ import { buildProgram } from '../src/cli/program';
 import { THIRTY_DAYS_MS } from '../src/core/auth';
 import type { Ctx } from '../src/core/context';
 import { ApiError, UsageError } from '../src/core/errors';
-import type { ResolveResult } from '../src/core/metadata';
+import { resolveWorkItemType, type ResolveResult } from '../src/core/metadata';
 import { createFakeFetch, createTestContext, jsonResponse } from './helpers/fake';
 
 /**
@@ -54,6 +54,18 @@ function ctxFor(responses: Array<() => Response>): {
     clientSecret: 'shh',
   });
   return { ctx, fake };
+}
+
+function typesPage(): Response {
+  return jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 2,
+    values: [
+      { id: 'task', name: '任务' },
+      { id: 'bug', name: '缺陷' },
+    ],
+  });
 }
 
 function statesPage(): Response {
@@ -205,6 +217,65 @@ describe('runWrite (design §6 invalidate-on-rejection)', () => {
     );
     expect(result).toBe('sent:input');
     expect(resolves).toBe(1);
+  });
+});
+
+describe('--type on update / transition (S8b, F1)', () => {
+  const program = buildProgram();
+
+  function leaf(name: string): Command {
+    const group = program.commands.find((command) => command.name() === 'work-item');
+    if (group === undefined) throw new Error('work-item group missing');
+    const found = group.commands.find((command) => command.name() === name);
+    if (found === undefined) throw new Error(`work-item ${name} missing`);
+    return found;
+  }
+
+  it('exists on update and transition, and says it is only a lookup aid', () => {
+    for (const name of ['update', 'transition']) {
+      const option = leaf(name).options.find((candidate) => candidate.long === '--type');
+      expect(option, name).toBeDefined();
+      expect(option?.description).toContain('--state <name>');
+      expect(option?.description).toContain('candidate states');
+      expect(option?.description).toContain('never sent');
+    }
+  });
+
+  it('keeps --type off the list of fields that make a patch non-empty', () => {
+    // `update <ref> --type task` alone is still an empty patch: --type is never sent.
+    const hintFlags = leaf('update')
+      .options.filter((option) => option.long !== undefined)
+      .map((option) => option.long);
+    expect(hintFlags).toContain('--type');
+    expect(hintFlags).toContain('--state-id');
+  });
+
+  it('resolves a state name against a --type-resolved type, as update does', async () => {
+    // update/transition run exactly this pair: type name → type id → state name.
+    const { ctx, fake } = ctxFor([typesPage, statesPage]);
+    const type = await resolveWorkItemType(ctx, 'p1', 'task');
+    expect(type.id).toBe('task');
+    const state = await resolveStateFlags(ctx, { state: 'In Progress' }, {
+      projectId: 'p1',
+      typeId: type.id,
+    });
+    expect(state?.id).toBe('st-doing');
+    expect(fake.urls()[0]).toContain('/v1/pjm/work_item/types?project_id=p1');
+    expect(fake.urls()[1]).toContain('work_item_type_id=task');
+  });
+
+  it('names only flags that exist when --type is missing', async () => {
+    const { ctx } = ctxFor([statesPage]);
+    const error = await resolveStateFlags(ctx, { state: 'Done' }, { projectId: 'p1' }).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(UsageError);
+    const hint = (error as UsageError).hint ?? '';
+    expect(hint).toContain('--type <name|id>');
+    expect(hint).toContain('--state-id <id>');
+    // the old wording blamed the payload's missing `type`, which is not actionable
+    expect(hint).not.toContain('did not report a type');
   });
 });
 

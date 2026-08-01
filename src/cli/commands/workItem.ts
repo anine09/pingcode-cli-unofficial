@@ -87,6 +87,8 @@ type CreateFlags = StateFlags & {
 type UpdateFlags = StateFlags & {
   title?: string | undefined;
   description?: string | undefined;
+  /** Only ever used to resolve `--state <name>` and to list candidate states. */
+  type?: string | undefined;
   assignee?: string | undefined;
   priority?: string | undefined;
   parent?: string | undefined;
@@ -96,6 +98,14 @@ type UpdateFlags = StateFlags & {
   estimatedWorkload?: string | undefined;
   remainingWorkload?: string | undefined;
 };
+
+/**
+ * The live API omits `type` from every work-item payload (research/s8-smoke.md
+ * F1), so a state *name* can only be resolved if the user names the type. The
+ * flag is never sent: `PATCH` has no `type_id` field.
+ */
+const TYPE_FLAG_HELP =
+  'work-item type — used only to resolve --state <name> and to list candidate states on rejection; never sent';
 
 export const WORK_ITEM_COLUMNS: Column<WorkItem>[] = [
   { header: 'IDENTIFIER', value: (item) => item.identifier ?? item.short_id ?? item.id },
@@ -172,6 +182,7 @@ export function registerWorkItemCommands(program: Command): void {
         .argument('<work-item>', 'id, short_id, identifier such as SCR-5, or a pasted URL')
         .option('--title <text>', 'new title')
         .option('--description <text>', 'new description (replaces the old one)')
+        .option('--type <name|id>', TYPE_FLAG_HELP)
         .option('--assignee <name|id>', 'new assignee')
         .option('--priority <name|id>', 'new priority')
         .option('--parent <ref>', 'new parent work item')
@@ -181,7 +192,6 @@ export function registerWorkItemCommands(program: Command): void {
         .option('--estimated-workload <n>', 'estimated workload in hours')
         .option('--remaining-workload <n>', 'remaining workload in hours'),
       'new state',
-      'the type is read from the work item',
     ),
     { hidden: true },
   ).action(async (target: string, flags: UpdateFlags, command: Command) => {
@@ -193,12 +203,12 @@ export function registerWorkItemCommands(program: Command): void {
       group
         .command('transition')
         .description('move a work item to another state (workflow-validated by the server)')
-        .argument('<work-item>', 'id, short_id, identifier such as SCR-5, or a pasted URL'),
+        .argument('<work-item>', 'id, short_id, identifier such as SCR-5, or a pasted URL')
+        .option('--type <name|id>', TYPE_FLAG_HELP),
       'target state',
-      'the type is read from the work item',
     ),
     { hidden: true },
-  ).action(async (target: string, flags: StateFlags, command: Command) => {
+  ).action(async (target: string, flags: UpdateFlags, command: Command) => {
     if (
       (flags.state === undefined || flags.state.trim() === '') &&
       (flags.stateId === undefined || flags.stateId.trim() === '')
@@ -382,11 +392,16 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   }
 
   // PATCH documents only `id` (research §6.9), so resolve the reference first —
-  // which also hands back the project and type a state lookup needs.
+  // which also hands back the project a name lookup needs. It does **not** hand
+  // back a type: the live API omits `type` from work-item payloads entirely
+  // (research/s8-smoke.md F1), which is why `--type` exists on this command.
   const locator = await resolveWorkItem(ctx, requireFlag(target, '<work-item>'));
   if (locator.id === '') {
     throw new NotFoundError(`could not resolve "${target}" to a work item id`);
   }
+
+  // Remembered for explainStates(): the id the state lookup actually used.
+  let typeIdUsed: string | undefined = locator.typeId;
 
   const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<UpdateWorkItemInput>> => {
     const projectId = locator.projectId;
@@ -397,14 +412,22 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
       );
     }
 
+    // Resolve the type only when a state *name* needs it: with --state-id the
+    // whole lookup is skipped, which keeps the request count where it was.
+    const needsTypeForName = flags.state !== undefined && flags.state.trim() !== '';
+    const type =
+      needsTypeForName && flags.type !== undefined && projectId !== undefined
+        ? await resolveWorkItemType(attemptCtx, projectId, flags.type)
+        : undefined;
+    const typeId = type?.id ?? locator.typeId;
+    typeIdUsed = typeId;
+
     const state =
       projectId === undefined
         ? undefined
         : await resolveStateFlags(attemptCtx, flags, {
             projectId,
-            ...(locator.typeId === undefined ? {} : { typeId: locator.typeId }),
-            typeHint:
-              'this work item did not report a type, so a state name cannot be resolved; pass --state-id <id>',
+            ...(typeId === undefined ? {} : { typeId }),
           });
     const priority =
       flags.priority === undefined || projectId === undefined
@@ -423,7 +446,7 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
       ...(parent === undefined ? {} : { parent_id: parent.id }),
     };
 
-    return { resolutions: present([state, priority, assignee]), value: patch };
+    return { resolutions: present([type, state, priority, assignee]), value: patch };
   };
 
   try {
@@ -432,7 +455,9 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
     );
     printWorkItem(item, ctx, 'updated');
   } catch (error) {
-    if (wantsState) await explainStates(ctx, locator, error);
+    if (wantsState) {
+      await explainStates(ctx, locator, error, { typeFlag: flags.type, typeId: typeIdUsed });
+    }
     throw error;
   }
 }
@@ -440,15 +465,44 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
 /**
  * A state change is only accepted if the target state belongs to the type's state
  * scheme **and** a legal transition exists (research §6.12). The server message
- * alone rarely says which states are legal, so we add them.
+ * rarely says which states are legal, so we add them.
+ *
+ * The states endpoint needs `(project_id, work_item_type_id)` and the payload
+ * carries no type, so this can only list candidates when the user passed
+ * `--type`. When they did not, say so instead of printing nothing — silence was
+ * exactly the S8 complaint (research/s8-smoke.md F1, step 11c).
  */
-async function explainStates(ctx: Ctx, locator: WorkItemLocator, error: unknown): Promise<void> {
+async function explainStates(
+  ctx: Ctx,
+  locator: WorkItemLocator,
+  error: unknown,
+  source: { typeFlag?: string | undefined; typeId?: string | undefined },
+): Promise<void> {
   if (!(error instanceof PingcodeError)) return;
   if (!['api', 'usage', 'not_found', 'permission'].includes(error.kind)) return;
-  const { projectId, typeId } = locator;
-  if (projectId === undefined || typeId === undefined) return;
+
+  const projectId = locator.projectId;
+  if (projectId === undefined) return;
+
+  if (source.typeFlag === undefined && source.typeId === undefined) {
+    // A local UsageError already tells the user to pass --type, so saying it
+    // twice is just noise; a *server* rejection is where the silence hurt.
+    if (error.kind === 'usage') return;
+    ctx.logger.warn(
+      'the candidate states cannot be listed because this API does not report a work item\'s type; ' +
+        're-run with --type <name|id> to see the states configured for it',
+    );
+    return;
+  }
 
   try {
+    const typeId =
+      source.typeId ??
+      (source.typeFlag === undefined
+        ? undefined
+        : (await resolveWorkItemType(ctx, projectId, source.typeFlag)).id);
+    if (typeId === undefined) return;
+
     const states = await listWorkItemStates(ctx, projectId, typeId);
     if (states.length === 0) return;
     const listed = states.map((state) => `${state.name ?? '(unnamed)'} (${state.id})`).join(', ');

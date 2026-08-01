@@ -101,6 +101,10 @@ describe('--help snapshots', () => {
   it('work-item update (the widest flag set)', () => {
     expect(group(group(program, 'work-item'), 'update').helpInformation()).toMatchSnapshot();
   });
+
+  it('work-item transition (--type is a lookup aid, not a patched field)', () => {
+    expect(group(group(program, 'work-item'), 'transition').helpInformation()).toMatchSnapshot();
+  });
 });
 
 describe('SKILL.md agrees with the CLI (R4.5)', () => {

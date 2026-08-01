@@ -143,11 +143,13 @@ export function addStateOptions(command: Command, noun: string, requires = 'requ
 /**
  * `GET /v1/pjm/work_item/states` needs **both** `project_id` and
  * `work_item_type_id` (research §4), so a state *name* can only be resolved when
- * the type is known. Rather than guessing at id shapes — which is impossible:
- * ids are 24-hex, 32-hex for users, or bare slugs for system types (research §6.8)
- * — the two cases are separate flags:
+ * the type is known — and the live API never reports a work item's type
+ * (research/s8-smoke.md F1), so the type always comes from `--type`. Rather than
+ * guessing at id shapes — which is impossible: ids are 24-hex, 32-hex for users,
+ * or bare slugs for system types (research §6.8) — the two cases are separate
+ * flags:
  *
- * - `--state <name>` always resolves by name and therefore requires a type;
+ * - `--state <name>` always resolves by name and therefore requires `--type`;
  * - `--state-id <id>` is passed through verbatim, no lookup, no type needed.
  *
  * They are mutually exclusive.
@@ -155,7 +157,7 @@ export function addStateOptions(command: Command, noun: string, requires = 'requ
 export async function resolveStateFlags(
   ctx: Ctx,
   flags: StateFlags,
-  scope: { projectId: string; typeId?: string | undefined; typeHint?: string | undefined },
+  scope: { projectId: string; typeId?: string | undefined },
 ): Promise<ResolveResult | undefined> {
   const name = flags.state?.trim();
   const id = flags.stateId?.trim();
@@ -181,9 +183,8 @@ export async function resolveStateFlags(
   if (typeId === undefined || typeId === '') {
     throw new UsageError('--state <name> requires --type', {
       hint:
-        scope.typeHint ??
-        'work-item states are scoped to (project, work item type): pass --type <name|id>, ' +
-          'or use --state-id <id> to send a state id unchanged',
+        'work-item states are scoped to (project, work item type), so a state name needs a type: ' +
+        'pass --type <name|id>, or use --state-id <id> to send a state id unchanged',
     });
   }
 

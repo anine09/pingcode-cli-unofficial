@@ -60,8 +60,11 @@ from every URL, log line, dry-run plan and error message it emits.
 
 - `--json` makes **stdout carry JSON only**. Logs, warnings, tables and notes go to stderr.
 - In `--json` mode, timestamps stay raw unix **seconds**. Human mode renders local time.
-- List commands in `--json` print `{"page_index":0,"page_size":30,"total":123,"values":[…]}`.
-  With `--all` they print `{"values":[…],"count":42,"all":true}`.
+- Three list shapes, by command family:
+  - `project list` / `work-item list` (one page) → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
+  - any list with `--all` → `{"values":[…],"count":42,"all":true}`
+  - every `pingcode meta …` lookup (including `meta users`, which still accepts `--page`/`--page-size`)
+    → `{"values":[…],"count":20}`
 - Single-resource commands (`get`, `create`, `update`, `transition`) print the resource object.
 - `--dry-run` on a mutating command prints `{"dry_run":true,"request":{…}}` to stdout and exits 0
   without sending anything. Read requests still run, so ids are really resolved.
@@ -78,10 +81,14 @@ from every URL, log line, dry-run plan and error message it emits.
 | 2 | usage error: bad flags, missing input, ambiguous or unresolvable name, empty update |
 | 3 | authentication: no or invalid credentials |
 | 4 | permission: 403, or a scope the app was not granted |
-| 5 | not found: 404 |
+| 5 | not found: the work item, state or other resource does not exist |
 | 6 | rate limited: 429 (200 requests/minute per token) |
 | 7 | other API error, carrying the API's `{code, message}` |
 | 8 | transport failure: DNS, TCP, TLS, timeout, unparseable body |
+
+The API answers HTTP 400 for both "not found" and "bad credentials", so the CLI maps a few known API
+codes onto exits 5 and 3 rather than trusting the status. Unknown codes stay on exit 7 with the raw
+`code` in the error payload — read it before concluding anything.
 
 ## 3. Commands
 
@@ -139,22 +146,27 @@ pingcode work-item create --project "Mobile App" --type task --title "Fix login 
   --assignee wangxiao --priority High --end-at 2026-02-15 --json
 
 pingcode work-item update SCR-5 --title "Fix login retry (v2)" --json
-pingcode work-item update SCR-5 --state "In Progress" --json
-pingcode work-item transition SCR-5 --state Done --json
+pingcode work-item update SCR-5 --type task --state "In Progress" --json
+pingcode work-item transition SCR-5 --type task --state Done --json
 pingcode work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
 ```
 
 `work-item get` accepts an id, a `short_id`, an identifier such as `SCR-5`, or a pasted work-item URL.
 `update` and `transition` accept the same forms and resolve them to a real id first.
 
+On `update` and `transition`, `--type` is **only** a lookup aid: it resolves `--state <name>` and lets
+the CLI list the candidate states if the server rejects the change. It is never written to the work
+item — there is no patchable type field.
+
 ## 4. Rules that will bite you
 
 1. **Resolve ids per project.** Run `pingcode meta types` / `meta states` for the project you are
    writing to before `create`. An id from another project is rejected or, worse, silently wrong.
-2. **`--state <name>` requires `--type`.** States live in a `(project, work item type)` pair, so a
-   state name cannot be resolved without a type. On `work-item list` and `create` pass `--type`; on
-   `update` / `transition` the type is read from the work item. Use `--state-id <id>` to send an id
-   with no lookup and no `--type`. `--state` and `--state-id` are mutually exclusive.
+2. **`--state <name>` always requires `--type`.** States live in a `(project, work item type)` pair,
+   and the API does **not** report a work item's type, so the CLI cannot infer it — not on `list`, not
+   on `create`, and not on `update`/`transition` either. Either pass `--type <name|id>` alongside
+   `--state <name>`, or skip the lookup entirely with `--state-id <id>`. `--state` and `--state-id`
+   are mutually exclusive.
 3. **`update` replaces, it does not merge.** Every field you pass overwrites the stored value, and
    array fields and `properties` objects are replaced wholesale rather than merged. Read the item
    first if you need to preserve anything.
@@ -163,7 +175,8 @@ pingcode work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
 5. **An update with no fields is exit 2**, not a no-op.
 6. **State changes are workflow-validated** by the server: the target state must belong to the type's
    state scheme and a legal transition must exist from the current state. On rejection the CLI prints
-   the server message plus the states configured for that type on stderr.
+   the server message plus the states configured for that type on stderr — but only if you passed
+   `--type`, since the candidate lookup needs it too.
 7. **No endpoint supports sorting.** Neither the CLI nor the API can order results. Sort what you
    collected yourself, and remember that offset paging over unordered, changing data can duplicate or
    skip rows.
@@ -180,6 +193,7 @@ pingcode work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
    guessing.
 2. Resolve the project: `pingcode project list --json`.
 3. Resolve ids: `pingcode meta types --project <p> --json`, then `meta states --project <p> --type <t> --json`.
+   Keep the type around: you need it again for `--state <name>` on any write.
 4. Read before writing: `pingcode work-item get <ref> --json`.
 5. For any mutation, run it with `--dry-run --json` first, show the plan, get confirmation, then run
    it again without `--dry-run`.

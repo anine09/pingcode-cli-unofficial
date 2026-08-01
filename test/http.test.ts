@@ -11,6 +11,7 @@ import {
   TransportError,
 } from '../src/core/errors';
 import { MAX_RETRY_WAIT_MS, request } from '../src/core/http';
+import { ERROR_CODE_OVERRIDES } from '../src/core/wire';
 import { createFakeFetch, createTestContext, emptyResponse, jsonResponse, textResponse } from './helpers/fake';
 
 const NOW = 1_700_000_000_000;
@@ -391,5 +392,86 @@ describe('request: response mapping', () => {
     }).catch((e: unknown) => e);
     expect((error as Error).message).not.toContain(SECRET);
     expect(ctx.logLines.join('\n')).not.toContain(SECRET);
+  });
+});
+
+/**
+ * The live API answers HTTP 400 where REST convention uses 401/404, which made
+ * exits 3 and 5 unreachable (research/s8-smoke.md F2/F3). A small code allowlist
+ * overrides the status; everything else keeps status-first behaviour.
+ */
+describe('request: code-aware overrides (S8b, F2/F3)', () => {
+  const ctxWith = (response: () => Response) =>
+    createTestContext({
+      fetch: createFakeFetch(response).fetch,
+      token: freshToken(),
+      now: NOW,
+    });
+
+  it('maps 400 + 100024 (bad client id/secret) to AuthError, exit 3', async () => {
+    const error = await request(
+      ctxWith(() =>
+        jsonResponse({ code: '100024', message: "'client_id'或'client_secret'错误" }, { status: 400 }),
+      ),
+      { method: 'GET', path: '/v1/auth/token', skipAuth: true },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AuthError);
+    expect((error as AuthError).exitCode).toBe(3);
+    expect((error as AuthError).code).toBe('100024');
+    expect((error as AuthError).status).toBe(400);
+    expect((error as AuthError).message).toContain("'client_id'或'client_secret'错误");
+  });
+
+  it('maps 400 + 100317 (work item does not exist) to NotFoundError, exit 5', async () => {
+    const error = await request(
+      ctxWith(() => jsonResponse({ code: '100317', message: '工作项资源不存在' }, { status: 400 })),
+      { method: 'GET', path: '/v1/pjm/work_items/000000000000000000000000' },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect((error as NotFoundError).exitCode).toBe(5);
+    expect((error as NotFoundError).code).toBe('100317');
+  });
+
+  it("maps 400 + 100303 ('state' does not exist) to NotFoundError, exit 5", async () => {
+    const error = await request(
+      ctxWith(() => jsonResponse({ code: '100303', message: "'state'资源不存在" }, { status: 400 })),
+      { method: 'PATCH', path: '/v1/pjm/work_items/abc', body: { state_id: 'nope' } },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect((error as NotFoundError).exitCode).toBe(5);
+    expect((error as NotFoundError).code).toBe('100303');
+  });
+
+  it('leaves codes outside the allowlist on the status-first mapping', async () => {
+    const error = await request(
+      ctxWith(() => jsonResponse({ code: '100318', message: '别的错误' }, { status: 400 })),
+      { method: 'GET', path: '/v1/pjm/work_items/abc' },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).exitCode).toBe(7);
+    expect((error as ApiError).code).toBe('100318');
+  });
+
+  it('matches on the code only, never on the message text', async () => {
+    // Same Chinese wording, unlisted code ⇒ still exit 7.
+    const error = await request(
+      ctxWith(() => jsonResponse({ code: '999999', message: '工作项资源不存在' }, { status: 400 })),
+      { method: 'GET', path: '/v1/pjm/work_items/abc' },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    // …and a listed code overrides even a status that would map elsewhere.
+    const overridden = await request(
+      ctxWith(() => jsonResponse({ code: '100317', message: 'whatever' }, { status: 500 })),
+      { method: 'GET', path: '/v1/pjm/work_items/abc' },
+    ).catch((e: unknown) => e);
+    expect(overridden).toBeInstanceOf(NotFoundError);
+  });
+
+  it('exposes the table so the mapping stays reviewable in one place', () => {
+    expect(ERROR_CODE_OVERRIDES).toEqual({
+      '100024': 'auth',
+      '100317': 'not_found',
+      '100303': 'not_found',
+    });
   });
 });
