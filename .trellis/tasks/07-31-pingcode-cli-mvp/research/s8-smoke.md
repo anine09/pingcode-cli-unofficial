@@ -275,7 +275,37 @@ while an invalid *bearer* token on a resource endpoint does still return a real 
 | `--verbose auth status --check` | no secret, and no 8-char substring of it, anywhere in stdout+stderr |
 | `npm run typecheck && npm test` | 13 files / **213 tests** green |
 
-**RDD-26 still exists and is back in state 进行中** — deletion is deferred to S9 by the user's
-instruction. Nothing in the "Not verified" list above became verifiable: 429 and 403 were not
+**RDD-26 still existed at the end of S8b, in state 进行中.** It was deleted in S9 — see below.
+Nothing in the "Not verified" list above became verifiable: 429 and 403 were not
 provoked (deliberately), and self-hosted derivation and sprint writes remain unit-tested only.
+
+---
+
+## S9 cleanup — the smoke artifact is gone (2026-08-01)
+
+Deleting RDD-26 was approved by the user. The CLI has **no** delete command and the MVP is not adding
+one, so it was done with a single direct authenticated call — no CLI code path, no other org data
+touched, nothing created.
+
+| step | result |
+|---|---|
+| `auth status --check --json` (freshness precondition) | 0 — live call ok, `projects_total: 9`, `token_expires_at 1788105626` |
+| `work-item get bbbbbbbbbbbbbbbbbbbbbbbb --json` (pre-check) | 0 — RDD-26 present, `is_deleted: false`, state 进行中 |
+| `DELETE /v1/pjm/work_items/bbbbbbbbbbbbbbbbbbbbbbbb` with `Authorization: Bearer …` | **HTTP 200 OK**, `application/json`, body = the deleted resource |
+| `work-item list --project RDD --all --no-cache --json` | 0 — `count: 25`, **0** `[CLI smoke]` titles, RDD-26 absent, identifiers RDD-1…RDD-25 contiguous |
+| `work-item list --project RDD --page-size 1 --no-cache --json` | 0 — server `total: 25` (was 26) |
+
+The one-off script read the access token from `~/.pingcode/config.json`, printed neither the token nor
+the secret, lived outside the repository, and was removed afterwards. No secret value appears in this
+file.
+
+Two API facts came out of it and were folded into `research/pingcode-api.md` as **gotchas 33 and 34**:
+`DELETE /v1/pjm/work_items/{id}` exists (undocumented in our §4 table), returns 200 with the resource
+body, and is a **soft delete** (`?include_deleted=true` in the echoed URL); and its response — unlike
+every read endpoint — *does* carry a `type` field, which narrows finding F1's wording without changing
+its consequence.
+
+**The user's PingCode org is now back to its pre-smoke state:** RDD holds 25 work items, exactly the
+ones that existed before S8, none of which was ever modified.
+
 

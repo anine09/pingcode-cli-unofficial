@@ -77,17 +77,49 @@ and conventions are all part of this task.
 
 ## Acceptance Criteria
 
-- [ ] AC1 `pingcode` runs from a built artifact and `--help` lists the auth, project, and work-item command groups.
-- [ ] AC2 With valid `client_id` / `client_secret`, the login command succeeds and the auth-status command reports an authenticated state with secrets redacted.
-- [ ] AC3 Credentials/token are stored outside the repository with `0600` permissions, and no secret appears in any command output.
-- [ ] AC4 An expired/invalid cached token is transparently re-acquired: a subsequent API command succeeds without the user re-running login.
-- [ ] AC5 Listing projects returns real data from the user's PingCode instance.
-- [ ] AC6 Work items can be listed with filters and paginated, a single work item can be fetched by identifier, and both work in `--json` mode emitting valid parseable JSON only.
-- [ ] AC7 A work item can be created and then updated (including a state change) against the real API; `--dry-run` on those same commands performs no write and prints the intended request.
-- [ ] AC8 Failure modes produce distinct, actionable messages and non-zero exit codes for: missing/invalid credentials, insufficient permission, invalid input, and not-found.
-- [ ] AC9 `SKILL.md` exists as a single skill with valid frontmatter, and every command/flag it documents exists in the CLI.
-- [ ] AC10 Type-check and the mocked-HTTP test suite pass.
-- [ ] AC11 No secret values are present in any tracked file.
+Verdicts recorded in S9. Evidence is a test name, a step in `research/s8-smoke.md`, or the S9
+re-verification noted inline.
+
+- [x] AC1 `pingcode` runs from a built artifact and `--help` lists the auth, project, and work-item command groups.
+      — S9: `npm run build` → `node dist/bin/pingcode.js --help` lists `auth`/`project`/`work-item`/`meta`;
+      all **15** leaf `--help` pages render with exit 0. Locked by `test/help.test.ts` snapshots.
+- [x] AC2 With valid `client_id` / `client_secret`, the login command succeeds and the auth-status command reports an authenticated state with secrets redacted.
+      — `s8-smoke.md` steps 1–2 and 13; S9 re-ran `auth status --check --json` (live call ok, `projects_total: 9`).
+- [x] AC3 Credentials/token are stored outside the repository with `0600` permissions, and no secret appears in any command output.
+      — `s8-smoke.md` steps 3 and 13 (`-rw-------`, dir `0700`, cache `0600`, no 8-char substring of the
+      secret anywhere in stdout+stderr); S9 re-confirmed mode `600` on `~/.pingcode/config.json`.
+      Tests: `test/config.test.ts` (mode, skipped on `win32`), `test/output.test.ts` (redaction).
+- [x] AC4 An expired/invalid cached token is transparently re-acquired: a subsequent API command succeeds without the user re-running login.
+      — `s8-smoke.md` step 12: token corrupted by hand → `--verbose` trace shows `← 401` → one re-auth →
+      replay `← 200`, stdout still pure JSON. Tests: `test/auth.test.ts`, `test/http.test.ts` (single
+      re-auth, no recursion, single in-flight acquisition).
+- [x] AC5 Listing projects returns real data from the user's PingCode instance.
+      — `s8-smoke.md` step 4 (9 real projects); S9 re-confirmed via the `auth status --check` capability call.
+- [x] AC6 Work items can be listed with filters and paginated, a single work item can be fetched by identifier, and both work in `--json` mode emitting valid parseable JSON only.
+      — `s8-smoke.md` steps 5–7, G5-1 (full paging matrix), and the 19-command `--json` purity sweep
+      (every stdout parsed, every stderr 0 bytes); S9 re-ran `work-item list --project RDD --all --no-cache --json`.
+- [x] AC7 A work item can be created and then updated (including a state change) against the real API; `--dry-run` on those same commands performs no write and prints the intended request.
+      — `s8-smoke.md` steps 8–10 (dry-run wrote nothing and the follow-up list proved it; create → RDD-26;
+      `transition` moved state; empty patch → exit 2) and the S8b live re-verification of the `--type`
+      state-name path. The artifact was deleted in S9 (see `s8-smoke.md` "S9 cleanup").
+- [x] AC8 Failure modes produce distinct, actionable messages and non-zero exit codes for: missing/invalid credentials, insufficient permission, invalid input, and not-found.
+      **Partially provable.** Live-observed: invalid credentials → **3**, invalid input → **2**,
+      not-found → **5** (both after the S8b `code`-override fix; `s8-smoke.md` step 11 + S8b table).
+      **Insufficient permission (403 → exit 4) was never observed live** — the Client Credentials token
+      is org-admin-scoped, so nothing in the MVP surface denied us. It is unit-tested only
+      (`test/http.test.ts`). Same caveat for rate limiting (429 → exit 6), which was deliberately not
+      provoked against the user's production org.
+- [x] AC9 `SKILL.md` exists as a single skill with valid frontmatter, and every command/flag it documents exists in the CLI.
+      — `test/help.test.ts`: frontmatter + `name: pingcode`, every command path in `SKILL.md` resolves in
+      the commander tree **and** every CLI leaf is mentioned. Command paths are machine-checked; flag
+      names are review-checked.
+- [x] AC10 Type-check and the mocked-HTTP test suite pass.
+      — S9: `npm run typecheck` clean, `npm test` → **13 files / 213 tests** passed, zero network.
+- [x] AC11 No secret values are present in any tracked file.
+      — S9: the stored `client_id`, `client_secret` and access token were each searched as literal
+      substrings across **all** `git ls-files` entries → **0 hits** each. `.gitignore` covers `.env*`,
+      `dist/`, `*.log` and now `.pingcode/`; the real store lives outside the repo at `~/.pingcode/`.
+
 
 ## Open Questions
 
@@ -97,5 +129,8 @@ and conventions are all part of this task.
 
 ## Notes
 
-- Follow `.trellis/spec/` guidelines when they become populated; today they are unfilled templates, so this task also establishes the initial conventions.
+- Follow `.trellis/spec/` guidelines when they become populated; at kickoff they were unfilled
+  templates, so this task also established the initial conventions. **Done in S9:** the five
+  `.trellis/spec/backend/` documents are filled from this codebase, and `.trellis/spec/frontend/`
+  is explicitly marked not applicable (there is no frontend).
 - Documentation in the repo is written in English; user-facing conversation is Chinese.

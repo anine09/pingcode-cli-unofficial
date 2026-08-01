@@ -158,13 +158,28 @@ Run against the user's real PingCode instance, in order, recording actual output
      parallel invocations can 401 each other and the skill must document it.
 - Record results in the task journal; any API-fact surprise updates `research/pingcode-api.md`.
 
-### S9 — Finish
-- `npm run typecheck && npm test` full-scope green.
-- Full-scope quality check (Trellis 2.2), including a grep for secret-shaped strings in tracked files (AC11).
-- `README.md`: install, auth, command examples, self-hosted `--host`, the org-admin-token caveat,
-  `--all` is best-effort, and the documented follow-ups (keychain, codegen, `state_flows` pre-validation,
-  `POST /search`).
-- Populate `.trellis/spec/` with the conventions this task established (Trellis 3.3), then commit (3.4).
+### S9 — Finish ✅
+- `npm run typecheck && npm test` full-scope green — 13 files / **213 tests**, zero network.
+- Full-scope quality check (Trellis 2.2): build + root and all **15** leaf `--help` pages,
+  `npm run skill:install -- --dry-run`, and a literal-substring grep for the stored `client_id` /
+  `client_secret` / access token across every `git ls-files` entry → **0 hits** (AC11).
+  AC1–AC11 verdicts with evidence are recorded in `prd.md`; AC8 is honestly marked *partially
+  provable* (403→4 and 429→6 are unit-tested only).
+- `README.md`: install/build, `auth login` (cloud default + self-hosted `--host`), the four required
+  scopes and where to create the app (企业后台 → 凭据管理), the command surface, the `--json`
+  contract, the exit-code table **including the three 400-mapped codes**, the practical caveats
+  (project-scoped ids, `--state` needs `--type`, update replaces, `--all` best-effort with no
+  sorting, 200 req/min, unix seconds, 24 h cache + `--no-cache`), and the follow-up list
+  (keychain, codegen from `api_data.json`, `state_flows` pre-validation, `POST /search`, bulk
+  `PATCH`, self-hosted verification, 429/403 unit-tested only).
+- `.trellis/spec/backend/` populated (Trellis 3.3): layering invariant + enforcement, the local
+  credential/cache store, the exit-code contract and status-first/`code`-override mapping, the
+  stdout-purity + redaction rules, and the testing / API-fact discipline. `.trellis/spec/frontend/`
+  marked **N/A — no frontend** rather than invented.
+- Smoke artifact **RDD-26 deleted** (user-approved, one direct `DELETE`, HTTP 200); RDD is back to
+  25 items. Recorded in `research/s8-smoke.md` "S9 cleanup" plus gotchas 33–34 in
+  `research/pingcode-api.md`.
+- Then commit (3.4).
 
 ---
 

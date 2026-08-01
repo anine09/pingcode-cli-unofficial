@@ -7,3 +7,7 @@ coverage/
 !.env.example
 .DS_Store
 *.tsbuildinfo
+
+# Credential store. It normally lives in ~/.pingcode/, but PINGCODE_CONFIG_DIR
+# can point anywhere — never let one land in a commit.
+.pingcode/

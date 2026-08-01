@@ -29,3 +29,32 @@ project `RDD` (kanban). Full evidence: `.trellis/tasks/07-31-pingcode-cli-mvp/re
   (`100317`), so exit 5 is unreachable server-side; F3 bad credentials return HTTP 400 (`100024`), so
   exit 3 never fires — while an invalid *bearer* token does correctly return 401.
 
+---
+
+## 2026-08-01 — S9 finish (pingcode-cli-mvp)
+
+Full-scope check, docs, spec, cleanup. AC verdicts with per-criterion evidence now live in `prd.md`.
+
+- Checks: `typecheck` clean; `npm test` **13 files / 213 tests**; `tsup` build 89.6 KB; root + all
+  **15** leaf `--help` pages exit 0 with the right usage header; unknown command → 2;
+  `skill:install --dry-run` lists both targets and writes nothing.
+- AC11 done properly: searched the *actual* stored `client_id` / `client_secret` / access token as
+  literal substrings across every `git ls-files` entry → **0 hits** each. Added `.pingcode/` to
+  `.gitignore` as a belt-and-braces guard, since `PINGCODE_CONFIG_DIR` can point into the repo.
+- AC8 is the one honest "partial": 3 / 2 / 5 are live-observed, but **403 → 4 and 429 → 6 are
+  unit-tested only** (org-admin token never got denied; provoking 429 means ~200 req/min against the
+  user's production org). Said so in `prd.md` rather than ticking it clean.
+- `README.md` rewritten for a first-time reader: install, 凭据管理 app + the four scopes, cloud vs
+  self-hosted login, command surface, the `--json` contract, the exit-code table **with** the three
+  400-mapped codes, the caveats that actually bite, and the follow-up list.
+- `.trellis/spec/backend/` filled from real code (layering + its test, stdout purity, exit-code
+  contract, redaction, error-mapping policy, testing + API-fact discipline). `database-guidelines.md`
+  became "Local State & Persistence" — no DB, but `~/.pingcode/` deserves the same rigour.
+  `.trellis/spec/frontend/` marked **N/A**: no frontend, so inventing one would just mislead.
+- Deleted the smoke artifact **RDD-26** (user-approved) with one direct
+  `DELETE /v1/pjm/work_items/bbbbbbbbbbbbbbbbbbbbbbbb` → **HTTP 200**; RDD back to 25 items, zero
+  `[CLI smoke]` titles. Two new API facts fell out (gotchas 33–34): that DELETE endpoint exists at
+  all and is a **soft** delete, and its response — uniquely — *does* carry `type`, which narrows F1's
+  wording without changing the `--type` flag's necessity.
+
+

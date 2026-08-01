@@ -398,6 +398,20 @@ Example:
     state and priority ids are 24-hex, user ids are 32-hex (gotcha 8 holds); kanban items carry
     `board`/`entry`/`swimlane` and `properties.{entry_status,entry_position,operation_time,…}`;
     `sprints` is empty for a kanban project (gotcha 14 holds).
+33. **`DELETE /v1/pjm/work_items/{id}` exists and works**, even though it is absent from the MVP
+    endpoint table in §4 (which was transcribed from the doc's work-item pages; only §6 gotcha 9
+    hinted at it). Observed once in S9 while removing the smoke artifact RDD-26: **HTTP 200** with
+    `content-type: application/json`, body = the deleted work-item resource. It is a **soft delete** —
+    the echoed `url` in the response comes back as
+    `…/v1/pjm/work_items/{id}?include_deleted=true`, and the row disappears from
+    `GET /v1/pjm/work_items` (project `total` went 26 → 25) unless `include_deleted=true` is passed.
+    Scope used: `pcp:write:pjm:workitem`. The CLI intentionally exposes **no** delete command.
+34. **The `DELETE` response body *does* include a `type` field** (`"type":"task"`), unlike `GET`
+    single-item and list responses, which omit it entirely (gotcha 27 / §4.2). So the stronger claim
+    "the API never returns a work item's type" is not literally true — it is the *read* endpoints
+    that omit it. This is not actionable: you cannot read a live item's type, because the only shape
+    that carries it is the response to destroying the item. The `--type` flag on
+    `work-item update`/`transition` (S8b, F1) remains necessary.
 
 ---
 
