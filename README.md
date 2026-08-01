@@ -1,5 +1,7 @@
 # pingcode-cli
 
+[![CI](https://github.com/anine09/pingcode-cli-unofficial/actions/workflows/ci.yml/badge.svg)](https://github.com/anine09/pingcode-cli-unofficial/actions/workflows/ci.yml)
+
 A command-line client for the [PingCode Open API](https://open.pingcode.com/), plus a single
 `pingcode` skill that teaches AI agents how to drive it.
 
@@ -31,6 +33,8 @@ npm run typecheck        # tsc --noEmit
 npm test                 # vitest run — no network, ever
 npm run dev              # tsup --watch
 npm run skill:install    # copy skills/pingcode/SKILL.md to the agent skill dirs
+npm run scan:secrets     # credential / tenant-identifier scan
+npm run check:commits    # commit-message gate
 ```
 
 ---
@@ -226,6 +230,71 @@ Installs are **global (user-level)** only:
 `--target` is repeatable, comma-separated and case-insensitive. With no `--target` the script
 prompts when stdin is a TTY (prompt on stderr, `q` aborts without writing) and installs **both**
 targets when it isn't, so CI and pipes keep their old behaviour. An unknown target exits `2`.
+
+---
+
+## CI/CD
+
+Two GitHub Actions workflows, both dependency-free: every gate is an npm script you can run
+locally with the identical command, so a red run never needs a "push and see" loop.
+
+**`.github/workflows/ci.yml`** — on every push to `main` and every pull request. Superseded runs
+for the same ref are cancelled.
+
+| Job | What it does |
+| --- | --- |
+| `node 20` / `node 22` / `node 24` | `npm ci` → `typecheck` → `test` → `build` → run the built bundle's `--version` and `--help` → `skill:install --dry-run` |
+| `secret scan and commit gate` | `scan:secrets` and `check:commits` over the pushed/PR commit range, once per run |
+
+Permissions are `contents: read` at workflow level; only the release job elevates. No secrets are
+used or needed — the test suite injects `fetch` and never opens a socket, and there are no PingCode
+credentials in CI.
+
+Run the same gates locally:
+
+```bash
+npm run typecheck && npm test && npm run build
+node dist/bin/pingcode.js --version && node dist/bin/pingcode.js --help
+npm run skill:install -- --dry-run
+
+npm run scan:secrets                        # tracked files
+npm run scan:secrets -- origin/main..HEAD    # + those commit messages
+npm run check:commits                        # whole history
+npm run check:commits -- origin/main..HEAD   # just your branch
+```
+
+`scan:secrets` (`scripts/scan-secrets.ts`) looks for `client_secret=…` assignments,
+`PINGCODE_CLIENT_ID` / `PINGCODE_CLIENT_SECRET` assignments with a real-looking value, `Bearer`
+token literals, and tenant hosts (a `*.pingcode.com` subdomain containing a digit). The patterns
+are deliberately keyword-anchored: a generic "hex id" rule would match every git sha and every
+work-item id. Documented placeholders are ignored, and a line carrying `scan-secrets:allow` is
+never reported.
+
+`check:commits` (`scripts/check-commits.ts`) enforces
+[`.trellis/spec/guides/commit-conventions.md`](.trellis/spec/guides/commit-conventions.md): the
+`type(scope): subject` shape, the type table, a lowercase non-empty subject with no trailing period
+and at most 72 characters. Merge commits are exempt, and on a pull request the PR title is checked
+too because a squash merge turns it into the commit subject.
+
+> **Node version note.** `skill:install`, `scan:secrets` and `check:commits` are TypeScript run
+> through `node --experimental-strip-types`, which exists from Node **22.6** only. On the Node 20
+> matrix leg the `skill:install --dry-run` step is therefore skipped, and the hygiene job runs on
+> Node 24. `engines` still says `>=20` because the *published bundle* is built for Node 20 and is
+> smoke-tested there; the restriction is on the repository's own scripts, not on the CLI.
+
+**`.github/workflows/release.yml`** — on tags matching `v*`. To cut a release:
+
+```bash
+# 1. bump the version in package.json (src/version.ts is asserted to match by test/version.test.ts)
+# 2. commit it, and make sure main is green
+git tag -a v0.2.0 -m 'v0.2.0'
+git push origin v0.2.0
+```
+
+The job first asserts `v<version>` equals `package.json`'s version and fails immediately on a
+mismatch, then re-runs typecheck/test/build plus the binary smoke on Node 20, `npm pack`s the
+tarball, and creates a GitHub Release with auto-generated notes and the tarball attached. It does
+**not** push to the npm registry: the package name is unclaimed, so that stays a non-goal.
 
 ---
 
