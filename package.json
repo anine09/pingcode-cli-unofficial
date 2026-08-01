@@ -21,7 +21,9 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "skill:install": "node --experimental-strip-types scripts/install-skill.ts"
+    "skill:install": "node --experimental-strip-types scripts/install-skill.ts",
+    "scan:secrets": "node --experimental-strip-types scripts/scan-secrets.ts",
+    "check:commits": "node --experimental-strip-types scripts/check-commits.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",
