@@ -5,6 +5,7 @@ import { registerIdeaCommands } from './commands/idea';
 import { registerMetaCommands } from './commands/meta';
 import { registerProductCommands } from './commands/product';
 import { registerProjectCommands } from './commands/project';
+import { registerTicketCommands } from './commands/ticket';
 import { registerWorkItemCommands } from './commands/workItem';
 import { addGlobalOptions } from './globals';
 
@@ -54,6 +55,7 @@ export function buildProgram(): Command {
   registerWorkItemCommands(program);
   registerProductCommands(program);
   registerIdeaCommands(program);
+  registerTicketCommands(program);
   registerMetaCommands(program);
 
   return program;

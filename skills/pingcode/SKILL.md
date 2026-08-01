@@ -220,6 +220,27 @@ or custom property, so the CLI never uses it. Note there is **no `--type`** anyw
 states are scoped to the product alone, which `--product` (or, on `update`, the idea itself) already
 supplies.
 
+### Ship: tickets (工单)
+
+```bash
+pingcode ticket list --product SLC --json
+pingcode ticket list --product SLC --type 故障 --state 待处理 --json
+pingcode ticket list --product SLC --channel 邮件 --all --limit 200 --json
+
+pingcode ticket get SLC-7 --json
+
+pingcode ticket create --product SLC --type 故障 --title "Cannot log in" --dry-run --json
+pingcode ticket create --product SLC --type 故障 --title "Cannot log in" \
+  --assignee zhangsan --priority P1 --channel 邮件 --json
+
+pingcode ticket update SLC-7 --title "Cannot log in (iOS)" --json
+pingcode ticket transition SLC-7 --state 处理中 --json
+```
+
+`--type` is **required** on `ticket create` — `type_id` is a required body field, which is the one
+place ship demands a lookup (`pingcode meta ticket-types --product SLC`) before a write can even be
+attempted. `--channel` can only be set at create time; there is no way to change it afterwards.
+
 ## 4. Rules that will bite you
 
 1. **Resolve ids per project.** Run `pingcode meta types` / `meta states` for the project you are

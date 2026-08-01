@@ -444,6 +444,159 @@ describe('idea update', () => {
   });
 });
 
+describe('ticket commands', () => {
+  const typesPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 1,
+      values: [{ id: 'ty-fault', name: '故障' }],
+    });
+
+  const ticketDetail = () =>
+    jsonResponse({
+      id: 't1',
+      identifier: 'SLC-7',
+      title: 'cannot log in',
+      product: { id: 'prod-1' },
+      state: { id: 'ts-pending', name: '待处理' },
+      channel: 'internal',
+      is_archived: 0,
+    });
+
+  it('list reads through POST …/search with a product+type filter', async () => {
+    const run = await runCli(
+      ['ticket', 'list', '--product', 'SLC', '--type', '故障', '--json'],
+      [
+        productsPage,
+        typesPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [{ id: 't1', channel: 'internal' }] }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(new URL(run.calls[2]?.url ?? '').pathname).toBe('/v1/ship/tickets/search');
+    const body = run.calls[2]?.body as { payload: { filter: unknown } };
+    expect(body.payload.filter).toEqual({
+      'product.id': { in: ['prod-1'] },
+      'type.id': { in: ['ty-fault'] },
+    });
+  });
+
+  it('renders an internal ticket without choking on the string channel', async () => {
+    const run = await runCli(
+      ['ticket', 'list', '--product', 'SLC'],
+      [
+        productsPage,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 30,
+            total: 2,
+            values: [
+              { id: 't1', identifier: 'SLC-7', title: 'a', channel: 'internal' },
+              { id: 't2', identifier: 'SLC-8', title: 'b', channel: { id: 'ch1', name: '邮件' } },
+            ],
+          }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stdout).toContain('internal');
+    expect(run.stdout).toContain('邮件');
+  });
+
+  it('create requires --type and sends it (PRD D12)', async () => {
+    const missing = await runCli(
+      ['ticket', 'create', '--product', 'SLC', '--title', 'x', '--json'],
+      [],
+    );
+    expect(missing.exit).toBe(2);
+    expect(missing.calls).toHaveLength(0);
+
+    const run = await runCli(
+      ['ticket', 'create', '--product', 'SLC', '--type', '故障', '--title', 'cannot log in', '--dry-run', '--json'],
+      [productsPage, typesPage],
+    );
+    const plan = parseStdout(run) as { request: { method: string; url: string; body: unknown } };
+    expect(plan.request.method).toBe('POST');
+    expect(plan.request.url).toContain('/v1/ship/tickets');
+    expect(plan.request.body).toEqual({
+      product_id: 'prod-1',
+      title: 'cannot log in',
+      type_id: 'ty-fault',
+    });
+    expect(mutations(run)).toHaveLength(0);
+  });
+
+  it('create accepts --channel, which update does not offer (set once)', async () => {
+    const channelsPage = () =>
+      jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'ch1', name: '邮件' }] });
+    const run = await runCli(
+      [
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        '邮件',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, channelsPage],
+    );
+    const plan = parseStdout(run) as { request: { body: { channel_id: string } } };
+    expect(plan.request.body.channel_id).toBe('ch1');
+  });
+
+  it('update with no fields is exit 2 and sends nothing', async () => {
+    const run = await runCli(['ticket', 'update', 't1', '--json'], []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+    expect(run.stderr).toContain('nothing to update');
+  });
+
+  it('update sends only the fields passed', async () => {
+    const run = await runCli(
+      ['ticket', 'update', 't1', '--title', 'renamed', '--json'],
+      [ticketDetail, () => jsonResponse({ id: 't1', title: 'renamed', is_archived: 0 })],
+    );
+    expect(run.exit).toBe(0);
+    expect(mutations(run)).toHaveLength(1);
+    expect(mutations(run)[0]?.method).toBe('PATCH');
+    expect(mutations(run)[0]?.body).toEqual({ title: 'renamed' });
+  });
+
+  it('transition without a state flag is exit 2 before any request', async () => {
+    const run = await runCli(['ticket', 'transition', 't1', '--json'], []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+    expect(run.stderr).toContain('--state');
+  });
+
+  it('get resolves an identifier through ticket search', async () => {
+    const run = await runCli(
+      ['ticket', 'get', 'SLC-7', '--json'],
+      [
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 20,
+            total: 1,
+            values: [{ id: 't1', identifier: 'SLC-7' }],
+          }),
+        ticketDetail,
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(new URL(run.calls[0]?.url ?? '').pathname).toBe('/v1/ship/tickets/search');
+    expect(new URL(run.calls[1]?.url ?? '').pathname).toBe('/v1/ship/tickets/t1');
+    expect((parseStdout(run) as { channel: string }).channel).toBe('internal');
+  });
+});
+
 describe('meta lookups', () => {
   const cases: Array<[string, string]> = [
     ['idea-states', '/v1/ship/idea/states'],

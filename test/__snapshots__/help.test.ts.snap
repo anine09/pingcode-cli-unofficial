@@ -163,9 +163,63 @@ Commands:
   work-item       work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
   product         ship products 产品 (scope pcp:read:ship:product)
   idea            ship requirements 需求 (scopes pcp:read:ship:idea / pcp:write:ship:idea)
+  ticket          ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)
   meta            ids you need before writing: project-scoped for work items, product-scoped for
                   ship
   help [command]  display help for command
+"
+`;
+
+exports[`--help snapshots > ticket 1`] = `
+"Usage: pingcode ticket [options] [command]
+
+ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)
+
+Options:
+  -h, --help                     display help for command
+
+Commands:
+  list [options]                 search tickets in a product (POST /v1/ship/tickets/search)
+  get [options] <ticket>         show one ticket
+  create [options]               create a ticket (--type is required by the API, unlike idea)
+  update [options] <ticket>      patch a ticket — only the fields you pass are sent, and they
+                                 replace
+  transition [options] <ticket>  move a ticket to another state, checking the state plan first
+  help [command]                 display help for command
+"
+`;
+
+exports[`--help snapshots > ticket create (--type is required by the API) 1`] = `
+"Usage: pingcode ticket create [options]
+
+create a ticket (--type is required by the API, unlike idea)
+
+Options:
+  --product <name|id>   product name, identifier or id
+  --type <name|id>      ticket type — list them with \`meta ticket-types\`
+  --title <text>        title, max 255 characters
+  --description <text>  description
+  --assignee <name|id>  assignee — must be a member of this product
+  --priority <name|id>  priority
+  --channel <name|id>   submission channel — can only be set here, never patched
+  --set <key=value>     custom property, repeatable: --set key=value. Values for select-type
+                        properties are option ids, not labels. Replaces, never merges
+  -h, --help            display help for command
+"
+`;
+
+exports[`--help snapshots > ticket transition (pre-validated against the state plan) 1`] = `
+"Usage: pingcode ticket transition [options] <ticket>
+
+move a ticket to another state, checking the state plan first
+
+Arguments:
+  ticket             id, identifier such as SLC-1, or a pasted ticket URL
+
+Options:
+  --state <name|id>  target state, resolved by name against the product's states
+  --state-id <id>    target state, given as an id (sent unchanged, no lookup)
+  -h, --help         display help for command
 "
 `;
 

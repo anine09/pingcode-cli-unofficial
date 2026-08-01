@@ -32,13 +32,14 @@ function leafPaths(command: Command, prefix: string[] = []): string[][] {
 describe('command surface', () => {
   const program = buildProgram();
 
-  it('registers the six command groups', () => {
+  it('registers the seven command groups', () => {
     expect(program.commands.map((command) => command.name()).filter((n) => n !== 'help')).toEqual([
       'auth',
       'project',
       'work-item',
       'product',
       'idea',
+      'ticket',
       'meta',
     ]);
   });
@@ -65,6 +66,11 @@ describe('command surface', () => {
       'idea get',
       'idea create',
       'idea update',
+      'ticket list',
+      'ticket get',
+      'ticket create',
+      'ticket update',
+      'ticket transition',
       'meta types',
       'meta states',
       'meta priorities',
@@ -110,7 +116,7 @@ describe('--help snapshots', () => {
     expect(program.helpInformation()).toMatchSnapshot();
   });
 
-  for (const name of ['auth', 'project', 'work-item', 'product', 'idea', 'meta']) {
+  for (const name of ['auth', 'project', 'work-item', 'product', 'idea', 'ticket', 'meta']) {
     it(name, () => {
       expect(group(program, name).helpInformation()).toMatchSnapshot();
     });
@@ -130,6 +136,14 @@ describe('--help snapshots', () => {
 
   it('idea update (no --type: ship states are product-scoped)', () => {
     expect(group(group(program, 'idea'), 'update').helpInformation()).toMatchSnapshot();
+  });
+
+  it('ticket create (--type is required by the API)', () => {
+    expect(group(group(program, 'ticket'), 'create').helpInformation()).toMatchSnapshot();
+  });
+
+  it('ticket transition (pre-validated against the state plan)', () => {
+    expect(group(group(program, 'ticket'), 'transition').helpInformation()).toMatchSnapshot();
   });
 });
 
