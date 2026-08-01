@@ -56,6 +56,16 @@ The CLI authenticates as an **application**, not as a user, using the OAuth
    | `pcp:write:pjm:workitem` | `work-item create` / `update` / `transition` |
    | `pcp:read:global:team` | `meta users` |
    | `pcp:read:pjm:sprint` | optional — only `meta sprints` |
+   | `pcp:read:ship:product` | `product list` / `get`, `meta product-members`, and every product-name lookup |
+   | `pcp:read:ship:idea` | `idea list` / `get`, `meta idea-states` / `idea-priorities` / `idea-suites` / `idea-properties` |
+   | `pcp:write:ship:idea` | `idea create` / `update` |
+   | `pcp:read:ship:ticket` | `ticket list` / `get`, `meta ticket-states` / `ticket-priorities` / `ticket-types` / `ticket-channels` / `ticket-properties` |
+   | `pcp:write:ship:ticket` | `ticket create` / `update` / `transition` |
+   | `pcp:read:ship:configuration` | optional — only the state-plan pre-check in `ticket transition`; without it the CLI warns and lets the server judge |
+
+   Every ship command begins by resolving a product name, so `pcp:read:ship:product` is required
+   even for a pure `idea list`. The product-scoped metadata endpoints (`/v1/ship/idea/*`,
+   `/v1/ship/ticket/*`) sit under the ordinary read scopes above, **not** under `configuration`.
 
 4. Copy the `client_id` and `client_secret`.
 
@@ -95,9 +105,20 @@ With a TTY attached, `auth login` prompts for anything missing.
 
 ```
 pingcode auth      login | status | logout
+
+# pjm (敏捷项目管理)
 pingcode project   list | get <project>
 pingcode work-item list | get <ref> | create | update <ref> | transition <ref>
+
+# ship (产品管理)
+pingcode product   list | get <product>
+pingcode idea      list | get <ref> | create | update <ref>
+pingcode ticket    list | get <ref> | create | update <ref> | transition <ref>
+
 pingcode meta      types | states | priorities | sprints | users
+                   idea-states | idea-priorities | idea-suites | idea-properties
+                   product-members
+                   ticket-states | ticket-priorities | ticket-types | ticket-channels | ticket-properties
 ```
 
 Global flags — valid **before or after** the subcommand: `--host <url>`, `--json`, `--dry-run`,
@@ -127,6 +148,25 @@ pingcode work-item transition SCR-5 --type task --state Done --json
 pingcode work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
 ```
 
+```bash
+# ship: resolve the product first — every other ship id hangs off it
+pingcode product list --json
+pingcode product get SLC --json
+
+pingcode meta idea-states     --product SLC --json
+pingcode meta product-members --product SLC --json     # the only valid --assignee values
+pingcode meta ticket-types    --product SLC --json     # required to create a ticket
+
+pingcode idea list --product SLC --state 待评审 --assignee zhangsan --json
+pingcode idea get SLC-1 --json
+pingcode idea create --product SLC --title "Single sign-on" --dry-run --json
+pingcode idea update SLC-1 --state 开发中 --json
+
+pingcode ticket list --product SLC --type 故障 --json
+pingcode ticket create --product SLC --type 故障 --title "Cannot log in" --json
+pingcode ticket transition SLC-7 --state 处理中 --json
+```
+
 `--dry-run` on a mutating command prints the request it *would* have sent and exits 0 without
 sending it. Read requests still run, so ids are genuinely resolved first.
 
@@ -137,7 +177,8 @@ sending it. Read requests still run, so ids are genuinely resolved first.
 - **stdout carries JSON only.** Tables, logs, warnings, dry-run notes and errors go to stderr.
 - Timestamps stay raw **unix seconds** in `--json`; human mode renders local time.
 - Three list shapes, by command family:
-  - one page of `project list` / `work-item list` → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
+  - one page of `project list` / `work-item list` / `product list` / `idea list` / `ticket list`
+    → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
   - any list with `--all` → `{"values":[…],"count":42,"all":true}`
   - every `pingcode meta …` lookup → `{"values":[…],"count":20}`
 - Single-resource commands (`get`, `create`, `update`, `transition`) print the resource object.
@@ -199,9 +240,50 @@ before drawing conclusions. (An invalid *bearer* token on a resource endpoint do
 - **Timestamps are unix seconds everywhere.** `--start-at` / `--end-at` accept `1730000000` or
   `2026-01-31` (parsed as UTC midnight).
 - **Metadata is cached for 24 h** under `~/.pingcode/cache/` (mode `0600`, hashed filenames), keyed
-  by `(apiBase, clientId, projectId, kind)`. Pass `--no-cache` if a project was reconfigured and an
-  id looks stale; a write rejected on a cached id invalidates that entry and retries once.
-  `auth login` and `auth logout` both clear the cache.
+  by `(apiBase, clientId, parentId, kind)` — the parent being a project for pjm and a **product**
+  for ship. Pass `--no-cache` if a project or product was reconfigured and an id looks stale; a
+  write rejected on a cached id invalidates that entry and retries once. `auth login` and
+  `auth logout` both clear the cache.
+
+### Ship-specific caveats
+
+Everything above still applies. These are the differences that will cost you time:
+
+- **A product is ship's project.** `state_id`, `priority_id`, `suite_id`, `type_id`, `channel_id`,
+  the writable `properties` keys and the assignable people are all **product-scoped**, even though
+  several of them look org-global (the same `P0` priority id appears under multiple products). The
+  API demands `product_id` on every lookup; never reuse an id across products.
+- **`--assignee` resolves against product members**, not `/v1/directory/users`. A user who is not a
+  member of the product cannot be assigned, so `meta product-members` is the candidate set.
+- **`idea list` and `ticket list` are `POST …/search`.** The plain list endpoints cannot filter by
+  assignee, date or custom property. The DSL allows **one operator per field and no `$and`/`$or`**;
+  several filters are AND-ed. Body pagination puts the cursor in `payload.page_index`, and the CLI
+  applies the same `--page` / `--page-size` (≤100) / `--all` / `--limit` semantics as elsewhere.
+- **Ticket transitions are pre-validated; idea state changes are not.** Ship publishes the legal
+  transitions of a ticket state plan, so `ticket transition` refuses an illegal target locally with
+  exit 2 and names the reachable states without sending anything. Ship publishes **no idea
+  state-flow endpoint at all**, so `idea update --state` can only be judged by the server; on
+  rejection the CLI prints the product's configured states on stderr. If the flow lookup itself
+  fails — no `pcp:read:ship:configuration`, or no plan matched — the CLI warns and sends the
+  transition rather than blocking a write on a failed read.
+- **Locating a ticket's state plan is a scan.** The ticket payload carries no plan reference and the
+  plan list has no `product_id` filter, so the CLI lists every plan and matches the embedded
+  `product.id` (cached per product). This is the only route the API documents.
+- **`--set key=value` sends the value verbatim, and select-type properties want the option `_id`,
+  not its label.** `meta idea-properties` / `meta ticket-properties` print both, and are also the
+  authoritative list of writable keys. `properties` replaces wholesale.
+- **Nothing in ship can be deleted.** There is no DELETE for products, ideas or tickets, and
+  `is_archived` / `is_deleted` are read-only. Anything you create during a test is permanent —
+  prefix the title before creating it.
+- **Identifiers and `short_id`s are not lookup keys.** `SLC-1` is resolved through `search` plus an
+  exact client-side match; a pasted URL ends in a `short_id` that no endpoint accepts, so prefer an
+  id or an identifier.
+- **`--suite` filtering on `idea list` is undocumented** — the API lists `suite.id` as neither
+  filterable nor unfilterable, so an empty result proves nothing. The CLI warns when you use it.
+- **`ticket.channel` is an object or the bare string `"internal"`**, and `--channel` can only be set
+  at create time. Tags cannot be written at all, and a ticket's `submitter_id` is silently ignored
+  under a client-credentials token — neither is exposed.
+
 
 ---
 

@@ -174,6 +174,46 @@ describe('SKILL.md agrees with the CLI (R4.5)', () => {
     }
   });
 
+  it('names every ship scope the commands need (Gate G4)', () => {
+    for (const scope of [
+      'pcp:read:ship:product',
+      'pcp:read:ship:idea',
+      'pcp:write:ship:idea',
+      'pcp:read:ship:ticket',
+      'pcp:write:ship:ticket',
+      'pcp:read:ship:configuration',
+    ]) {
+      expect(skill, scope).toContain(scope);
+    }
+  });
+
+  it('states the idea-vs-ticket transition asymmetry explicitly (Gate G4)', () => {
+    // The single most dangerous thing an agent could get wrong here: assuming an
+    // idea state change is validated the way a ticket's is.
+    expect(skill).toMatch(/ticket transition.{0,200}locally/is);
+    expect(skill).toMatch(/no\s+idea\s+state-flow\s+endpoint/i);
+    expect(skill).toMatch(/idea\s+update\s+--state/);
+    // and the failed-lookup escape valve, which is the other half of the rule
+    expect(skill).toMatch(/warns\s+and\s+sends\s+the\s+transition/i);
+  });
+
+  it('states the ship rules that have no pjm equivalent (Gate G4)', () => {
+    expect(skill).toMatch(/product-scoped/i);
+    expect(skill).toMatch(/meta product-members/);
+    expect(skill).toMatch(/option.{0,20}_id|option ids/i);
+    expect(skill).toMatch(/nothing\s+in\s+ship\s+can\s+be\s+deleted/i);
+    // `--type` means something different on each module
+    expect(skill).toMatch(/no\s+`--type`\s+(on|anywhere\s+on)\s+`idea`/i);
+  });
+
+  it('no longer tells the agent that ship is out of scope', () => {
+    // The frontmatter used to list "Ship products/ideas/tickets" as a do-not-use,
+    // which would have suppressed the whole new surface.
+    const frontmatter = skill.slice(0, skill.indexOf('\n---', 4));
+    expect(frontmatter).not.toMatch(/Do NOT use[^]*Ship products/i);
+    expect(frontmatter).toMatch(/产品管理|ship/i);
+  });
+
   it('mentions no command path that the CLI does not have', () => {
     const mentioned = new Set<string>();
     // Same line only: a command path never wraps, and `\s` would swallow the
