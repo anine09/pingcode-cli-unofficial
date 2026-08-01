@@ -1071,6 +1071,26 @@ function shipLocatorOf(raw: unknown): ShipLocator {
 // ---------------------------------------------------------------------------
 
 /**
+ * Thrown by an `attempt` to say: *the retry would send an identical request, so
+ * do not send it.* `withCacheInvalidation` answers by rethrowing the **original**
+ * error untouched — nothing new went out, so there is nothing new to report.
+ *
+ * This is how the invariant "the CLI never sends the same mutating body twice in
+ * one invocation" is enforced without asking the error what went wrong. Error
+ * classification provably cannot do this job: ship returns `100702`
+ * `工单状态不存在` both for a genuinely unknown state id and for a perfectly
+ * existing state that the flow forbids (`research/s7-smoke.md` F5), so no code
+ * allowlist can tell a stale cache from a refused transition. Whether *the id
+ * changed* is a fact we own, and it is exact.
+ */
+export class RetryWouldBeIdentical extends Error {
+  constructor() {
+    super('retry skipped: re-resolution produced the same ids');
+    this.name = 'RetryWouldBeIdentical';
+  }
+}
+
+/**
  * Run a write that used cache-resolved ids. If the server rejects it, drop those
  * cache keys and retry **once** with the cache bypassed; if it fails again, the
  * message names the culprit — without this, a reconfigured project produces a
@@ -1078,7 +1098,8 @@ function shipLocatorOf(raw: unknown): ShipLocator {
  * (design §6).
  *
  * The callback receives a context to resolve/send with: the second attempt gets
- * a `--no-cache` view.
+ * a `--no-cache` view. It may throw `RetryWouldBeIdentical` to abort the retry
+ * before sending (see `runWrite`, which does exactly that).
  */
 export async function withCacheInvalidation<T>(
   ctx: Ctx,
@@ -1103,6 +1124,8 @@ export async function withCacheInvalidation<T>(
     try {
       return await attempt(withoutCache(ctx));
     } catch (second) {
+      // Nothing was re-sent, so the original failure is the whole truth.
+      if (second instanceof RetryWouldBeIdentical) throw error;
       throw annotateWithCacheCulprits(second, cached);
     }
   }

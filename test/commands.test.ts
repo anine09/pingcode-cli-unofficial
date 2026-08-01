@@ -164,20 +164,22 @@ describe('runWrite (design §6 invalidate-on-rejection)', () => {
     cacheKey: 'work_item_state-abc',
   };
 
-  it('re-resolves and re-sends exactly once when a cached id is rejected', async () => {
+  it('re-resolves and re-sends exactly once when the refreshed id is different', async () => {
     const { ctx } = ctxFor([statesPage]);
     const resolveCalls: boolean[] = [];
-    let sends = 0;
+    const sent: unknown[] = [];
 
     await expect(
       runWrite(
         ctx,
         async (attemptCtx) => {
           resolveCalls.push(attemptCtx.useCache);
-          return { resolutions: [cachedResolution], value: { state_id: 'stale-id' } };
+          // The genuine stale-cache case: bypassing the cache finds another id.
+          const id = attemptCtx.useCache ? 'stale-id' : 'fresh-id';
+          return { resolutions: [{ ...cachedResolution, id }], value: { state_id: id } };
         },
-        async () => {
-          sends += 1;
+        async (_ctx, value) => {
+          sent.push(value);
           throw new ApiError('参数错误', { code: '100000', status: 400 });
         },
       ),
@@ -185,7 +187,37 @@ describe('runWrite (design §6 invalidate-on-rejection)', () => {
 
     // first pass with the cache, second pass with it bypassed
     expect(resolveCalls).toEqual([true, false]);
-    expect(sends).toBe(2);
+    expect(sent).toEqual([{ state_id: 'stale-id' }, { state_id: 'fresh-id' }]);
+  });
+
+  // S7b: the id-diff gate. The API conflates "your id is stale" with "that value
+  // is refused here" (research/s7-smoke.md F5), so the retry is decided by
+  // whether re-resolution changed anything — never by the error's code.
+  it('re-resolves but does NOT re-send when the refreshed ids are identical', async () => {
+    const { ctx } = ctxFor([statesPage]);
+    const resolveCalls: boolean[] = [];
+    let sends = 0;
+
+    const failure = await runWrite(
+      ctx,
+      async (attemptCtx) => {
+        resolveCalls.push(attemptCtx.useCache);
+        return { resolutions: [cachedResolution], value: { state_id: 'stale-id' } };
+      },
+      async () => {
+        sends += 1;
+        throw new ApiError('工单状态不存在', { code: '100702', status: 400 });
+      },
+    ).catch((error: unknown) => error);
+
+    expect(resolveCalls).toEqual([true, false]);
+    // exactly one mutating request left the process
+    expect(sends).toBe(1);
+    // …and the original failure is reported verbatim, not annotated with a
+    // retry that never happened
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).message).toBe('工单状态不存在');
+    expect((failure as ApiError).code).toBe('100702');
   });
 
   it('does not retry when nothing came from the cache', async () => {

@@ -3,6 +3,7 @@ import type { Ctx } from '../../core/context';
 import { UsageError } from '../../core/errors';
 import {
   resolveWorkItemState,
+  RetryWouldBeIdentical,
   withCacheInvalidation,
   type MetaKind,
   type ResolveResult,
@@ -306,6 +307,15 @@ export type ResolvedWrite<R> = {
  * Run a write whose ids came from name resolution. If the server rejects it and
  * any id came from the metadata cache, the cache key is dropped and the whole
  * resolve-then-send pass runs **once** more with the cache bypassed.
+ *
+ * The second pass only *sends* if re-resolution actually produced a different id.
+ * Invariant: **the CLI never sends the same mutating body twice in one
+ * invocation.** Asking "would the retry differ?" is exact and needs no knowledge
+ * of vendor error codes — which is essential, because the API conflates a stale
+ * id with a legitimately refused value (`research/s7-smoke.md` F5): a ticket
+ * transition the state plan forbids returns the same `100702`
+ * `工单状态不存在` as a state id that does not exist. Before this gate, an illegal
+ * transition cost two PATCHes.
  */
 export async function runWrite<R, T>(
   ctx: Ctx,
@@ -314,9 +324,24 @@ export async function runWrite<R, T>(
 ): Promise<T> {
   const first = await resolve(ctx);
   return await withCacheInvalidation(ctx, first.resolutions, async (attemptCtx) => {
-    const pass = attemptCtx === ctx ? first : await resolve(attemptCtx);
-    return await send(attemptCtx, pass.value);
+    if (attemptCtx === ctx) return await send(attemptCtx, first.value);
+    const second = await resolve(attemptCtx);
+    if (sameResolvedIds(first.resolutions, second.resolutions)) {
+      throw new RetryWouldBeIdentical();
+    }
+    return await send(attemptCtx, second.value);
   });
+}
+
+/** Do two resolution passes name the same ids? Order-insensitive, id-only. */
+function sameResolvedIds(before: ResolveResult[], after: ResolveResult[]): boolean {
+  if (before.length !== after.length) return false;
+  const fingerprint = (resolutions: ResolveResult[]): string =>
+    resolutions
+      .map((resolution) => `${resolution.input}=>${resolution.id}`)
+      .sort()
+      .join('\u0000');
+  return fingerprint(before) === fingerprint(after);
 }
 
 // ---------------------------------------------------------------------------

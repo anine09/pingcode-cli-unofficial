@@ -77,6 +77,21 @@ The 404 branch stays even though this API is not observed to return 404 — for 
 future behaviour. Note the asymmetry: an invalid *bearer* token on a resource endpoint **does**
 return a real 401, so that branch is live.
 
+### Never send the same mutating body twice
+
+**Invariant: one invocation of the CLI sends a given mutating request at most once.**
+
+The invalidate-on-rejection path (`withCacheInvalidation` + `runWrite`) is the only thing that
+retries a write, and it must decide whether to retry by asking *"would the second request differ?"*
+— re-resolve with the cache bypassed, compare the resolved ids, and send again **only if some id
+changed**. If they are identical, rethrow the original error and send nothing; `runWrite` signals
+this with `RetryWouldBeIdentical`.
+
+Do **not** decide this by classifying the error. It was tried and it cannot work: the API returns
+one code (`100702`) both for an id that does not exist and for a value it merely refuses in context
+(`08-01-ship-cli/research/s7-smoke.md` F5). Id identity is a fact the CLI owns; error semantics are
+not.
+
 ### Retry and replay policy
 
 Encoded once, in `core/http.ts`, never at a call site:
