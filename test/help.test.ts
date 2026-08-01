@@ -32,16 +32,18 @@ function leafPaths(command: Command, prefix: string[] = []): string[][] {
 describe('command surface', () => {
   const program = buildProgram();
 
-  it('registers the four command groups', () => {
+  it('registers the six command groups', () => {
     expect(program.commands.map((command) => command.name()).filter((n) => n !== 'help')).toEqual([
       'auth',
       'project',
       'work-item',
+      'product',
+      'idea',
       'meta',
     ]);
   });
 
-  it('registers every MVP subcommand and nothing else', () => {
+  it('registers every subcommand and nothing else', () => {
     const paths = program.commands
       .filter((command) => command.name() !== 'help')
       .flatMap((command) => leafPaths(command))
@@ -57,11 +59,27 @@ describe('command surface', () => {
       'work-item create',
       'work-item update',
       'work-item transition',
+      'product list',
+      'product get',
+      'idea list',
+      'idea get',
+      'idea create',
+      'idea update',
       'meta types',
       'meta states',
       'meta priorities',
       'meta sprints',
       'meta users',
+      'meta idea-states',
+      'meta idea-priorities',
+      'meta idea-suites',
+      'meta idea-properties',
+      'meta product-members',
+      'meta ticket-states',
+      'meta ticket-priorities',
+      'meta ticket-types',
+      'meta ticket-channels',
+      'meta ticket-properties',
     ]);
   });
 
@@ -92,7 +110,7 @@ describe('--help snapshots', () => {
     expect(program.helpInformation()).toMatchSnapshot();
   });
 
-  for (const name of ['auth', 'project', 'work-item', 'meta']) {
+  for (const name of ['auth', 'project', 'work-item', 'product', 'idea', 'meta']) {
     it(name, () => {
       expect(group(program, name).helpInformation()).toMatchSnapshot();
     });
@@ -104,6 +122,14 @@ describe('--help snapshots', () => {
 
   it('work-item transition (--type is a lookup aid, not a patched field)', () => {
     expect(group(group(program, 'work-item'), 'transition').helpInformation()).toMatchSnapshot();
+  });
+
+  it('idea list (the search filter surface)', () => {
+    expect(group(group(program, 'idea'), 'list').helpInformation()).toMatchSnapshot();
+  });
+
+  it('idea update (no --type: ship states are product-scoped)', () => {
+    expect(group(group(program, 'idea'), 'update').helpInformation()).toMatchSnapshot();
   });
 });
 

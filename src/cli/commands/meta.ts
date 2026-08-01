@@ -9,9 +9,29 @@ import {
   type SprintListQuery,
   type UserListQuery,
 } from '../../api/meta';
-import { resolveProject, resolveWorkItemType } from '../../core/metadata';
+import {
+  listIdeaPriorities,
+  listIdeaProperties,
+  listIdeaStates,
+  listIdeaSuites,
+  listProductMembers,
+  listTicketChannels,
+  listTicketPriorities,
+  listTicketProperties,
+  listTicketStates,
+  listTicketTypes,
+} from '../../api/ship';
+import type { Ctx } from '../../core/context';
+import { resolveProduct, resolveProject, resolveWorkItemType } from '../../core/metadata';
 import { collect } from '../../core/paginate';
 import type {
+  ShipChannel,
+  ShipPriority,
+  ShipProductMember,
+  ShipProperty,
+  ShipState,
+  ShipSuite,
+  ShipTicketType,
   Sprint,
   User,
   WorkItemPriority,
@@ -26,22 +46,27 @@ import {
   modeOf,
   printCollection,
   readPaging,
+  refName,
   timestampCell,
   type PagingFlags,
 } from './common';
 
 /**
- * `pingcode meta types|states|priorities|sprints|users`.
+ * `pingcode meta …` — the id lookups a write cannot be built without.
  *
- * This group is load-bearing, not scope creep: `type_id`, `state_id` and
- * `priority_id` are **project-scoped** (research §6.13), so an agent cannot build
- * a valid `work-item create` without discovering them here first.
+ * This group is load-bearing, not scope creep. In pjm, `type_id`, `state_id` and
+ * `priority_id` are **project-scoped** (research §6.13). In ship, everything is
+ * **product-scoped** — states, priorities, suites, types, channels, the writable
+ * `properties` keys and the assignee candidate set (ship §5) — and ticket create
+ * additionally *requires* a `type_id`, so `meta ticket-types` is mandatory rather
+ * than convenient.
  */
 
 type ProjectFlag = { project: string };
 type StatesFlags = ProjectFlag & { type: string };
 type SprintsFlags = ProjectFlag & { status?: string | undefined };
 type UsersFlags = PagingFlags & { keywords?: string | undefined };
+type ProductFlag = { product: string };
 
 const TYPE_COLUMNS: Column<WorkItemType>[] = [
   { header: 'ID', value: (t) => t.id },
@@ -75,10 +100,66 @@ const USER_COLUMNS: Column<User>[] = [
   { header: 'EMAIL', value: (u) => u.email ?? '', flex: true },
 ];
 
+const SHIP_STATE_COLUMNS: Column<ShipState>[] = [
+  { header: 'ID', value: (s) => s.id },
+  { header: 'NAME', value: (s) => s.name ?? '', flex: true },
+  { header: 'GROUP', value: (s) => s.type ?? '' },
+];
+
+const SHIP_PRIORITY_COLUMNS: Column<ShipPriority>[] = [
+  { header: 'ID', value: (p) => p.id },
+  { header: 'NAME', value: (p) => p.name ?? '', flex: true },
+];
+
+const SHIP_SUITE_COLUMNS: Column<ShipSuite>[] = [
+  { header: 'ID', value: (s) => s.id },
+  { header: 'NAME', value: (s) => s.name ?? '', flex: true },
+  { header: 'TYPE', value: (s) => s.type ?? '' },
+  { header: 'PARENT', value: (s) => refName(s.parent) },
+];
+
+const SHIP_PROPERTY_COLUMNS: Column<ShipProperty>[] = [
+  { header: 'ID', value: (p) => p.id },
+  { header: 'NAME', value: (p) => p.name ?? '', flex: true },
+  { header: 'TYPE', value: (p) => p.type ?? '' },
+  {
+    header: 'OPTIONS',
+    value: (p) =>
+      p.options
+        .map((option) => `${option.text ?? '?'}=${option._id ?? '?'}`)
+        .join(' | '),
+    flex: true,
+  },
+];
+
+const SHIP_MEMBER_COLUMNS: Column<ShipProductMember>[] = [
+  { header: 'ID', value: (m) => m.id },
+  {
+    header: 'NAME',
+    value: (m) => refName(m.user) || refName(m.user_group),
+    flex: true,
+  },
+  { header: 'TYPE', value: (m) => m.type ?? '' },
+  { header: 'ROLE', value: (m) => refName(m.role) },
+];
+
+const SHIP_TICKET_TYPE_COLUMNS: Column<ShipTicketType>[] = [
+  { header: 'ID', value: (t) => t.id },
+  { header: 'NAME', value: (t) => t.name ?? '', flex: true },
+];
+
+const SHIP_CHANNEL_COLUMNS: Column<ShipChannel>[] = [
+  { header: 'ID', value: (c) => c.id },
+  { header: 'NAME', value: (c) => c.name ?? '', flex: true },
+  { header: 'DESCRIPTION', value: (c) => c.description ?? '', flex: true },
+];
+
 export function registerMetaCommands(program: Command): void {
   const meta = program
     .command('meta')
-    .description('project-scoped ids you need before creating or updating work items');
+    .description(
+      'ids you need before writing: project-scoped for work items, product-scoped for ship',
+    );
 
   addGlobalOptions(
     meta
@@ -171,4 +252,88 @@ export function registerMetaCommands(program: Command): void {
     // the request itself.
     printCollection(page.values, USER_COLUMNS, modeOf(ctx));
   });
+
+  // -------------------------------------------------------------------------
+  // ship: every lookup is scoped to one product
+  // -------------------------------------------------------------------------
+
+  function productScoped<T>(
+    name: string,
+    description: string,
+    load: (ctx: Ctx, productId: string) => Promise<T[]>,
+    columns: Column<T>[],
+  ): void {
+    addGlobalOptions(
+      meta
+        .command(name)
+        .description(description)
+        .requiredOption('--product <name|id>', 'product name, identifier such as SLC, or id'),
+      { hidden: true },
+    ).action(async (flags: ProductFlag, command: Command) => {
+      const { ctx } = contextFor(command);
+      const product = await resolveProduct(ctx, flags.product);
+      printCollection(await load(ctx, product.id), columns, modeOf(ctx));
+    });
+  }
+
+  productScoped(
+    'idea-states',
+    'idea states of a product (values for --state / state_id)',
+    listIdeaStates,
+    SHIP_STATE_COLUMNS,
+  );
+  productScoped(
+    'idea-priorities',
+    'idea priorities of a product',
+    listIdeaPriorities,
+    SHIP_PRIORITY_COLUMNS,
+  );
+  productScoped(
+    'idea-suites',
+    'requirement modules 需求模块 of a product (a tree, listed flat with parents)',
+    listIdeaSuites,
+    SHIP_SUITE_COLUMNS,
+  );
+  productScoped(
+    'idea-properties',
+    'writable idea property keys and their option ids — the only source for --set values',
+    listIdeaProperties,
+    SHIP_PROPERTY_COLUMNS,
+  );
+  productScoped(
+    'product-members',
+    'members of a product — the only valid --assignee candidates',
+    listProductMembers,
+    SHIP_MEMBER_COLUMNS,
+  );
+  productScoped(
+    'ticket-states',
+    'ticket states of a product (values for --state / state_id)',
+    listTicketStates,
+    SHIP_STATE_COLUMNS,
+  );
+  productScoped(
+    'ticket-priorities',
+    'ticket priorities of a product',
+    listTicketPriorities,
+    SHIP_PRIORITY_COLUMNS,
+  );
+  productScoped(
+    'ticket-types',
+    'ticket types of a product — required to create a ticket',
+    listTicketTypes,
+    SHIP_TICKET_TYPE_COLUMNS,
+  );
+  productScoped(
+    'ticket-channels',
+    'ticket channels of a product (set once, at create time)',
+    listTicketChannels,
+    SHIP_CHANNEL_COLUMNS,
+  );
+  productScoped(
+    'ticket-properties',
+    'writable ticket property keys and their option ids — the only source for --set values',
+    listTicketProperties,
+    SHIP_PROPERTY_COLUMNS,
+  );
 }

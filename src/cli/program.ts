@@ -1,7 +1,9 @@
 import { Command } from 'commander';
 import { VERSION } from '../version';
 import { registerAuthCommands } from './commands/auth';
+import { registerIdeaCommands } from './commands/idea';
 import { registerMetaCommands } from './commands/meta';
+import { registerProductCommands } from './commands/product';
 import { registerProjectCommands } from './commands/project';
 import { registerWorkItemCommands } from './commands/workItem';
 import { addGlobalOptions } from './globals';
@@ -50,6 +52,8 @@ export function buildProgram(): Command {
   registerAuthCommands(program);
   registerProjectCommands(program);
   registerWorkItemCommands(program);
+  registerProductCommands(program);
+  registerIdeaCommands(program);
   registerMetaCommands(program);
 
   return program;

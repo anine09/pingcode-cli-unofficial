@@ -4,6 +4,7 @@ import { UsageError } from '../../core/errors';
 import {
   resolveWorkItemState,
   withCacheInvalidation,
+  type MetaKind,
   type ResolveResult,
 } from '../../core/metadata';
 import {
@@ -189,6 +190,107 @@ export async function resolveStateFlags(
   }
 
   return await resolveWorkItemState(ctx, { projectId: scope.projectId, typeId, input: name });
+}
+
+// ---------------------------------------------------------------------------
+// ship: state flags, search filters, --set key=value
+// ---------------------------------------------------------------------------
+
+/**
+ * Ship's `--state` needs no companion flag. Unlike pjm — where states live in a
+ * `(project, work item type)` pair — idea and ticket states are scoped to the
+ * **product** alone (ship §J3/§K3), which `--product` or the resolved reference
+ * already tells us. `--state-id` still exists as the no-lookup escape hatch.
+ */
+export function addShipStateOptions(command: Command, noun: string): Command {
+  return command
+    .option('--state <name|id>', `${noun}, resolved by name against the product's states`)
+    .option('--state-id <id>', `${noun}, given as an id (sent unchanged, no lookup)`);
+}
+
+export type ShipStateResolver = (ctx: Ctx, input: string) => Promise<ResolveResult>;
+
+/** `--state` and `--state-id` are mutually exclusive, exactly as on pjm. */
+export async function resolveShipStateFlags(
+  ctx: Ctx,
+  flags: StateFlags,
+  kind: MetaKind,
+  resolve: ShipStateResolver,
+): Promise<ResolveResult | undefined> {
+  const name = flags.state?.trim();
+  const id = flags.stateId?.trim();
+
+  if (name !== undefined && name !== '' && id !== undefined && id !== '') {
+    throw new UsageError('--state and --state-id are mutually exclusive', {
+      hint: 'use --state <name> to resolve by name, or --state-id <id> to send an id unchanged',
+    });
+  }
+
+  if (id !== undefined && id !== '') {
+    // Pass-through: no lookup, no shape check, no cache key to invalidate.
+    return { kind, input: id, id, name: undefined, fromCache: false, cacheKey: null };
+  }
+
+  if (name === undefined || name === '') return undefined;
+  return await resolve(ctx, name);
+}
+
+/**
+ * One entry of a ship search `filter`.
+ *
+ * Reference fields are addressed as `{field}.id` and accept only
+ * `exists`/`in`/`nin` — there are no logical operators, and multiple entries are
+ * implicitly AND-ed (ship §4). One operator per field, so a filter entry is
+ * always a single-key object.
+ */
+export function refFilter(
+  field: string,
+  id: string | undefined,
+): Record<string, unknown> | undefined {
+  if (id === undefined || id === '') return undefined;
+  return { [`${field}.id`]: { in: [id] } };
+}
+
+/** Merge the defined filter entries into one `payload.filter`. */
+export function mergeFilters(
+  entries: (Record<string, unknown> | undefined)[],
+): Record<string, unknown> {
+  const filter: Record<string, unknown> = {};
+  for (const entry of entries) {
+    if (entry === undefined) continue;
+    Object.assign(filter, entry);
+  }
+  return filter;
+}
+
+/** commander accumulator for a repeatable option. */
+export function collectValue(value: string, previous: string[] = []): string[] {
+  return [...previous, value];
+}
+
+export type PropertyAssignment = { key: string; value: string };
+
+/**
+ * Parse `--set key=value` (repeatable).
+ *
+ * The value is sent **verbatim**. For select-typed properties the API expects the
+ * option's `_id`, not its display text (ship GOTCHA #5), and the docs' own
+ * examples only ever show text-typed properties — which is precisely the trap.
+ * `pingcode meta {idea,ticket}-properties --product <p>` lists both the keys and
+ * the option ids.
+ */
+export function parseSetFlags(values: string[] | undefined): PropertyAssignment[] {
+  const assignments: PropertyAssignment[] = [];
+  for (const raw of values ?? []) {
+    const separator = raw.indexOf('=');
+    if (separator <= 0) {
+      throw new UsageError(`--set expects key=value, got "${raw}"`, {
+        hint: 'list valid keys with `pingcode meta idea-properties --product <p>` (ticket-properties for tickets)',
+      });
+    }
+    assignments.push({ key: raw.slice(0, separator).trim(), value: raw.slice(separator + 1) });
+  }
+  return assignments;
 }
 
 // ---------------------------------------------------------------------------
