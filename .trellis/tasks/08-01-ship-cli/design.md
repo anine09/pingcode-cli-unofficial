@@ -248,3 +248,84 @@ product parent: it is keyed by plan id.
 ### §13.5 New files
 
 `src/cli/commands/ticket.ts` and `test/ticket.test.ts` join the §1 list.
+
+---
+
+## §14 Live findings from S7 that this design got wrong
+
+Evidence: `research/s7-smoke.md` (2026-08-01, public cloud, one product, all ship scopes granted).
+Nothing in `src/` was changed in S7 — each item below is either a doc correction or a decision the
+orchestrator has to take. Research corrections went into `ship-api.md` §10 in the same commit.
+
+### §14.1 Settled: Q2 — search **does** echo `page_index` (§3, §11)
+
+`POST /v1/ship/ideas/search` and `POST /v1/ship/tickets/search` return
+`{page_index, page_size, total, values}` with the requested index echoed as an own property, and
+paging is real (disjoint row sets). §3's "missing ⇒ no signal, continue" defence is therefore never
+exercised on this deployment. Keep it — it costs nothing and the docs still do not promise the field
+— but the risk row in §11 can be closed.
+
+### §14.2 §5's suite tree cannot be built from the endpoint we use
+
+`GET /v1/ship/idea/suites?product_id=` returns `{id, url, name, type}` — **no `parent`**. So
+`loadSuites`' path construction collapses to the bare name, and the cross-branch ambiguity error is
+unreachable through this endpoint. Name resolution itself works (verified on 13 real suites, 1
+`product` root + 12 `module`). The alternative `GET /v1/ship/products/{id}/suites` might carry
+`parent`, but it is `configuration`-scoped. **No code change made**: the flattening is inert, not
+wrong, and becomes correct the moment `parent` appears. §5's last paragraph should be read as
+conditional.
+
+### §14.3 §13.2a's plan lookup can never succeed on a default org — G3b/AC9 is blocked
+
+`GET /v1/ship/ticket_state_plans` returned **one** row, `{id, url, product: null}`. §13.2a step 2
+skips `product: null` rows, so no plan is matched, and every `ticket transition` takes the step-3
+warn-and-proceed path. Live consequences: legal transitions succeed with a spurious warning; an
+illegal one is refused by the *server* with exit 7, not locally with exit 2; and because the local
+check was skipped, `withCacheInvalidation` misreads the rejection as a stale id and **retries the
+doomed PATCH once**.
+
+The org-default plan *is* the effective plan: its `ticket_state_flows` is reachable (`200`) and its
+4 edges match exactly what the server enforces.
+
+**Proposed design change (not implemented — needs approval):** in the plan resolver, after failing
+to match `product.id`, fall back to the single `product: null` plan and use it; keep step 3's
+warn-and-proceed only when there is no plan at all or the flow read fails. Optionally, suppress the
+`withCacheInvalidation` retry when the rejected id came from a *validated* transition, so an illegal
+transition costs one PATCH instead of two. This contradicts §13.2a step 2 and `ship-api.md`
+GOTCHA #23 as written, which is why S7 stopped at recording it. Until it lands, **AC9's "refused
+locally with exit 2, proven against the real API" is provable only by unit test**, not live.
+
+### §14.4 §13.2b's `html_url` claim is wrong — short_id and identifier both resolve
+
+`GET /v1/ship/{ideas,tickets}/{…}` accepts the 24-hex `id`, the 8-char `short_id` (the trailing
+segment of a pasted `html_url`) **and** the human `identifier`, all returning `200`. So the "passed
+through as an id and allowed to fail honestly" wording in §13.2b describes a failure that does not
+happen. `core/metadata.ts`'s `IDENTIFIER_RE` also does not match dash-containing product prefixes
+(`PD-YYHC-73`), which quietly routes such references down the direct-GET path — one request instead
+of two, and it works. **Deliberately not "fixed"**: broadening the regex would trade a working
+1-request path for a 2-request one. Both paths are exercised and correct.
+
+### §14.5 §9/§10's "`--json` stays faithful" is too strong
+
+`api/parse.ts` normalises `null` **and `""`** to `undefined`, and `JSON.stringify` drops those keys.
+So the wire's `plan_at: null`, `score: null`, `product.description: ""`, `ticket.solution: null`
+simply vanish from `--json`. Semantically harmless, but it means our `--json` cannot be diffed
+against the vendor field lists (this smoke run initially "found" four missing idea fields that way).
+This is inherited pjm-wide behaviour, not ship-specific; changing it would alter the output of every
+existing command, so it is an orchestrator decision, not a smoke-run patch.
+
+### §14.6 Exit 5 is unreachable for server-side not-founds (again)
+
+Ship answers `400` + a vendor code for a missing record (`100725` idea) and for an invalid state id
+(`100719` idea, `100702` ticket), never `404`. This is the pjm smoke's finding F2, reconfirmed. Any
+repair touches the frozen `core/errors.ts` / `core/http.ts` mapping or introduces vendor-code
+translation in the api layer — both are contract changes. Exit 5 still fires for client-side
+identifier misses.
+
+### §14.7 Q1 — the ten metadata lookups are *not* behind a configuration scope
+
+The `idea/*` and `ticket/*` product-scoped lookups declare the plain `pcp:read:ship:{idea,ticket}`
+read scopes, unlike Testhub's equivalents; only `ticket_state_plans` / `ticket_state_flows` are
+`pcp:read:ship:configuration`. So `pcp:read:ship:configuration` belongs in the docs as **optional,
+improves `ticket transition`**, not as required. Sufficiency could not be tested: all scopes were
+granted and the token response carries no `scope` field, so no 403 is reachable.

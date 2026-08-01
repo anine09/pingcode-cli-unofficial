@@ -12,6 +12,12 @@
 
 **Citation convention used below**: `record: {METHOD} {url} — {name}` uniquely identifies an `api_data.json` element. Where useful I also cite the record's `filename` (the PingCode server-side source path that apiDoc scraped), which is a strong signal about how the backend groups resources.
 
+> **Live corrections exist.** Everything below §1–§9 was derived from `api_data.json` alone. A live
+> smoke run on 2026-08-01 (`.trellis/tasks/08-01-ship-cli/research/s7-smoke.md`) confirmed most of
+> it and **contradicted four claims**: GOTCHA #25 (lookup keys), §3.6 (product-scoped metadata list
+> shapes), §9.5 (idea `suite.id` filterability) and the property `type` enum. Each is annotated
+> inline with **[LIVE 2026-08-01]** and collected in **§10**.
+
 ---
 
 ## 1. Resource inventory
@@ -320,6 +326,25 @@ All list endpoints return the standard envelope `{page_size, page_index, total, 
 | state flow | `id, url, state_plan, **form_state**, to_state` | GOTCHA #2 |
 | transition history | `id, url, {idea\|ticket}, from_state, to_state, created_at, created_by` | `from_state` may be `null` for the first transition |
 
+**[LIVE 2026-08-01]** Every row above is the shape of the resource's **single-GET** record. The
+**product-scoped list** endpoints return strictly fewer fields (GOTCHA #12 generalises to all of
+them):
+
+| endpoint | live row |
+|---|---|
+| `GET /v1/ship/idea/suites?product_id=` | `{id, url, name, type}` — **no `parent`, no `product`**: the module tree is *not* reconstructible from this endpoint |
+| `GET /v1/ship/idea/states?product_id=` | `{id, url, name, type}` — no `color` |
+| `GET /v1/ship/idea/priorities?product_id=` | `{id, url, name}` |
+| `GET /v1/ship/idea/properties?product_id=` | `{id, url, name, type, options}` — no `is_removable` / `is_name_editable` / `is_options_editable` |
+| `GET /v1/ship/ticket/channels?product_id=` | `{id, url, name}` — no `product`, no `description`; `url` points at the real `/v1/ship/products/{pid}/channels/{cid}` |
+| `GET /v1/ship/ticket/types?product_id=` | `{id, url, name}` — no `is_system` (as already noted above) |
+| `GET /v1/ship/products/{id}/members` | `{id, url, product, type, user, role}` — matches the table |
+| `GET /v1/ship/ticket_state_plans` | `{id, url, product}` — matches; `product` was `null` on the only row |
+| `GET /v1/ship/ticket_state_plans/{plan}/ticket_state_flows` | `{id, url, state_plan, form_state, to_state}` — **`form_state` confirmed on the wire**, `from_state` absent (settles §9.3) |
+
+Also live: the **property `type` enum has an undocumented `system` value** (`plan_at`, `real_at` on
+ideas; `estimated_at`, `tag_ids` on tickets), outside the 13 documented types of §L.
+
 ---
 
 ## 4. Search / filter DSL
@@ -494,7 +519,9 @@ Relation response: `{id, url, principal_type, principal, target_type, target}` w
 22. **Doc example enum mismatch that will teach the wrong lesson.** `POST /v1/ship/ticket_states` example is `{"name": "处理中", "type": "pending"}` — "处理中" means *in progress* but is typed `pending`. Don't infer a name→type mapping from examples.
 23. **Property plans and state plans can have `product: null`** (`GET /v1/ship/{idea,ticket}_property_plans`, `GET /v1/ship/ticket_state_plans` examples each show one `null` and one real product). `null` = the org-level default/template plan. Resolving "the plan for product X" by scanning the plan list must skip nulls, and there is **no `?product_id=` filter** on any of the three plan-list endpoints — so this is an O(all plans) client-side scan with no pagination parameters documented.
 24. **`GET /v1/ship/ticket_state_plans` example is internally inconsistent** (`"total": 1` with 2 elements in `values`) — a reminder that `total` in the docs is illustrative; trust the wire.
-25. **ID shape summary for ship** (never assume uniformity): product/idea/ticket/customer/suite/plan/tag/channel/state/priority/type/solution/plan-ids = 24-hex; **org users = 32-hex**; **external product users = 24-hex**; **properties may be slugs** (`solution`, `identifier`, `backlog_type`); `short_id` is an 8-char base62 string (`Ogf1EYey`) used only in `html_url`, and **no endpoint accepts `short_id` or `identifier` as a lookup key** — only the 24-hex `id`. Resolving "SLC-1" → id requires `keywords` search.
+25. **ID shape summary for ship** (never assume uniformity): product/idea/ticket/customer/suite/plan/tag/channel/state/priority/type/solution/plan-ids = 24-hex; **org users = 32-hex**; **external product users = 24-hex**; **properties may be slugs** (`solution`, `identifier`, `backlog_type`); `short_id` is an 8-char base62 string (`Ogf1EYey`) used only in `html_url`, and ~~**no endpoint accepts `short_id` or `identifier` as a lookup key** — only the 24-hex `id`. Resolving "SLC-1" → id requires `keywords` search.~~
+
+    **[LIVE 2026-08-01 — the struck-through half is wrong.]** `GET /v1/ship/ideas/{…}` and `GET /v1/ship/tickets/{…}` accept **all three** keys: the 24-hex `id`, the 8-char `short_id` (i.e. the trailing segment of a pasted `html_url`) and the human `identifier`. All three returned `200` with the same record (`s7-smoke.md` F3), mirroring the id-or-`short_id` tolerance of `GET /v1/pjm/work_items/{id}`. A `keywords` search is therefore an *option*, not a requirement, for resolving `SLC-1`. The id-shape half of this gotcha stands unchanged.
 26. **Priorities look global, not per-product.** `GET /v1/ship/ticket/priorities?product_id=` and `GET /v1/ship/ticket_priorities` return the same legacy-looking constants (`5cb9466afda1ce4ca0090005` = "P0"), and idea priorities use the *same* id space (`5cb9466afda1ce4ca0090005` also appears as an idea priority "P0"). Tempting to cache org-wide — but the API deliberately requires `product_id`, so caching across products is unsafe without live verification.
 27. **`GET /v1/ship/ticket/solutions?product_id=` example returns `id: 6422711c3f12e6c1e46d40e9`, which is the *product* id used throughout the docs.** Clearly a copy-paste error in the example; solution ids are their own ObjectIds (cf. `62f217ae16e3661a20124330` in the ticket example).
 28. **Pagination on GET lists is entirely undocumented in ship.** 41 of the 68 ship GETs are list endpoints returning `{page_size, page_index, total, values}`, and **not one** documents `page_size`/`page_index` as inputs. Only the two `POST …/search` bodies do. (Established as working in practice; just don't expect the docs to back you up.)
@@ -507,6 +534,8 @@ Relation response: `{id, url, principal_type, principal, target_type, target}` w
     The only route the docs leave open is the one described in §9.11 and GOTCHA #23: list **all** `ticket_state_plans` and match the embedded `product.id`, skipping the `product: null` org-default rows, with no `?product_id=` filter and no documented pagination. That is O(all plans) per product and is what `pingcode ticket transition` does — cached under the product id, with the plan-keyed flow list cached separately.
 
     Consequence for anyone building on this: **do not treat a failed plan lookup as a failed transition.** The CLI warns and sends the PATCH anyway, because a missing `pcp:read:ship:configuration` scope would otherwise make tickets unmovable. Whether the wire response is in fact richer than §3.3 is **unverified** — the CLI reads the three plausible key spellings opportunistically and falls back to the scan. Settle it during a live smoke run.
+
+    **[LIVE 2026-08-01 — settled, and worse than feared.]** The wire is **not** richer: the raw `GET /v1/ship/tickets/{id}` body has 29 keys and none of `state_plan` / `ticket_state_plan` / `state_plan_id` (`s7-smoke.md` F4). Worse, the fallback scan does not help either on a default org: `GET /v1/ship/ticket_state_plans` returned **exactly one** plan, with `product: null`. Per this gotcha and #23 that row is skipped as the org-level template, so *no* plan is ever matched and pre-validation never runs. Yet that org-default plan **is** the one governing the product's tickets — its `ticket_state_flows` (4 edges, reachable with `200`) match the transitions the server actually enforces. So the correct rule is: match `product.id` first, and **fall back to the single `product: null` plan** when nothing matches. See `s7-smoke.md` F5 and `design.md` §14.
 
 ---
 
@@ -556,10 +585,10 @@ Design goal: an AI agent can find the product, read/search ideas, create and upd
 ## 9. Not determinable from `api_data.json`
 
 1. **Error codes for ship.** There is no error-code catalogue anywhere in the file (no `错误码` group; the only code shown is `100038` inside the 频率限制 overview). Ship-specific codes (e.g. product-not-found, invalid `suite_id`, property-not-in-view) must be discovered by live probing, exactly as `100317`/`100303` were for pjm.
-2. **Idea state `type` enum.** Ticket states document `pending|in_progress|completed|closed` (via `POST /v1/ship/ticket_states`). Idea states have **no write endpoint**, so the enum is never declared; the only evidence is the example value `"pending"`. Whether ideas use the same 4 values (or something like `pending|approved|rejected|…` given the example state name 待评审 "awaiting review") is unknown.
-3. **Whether the state-flow field is `form_state` or `from_state` on the wire** (GOTCHA #2) — no response example exists for any state-flow endpoint.
+2. **Idea state `type` enum.** Ticket states document `pending|in_progress|completed|closed` (via `POST /v1/ship/ticket_states`). Idea states have **no write endpoint**, so the enum is never declared; the only evidence is the example value `"pending"`. Whether ideas use the same 4 values (or something like `pending|approved|rejected|…` given the example state name 待评审 "awaiting review") is unknown. **[LIVE 2026-08-01 — settled: ideas use the same 4 values.]** Idea `state.type` came back as `pending` / `in_progress` / `completed` / `closed` across the product's 5 configured states.
+3. ~~**Whether the state-flow field is `form_state` or `from_state` on the wire** (GOTCHA #2) — no response example exists for any state-flow endpoint.~~ **[LIVE 2026-08-01 — settled: the wire really says `form_state`.]** `GET …/ticket_state_flows` rows are `{id, url, state_plan, form_state, to_state}`; `from_state` does not appear.
 4. **Whether unknown/out-of-view `properties` keys are rejected or silently dropped** on idea/ticket writes (GOTCHA #6), and likewise whether `PATCH /v1/ship/products` 400s on `visibility`.
-5. **Whether idea `plan.id`, `suite.id`, `plan_at`, `real_at` are filterable** in `POST /v1/ship/ideas/search` — they appear in neither the supported-operators lists nor the explicit "暂不支持过滤" list.
+5. **Whether idea `plan.id`, `suite.id`, `plan_at`, `real_at` are filterable** in `POST /v1/ship/ideas/search` — they appear in neither the supported-operators lists nor the explicit "暂不支持过滤" list. **[LIVE 2026-08-01 — `suite.id` IS filterable]**: `filter: {"suite.id": {"in": [...]}}` narrowed 46 ideas to the 13 in that module, all correct. `plan.id`, `plan_at` and `real_at` remain untested.
 6. **Whether `participants.id` really works as an idea filter** (present in the example, absent from the enumerated reference-field list).
 7. **Whether priorities/states/types are truly org-global or product-scoped.** Both list forms exist with identical-looking ids, but the product-scoped forms *require* `product_id`, implying filtering. Cannot confirm without two products in a live org.
 8. **Boolean serialization** for `include_deleted`/`include_archived` (`true`/`false` vs `1`/`0`).
@@ -569,3 +598,58 @@ Design goal: an AI agent can find the product, read/search ideas, create and upd
 12. **Rate-limit interaction with the metadata fan-out.** A single `idea create` with full validation costs ~5 lookups; at 200 req/min a naive agent loop will hit `100038`. Caching policy needs to be decided from live latency/consistency behaviour, not from the docs.
 13. **Webhook / Flow event names for ship objects** — no webhook payload documentation exists in `api_data.json` (the 频率限制 page merely *recommends* using PingCode Flow's "发送Webhook"). Event-driven CLI features cannot be designed from this source.
 14. **Ship-specific permission points** — `GET /v1/permission/points` exists and its description mentions ship, but the enumerated point list is not in the file; only the scope strings are.
+
+---
+
+## 10. Live corrections (S7 smoke run, 2026-08-01)
+
+Source: `.trellis/tasks/08-01-ship-cli/research/s7-smoke.md` — public cloud, one org, one product
+with 46 ideas / 14 tickets / 13 suites, all ship scopes granted. Raw wire bodies were inspected, not
+the CLI's `--json` (which drops `null` and `""` fields). Findings are cited there as F1–F8.
+
+**Confirmed exactly as documented**
+
+- §3.1 product (16 keys, list and single-GET identical), §3.2 idea (27 keys), §3.3 ticket (29 keys) —
+  all match, minus `public_image_token`, which only appears when requested. `score`, `plan`,
+  `plan_at`, `real_at` do exist on ideas; they are simply `null` when unset.
+- GOTCHA #3: `ticket.channel` really is the bare string `"internal"` on internal tickets.
+- GOTCHA #4/#5: metadata ids are slugs (`backlog_type`, `priority`, `rate`, `solution`, `type_id`,
+  `tag_ids`), and select-typed `properties` values are option `_id`s.
+- GOTCHA #20: the server **does** enforce ticket state flows — an edge absent from
+  `ticket_state_flows` is rejected with `400` code `100702` `工单状态不存在` (a misleading message:
+  the *state* exists, the *edge* does not).
+- §3.1: the embedded product `members[]` element has no `role`; the dedicated `…/members` endpoint
+  does.
+- Idea/ticket `POST …/search` return `{page_index, page_size, total, values}` and **echo the
+  requested `page_index`** — so the mismatch guard of a paginating client is meaningful, and offset
+  paging is genuinely honoured (disjoint row sets across pages). This settles PRD Q2.
+
+**Corrected**
+
+1. **GOTCHA #25** — `id`, `short_id` *and* `identifier` all work as lookup keys on
+   `GET /v1/ship/{ideas,tickets}/{…}`.
+2. **§3.6** — product-scoped metadata *lists* are leaner than the single-GET shapes; notably
+   `idea/suites?product_id=` has **no `parent`**, so the suite tree cannot be built from it.
+3. **§9.5** — idea `suite.id` **is** filterable in search.
+4. **§L property `type`** — an undocumented `system` value exists.
+5. **§9.2** — idea state `type` uses the ticket enum (`pending|in_progress|completed|closed`).
+6. **§9.3 / GOTCHA #2** — the wire field is `form_state`, not `from_state`.
+7. **GOTCHA #33 / #23** — a ticket carries no plan reference *and* a default org has only the
+   `product: null` plan, so "skip nulls and match `product.id`" finds nothing. That org-default plan
+   is nevertheless the effective plan.
+
+**Still open after this run**
+
+- §9.1 error catalogue: only `100702` (ticket state), `100719` (idea state), `100725` (idea
+  not-found) and `100024` (bad credentials) were observed. **Not-found is `400`, never `404`** —
+  same as pjm.
+- §9.4 out-of-view `properties` keys: untested (`--set` was not exercised live).
+- §9.5 for `plan.id` / `plan_at` / `real_at`; §9.6 `participants.id`.
+- §9.7 org-global vs product-scoped metadata: ideas and tickets share one priority id space in this
+  org, but only one product was written to.
+- §9.12 rate limiting: no `429`, so `x-pc-retry-after` is still unobserved.
+- Scope minimisation for every endpoint: unobservable, because all ship scopes were granted and
+  `GET /v1/auth/token` returns **no `scope` field**. The declared per-endpoint scopes in §2 remain
+  the only evidence; note that `ticket_state_plans` / `ticket_state_flows` are
+  `pcp:read:ship:configuration`, i.e. a *different* scope from the rest of the ticket surface
+  (GOTCHA #29).
