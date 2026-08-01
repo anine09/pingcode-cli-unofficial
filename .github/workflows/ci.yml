@@ -1,0 +1,118 @@
+# Quality gate for every push to `main` and every pull request
+# (prd 08-01-ci-cd-pipeline: D1/D2/D3/D4/D8).
+#
+# Every step below is a plain npm script, so any failure here reproduces locally
+# with the identical command (D9). Nothing in this workflow needs a secret: the
+# test suite injects `fetch` and never opens a socket, and no PingCode
+# credentials exist in CI by design.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same ref makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # `engines` says >=20; 24 is the development machine. 22 is in between so a
+    # break in either direction shows up here rather than in a user's shell.
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+      # The bundle is what users actually run; `tsc` passing does not prove it boots.
+      - name: smoke the built binary
+        run: |
+          node dist/bin/pingcode.js --version
+          node dist/bin/pingcode.js --help
+
+      # Non-TTY path: lists both global targets and writes nothing.
+      #
+      # Skipped on Node 20 on purpose: the installer is a `.ts` file run by
+      # `node --experimental-strip-types`, and that flag only exists from Node
+      # 22.6. Gating the step is preferred over adding a build step or a
+      # dependency just to exercise it — see the README's CI/CD section.
+      - name: skill installer dry run
+        if: matrix.node != '20'
+        run: npm run skill:install -- --dry-run
+
+  checks:
+    # Repository hygiene, once per run rather than once per matrix leg (D5).
+    # No `npm ci`: both scripts are `node:`-builtin-only, so there is nothing to
+    # install. Node 24 because they are type-stripped TypeScript (see above).
+    name: secret scan and commit gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Needed to walk the pushed/PR commit range, and to see `origin/<base>`.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: resolve the commit range
+        id: range
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            range="origin/${BASE_REF}..HEAD"
+          elif [ -n "${BEFORE:-}" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            range="${BEFORE}..HEAD"
+          else
+            # Branch creation, force push, or a first push: check everything reachable.
+            range="HEAD"
+          fi
+          echo "range=${range}" >> "$GITHUB_OUTPUT"
+          echo "commit range: ${range}"
+
+      # Tracked files always; commit messages for the range as well, because the
+      # last leak in this repository reached both surfaces.
+      - name: scan for secrets and tenant identifiers
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: npm run scan:secrets -- "$RANGE"
+
+      # `PR_TITLE` matters because a squash merge turns the PR title into the
+      # commit subject. Passed through `env` rather than interpolated into the
+      # shell, so a title cannot inject commands.
+      - name: check commit messages
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: npm run check:commits -- "$RANGE"
