@@ -15,6 +15,12 @@ import { request } from './http';
  * offset paging over mutating data can duplicate and skip rows. Hence: dedupe by
  * `id`, stop on a short page, and bail when the echoed `page_index` does not
  * match what we asked for. `--all` is therefore **best effort, not a snapshot**.
+ *
+ * Two transports, one walk. Ship's only filtering read is
+ * `POST /v1/ship/{ideas,tickets}/search`, which carries the cursor in
+ * `payload.page_index` instead of the query string (ship §4). The cursor
+ * placement is the *only* difference, so `paginate` and `searchPaginate` share
+ * `walkPages` rather than forking the dedupe/short-page/echo-guard logic.
  */
 
 export const DEFAULT_PAGE_SIZE = 30;
@@ -108,14 +114,23 @@ export type PaginateOptions = {
   limit?: number | undefined;
 };
 
+/** Fetch page `n`. The two implementations differ only in where the cursor goes. */
+export type PageFetcher<T> = (page: { pageIndex: number; pageSize: number }) => Promise<Page<T>>;
+
 /**
- * Walk a `GET` list endpoint. There is no `POST /search` variant in MVP (design §1.1).
+ * The shared page walk: 0-based cursor, dedupe on `id`, stop on a short page,
+ * respect `--limit`, and bail when the envelope echoes a **different**
+ * `page_index` than the one requested.
+ *
+ * A **missing** `page_index` is not a mismatch: `normalizeEnvelope` falls back to
+ * the requested value, so an envelope that simply omits the field is treated as
+ * "no signal" and the walk continues (PRD Q2 — search may not echo it).
  */
-export async function* paginate<T>(
+async function* walkPages<T>(
   ctx: Ctx,
-  path: string,
-  query: Record<string, unknown> = {},
-  options: PaginateOptions = {},
+  fetchOne: PageFetcher<T>,
+  options: PaginateOptions,
+  label: string,
 ): AsyncGenerator<T, void, undefined> {
   const pageSize = validatePageSize(options.pageSize ?? DEFAULT_PAGE_SIZE);
   const limit = validateLimit(options.limit ?? DEFAULT_LIMIT);
@@ -125,14 +140,14 @@ export async function* paginate<T>(
   let yielded = 0;
 
   for (;;) {
-    const page = await fetchPage<T>(ctx, path, query, { pageIndex, pageSize });
+    const page = await fetchOne({ pageIndex, pageSize });
 
     if (page.pageIndex !== pageIndex) {
-      // A precise signal that GET-list paging is being ignored (research §6.20):
+      // A precise signal that paging is being ignored (research §6.20):
       // continuing would loop over page 0 forever.
       ctx.logger.warn(
         `the API echoed page_index=${page.pageIndex} for a request with page_index=${pageIndex}; ` +
-          'GET-list paging appears to be ignored, so the result set is incomplete',
+          `${label} paging appears to be ignored, so the result set is incomplete`,
       );
       return;
     }
@@ -151,6 +166,99 @@ export async function* paginate<T>(
     if (page.values.length < pageSize) return; // short page ⇒ the end
     pageIndex += 1;
   }
+}
+
+/** Walk a `GET` list endpoint. */
+export async function* paginate<T>(
+  ctx: Ctx,
+  path: string,
+  query: Record<string, unknown> = {},
+  options: PaginateOptions = {},
+): AsyncGenerator<T, void, undefined> {
+  yield* walkPages<T>(ctx, (page) => fetchPage<T>(ctx, path, query, page), options, 'GET-list');
+}
+
+// ---------------------------------------------------------------------------
+// body pagination: POST …/search (ship §4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The `payload` of a `POST …/search` body, minus the paging fields this module
+ * owns. `mode` is required and its only legal value is `"query"` (ship §4).
+ *
+ * `filter` holds **one operator per field**; there are no logical operators, so
+ * multiple entries are implicitly AND-ed. `keywords` is a sibling of `filter`,
+ * not an entry inside it.
+ */
+export type SearchPayload = {
+  filter?: Record<string, unknown> | undefined;
+  keywords?: string | undefined;
+  include_public_image_token?: string | string[] | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * `POST …/search` is a **read** that happens to use a mutating verb, so the
+ * dry-run gate in `core/http.ts` — which keys off the verb — must not swallow
+ * it. Under `--dry-run` a search would otherwise print a request plan instead of
+ * listing anything, and the documented contract is the opposite: *"read requests
+ * still run, so ids are really resolved"*.
+ *
+ * This is deliberately scoped to the two `…/search` endpoints rather than
+ * changed in the transport: the verb-based gate is the right default, and every
+ * genuine ship write (`POST /v1/ship/ideas`, `POST /v1/ship/tickets`, both
+ * PATCHes) still halts under `--dry-run`.
+ */
+function asReadContext(ctx: Ctx): Ctx {
+  return ctx.dryRun ? { ...ctx, dryRun: false } : ctx;
+}
+
+function buildSearchBody(
+  payload: SearchPayload,
+  page: { pageIndex: number; pageSize: number },
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined || value === null) continue;
+    // An empty filter is noise: send no `filter` key rather than `{}`.
+    if (key === 'filter' && Object.keys(value as Record<string, unknown>).length === 0) continue;
+    body[key] = value;
+  }
+  body.page_index = page.pageIndex;
+  body.page_size = page.pageSize;
+  return { mode: 'query', payload: body };
+}
+
+/** Fetch exactly one page of a `POST …/search` endpoint. */
+export async function fetchSearchPage<T>(
+  ctx: Ctx,
+  path: string,
+  payload: SearchPayload = {},
+  page: PageRequest = {},
+): Promise<Page<T>> {
+  const pageIndex = validatePageIndex(page.pageIndex ?? 0);
+  const pageSize = validatePageSize(page.pageSize ?? DEFAULT_PAGE_SIZE);
+  const raw = await request<PageEnvelope<T> | undefined>(asReadContext(ctx), {
+    method: 'POST',
+    path,
+    body: buildSearchBody(payload, { pageIndex, pageSize }),
+  });
+  return normalizeEnvelope<T>(raw, { pageIndex, pageSize });
+}
+
+/** Walk a `POST …/search` endpoint. Identical semantics to `paginate`. */
+export async function* searchPaginate<T>(
+  ctx: Ctx,
+  path: string,
+  payload: SearchPayload = {},
+  options: PaginateOptions = {},
+): AsyncGenerator<T, void, undefined> {
+  yield* walkPages<T>(
+    ctx,
+    (page) => fetchSearchPage<T>(ctx, path, payload, page),
+    options,
+    'search',
+  );
 }
 
 /** Drain an async iterable into an array. */
