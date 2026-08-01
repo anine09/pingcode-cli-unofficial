@@ -472,6 +472,35 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100024': 'auth',
       '100317': 'not_found',
       '100303': 'not_found',
+      '100725': 'not_found',
+      '100711': 'not_found',
     });
+  });
+
+  // S7b / research/s7-smoke.md F1: ship answers 400 for a missing record, with
+  // one code per resource. Without these rows the same mistake exited 5 on pjm
+  // and 7 on ship.
+  it.each([
+    ['100725', '/v1/ship/ideas/000000000000000000000000', '需求不存在或无权访问'],
+    ['100711', '/v1/ship/tickets/000000000000000000000000', '工单不存在或无权访问'],
+  ])('maps ship code %s (HTTP 400) to NotFoundError, i.e. exit 5', async (code, path, message) => {
+    const error = await request(
+      ctxWith(() => jsonResponse({ code, message }, { status: 400 })),
+      { method: 'GET', path },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect((error as NotFoundError).exitCode).toBe(5);
+    expect((error as NotFoundError).code).toBe(code);
+  });
+
+  // The state codes stay on exit 7 on purpose: live they also fire for a state
+  // that exists but is unreachable under the plan (s7-smoke.md F5).
+  it.each(['100719', '100702'])('leaves ship state code %s classified as an api error', async (code) => {
+    const error = await request(
+      ctxWith(() => jsonResponse({ code, message: '状态不存在' }, { status: 400 })),
+      { method: 'PATCH', path: '/v1/ship/tickets/t1', body: { state_id: 'x' } },
+    ).catch((caught: unknown) => caught);
+    expect(error).not.toBeInstanceOf(NotFoundError);
+    expect((error as ApiError).exitCode).toBe(7);
   });
 });

@@ -178,6 +178,21 @@ const SCOPE_HINT =
  * | `100317` | `GET /v1/pjm/work_items/{unknown id}` | 400 | `NotFoundError` (5) |
  * | `100303` | `PATCH` with an unknown `state_id` | 400 | `NotFoundError` (5) |
  *
+ * **Evidence: `research/s7-smoke.md` F1** — ship repeats the pattern with its own
+ * per-resource codes, so the same mistake had different exits per module until
+ * these two rows existed:
+ *
+ * | code | observed on | HTTP | mapped to |
+ * |---|---|---|---|
+ * | `100725` | `GET /v1/ship/ideas/{unknown id}` (`需求不存在或无权访问`) | 400 | `NotFoundError` (5) |
+ * | `100711` | `GET /v1/ship/tickets/{unknown id}` (`工单不存在或无权访问`) | 400 | `NotFoundError` (5) |
+ *
+ * Deliberately **not** here: ship's `100719` / `100702` ("state does not exist"
+ * on an idea/ticket PATCH). Live they are also returned for a state that plainly
+ * exists but is unreachable under the state plan (`research/s7-smoke.md` F5), so
+ * mapping them to `not_found` would tell an agent a state is missing when it is
+ * merely forbidden. They stay on exit 7.
+ *
  * Matching is on the **`code` string only**: the API is Chinese-only and its
  * message wording is not a contract. Any code outside this table keeps the
  * status-first mapping and still surfaces `code` verbatim, so an unknown failure
@@ -188,6 +203,9 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   '100024': 'auth',
   '100317': 'not_found',
   '100303': 'not_found',
+  // ship's not-found codes: idea, then ticket (research/s7-smoke.md F1).
+  '100725': 'not_found',
+  '100711': 'not_found',
 };
 
 const NOT_FOUND_HINT =

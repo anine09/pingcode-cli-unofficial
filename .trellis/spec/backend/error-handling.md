@@ -67,6 +67,12 @@ HTTP **400** where REST convention would use 401 or 404, which made exits 3 and 
 | `100024` | 400 | `GET /v1/auth/token`, wrong client id/secret | `AuthError` (3) |
 | `100317` | 400 | `GET /v1/pjm/work_items/{unknown id}` | `NotFoundError` (5) |
 | `100303` | 400 | `PATCH` with an unknown `state_id` | `NotFoundError` (5) |
+| `100725` | 400 | `GET /v1/ship/ideas/{unknown id}` (`08-01-ship-cli/research/s7-smoke.md` F1) | `NotFoundError` (5) |
+| `100711` | 400 | `GET /v1/ship/tickets/{unknown id}` (same source) | `NotFoundError` (5) |
+
+Not every "does not exist" code belongs here. Ship's `100719` / `100702` ("state does not exist" on
+an idea/ticket PATCH) are also returned for a state that **does** exist but is unreachable under the
+state plan, so they stay `ApiError` (7): a code that conflates two causes must be mapped to neither.
 
 **Never match on message text.** The PingCode API is Chinese-only and its wording is not a contract;
 a locale or copy change would silently break the mapping. Match on the `code` string only, and only
