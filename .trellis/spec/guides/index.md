@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Commit Conventions](./commit-conventions.md) | Conventional Commits format, scopes, and history rules | Every commit — this is a rule, not a suggestion |
 
 ---
 
@@ -50,6 +51,14 @@ These guides help you **ask the right questions before coding**.
 - [ ] Multiple branches update the same derived state from `kind` / `action`
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+
+### Before Every Commit
+
+- [ ] Message is `type(scope): subject` per Conventional Commits
+- [ ] One logical change, and the tree is green (`npm run typecheck && npm test`)
+- [ ] No secrets or tenant-identifiable values in the diff **or** the message
+
+→ Read [Commit Conventions](./commit-conventions.md)
 
 ### When Verifying AI Cross-Review Results
 

@@ -43,7 +43,7 @@ There is **no frontend** in this project; see [`../frontend/index.md`](../fronte
 
 These guidelines are the distilled rules. The reasoning, the alternatives that were rejected, and the
 live-API evidence behind the surprising parts are in
-`.trellis/tasks/07-31-pingcode-cli-mvp/`:
+`.trellis/tasks/archive/2026-08/07-31-pingcode-cli-mvp/`:
 
 - `design.md` — architecture decisions D1–D8, §5.2 exit codes, §7 command semantics
 - `research/pingcode-api.md` — the endpoint contract and its gotchas
