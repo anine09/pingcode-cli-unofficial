@@ -208,10 +208,24 @@ asserts that every command path it mentions exists in the CLI. Sync it to your a
 directories:
 
 ```bash
-npm run skill:install -- --dry-run   # show the destinations, write nothing
-npm run skill:install                # → ~/.claude/skills/pingcode/ and ./.opencode/skills/pingcode/
-npm run skill:install -- --force     # overwrite existing copies
+npm run skill:install -- --dry-run              # show the destinations, write nothing
+npm run skill:install                           # pick a target (prompts on a TTY, else installs both)
+npm run skill:install -- --target claude        # Claude Code only
+npm run skill:install -- --target opencode      # OpenCode only
+npm run skill:install -- --target claude,opencode   # or --target all
+npm run skill:install -- --force                # overwrite existing copies
 ```
+
+Installs are **global (user-level)** only:
+
+| Target | Destination |
+| --- | --- |
+| `claude` | `~/.claude/skills/pingcode/SKILL.md` |
+| `opencode` | `$XDG_CONFIG_HOME/opencode/skills/pingcode/SKILL.md` (default `~/.config/opencode/…`) |
+
+`--target` is repeatable, comma-separated and case-insensitive. With no `--target` the script
+prompts when stdin is a TTY (prompt on stderr, `q` aborts without writing) and installs **both**
+targets when it isn't, so CI and pipes keep their old behaviour. An unknown target exits `2`.
 
 ---
 

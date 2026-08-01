@@ -190,8 +190,10 @@ describe('install-skill script', () => {
     expect(imports.every((specifier) => specifier?.startsWith('node:'))).toBe(true);
     expect(script).toContain("'skills'");
     expect(script).toContain("'SKILL.md'");
-    expect(script).toContain('.claude');
-    expect(script).toContain('.opencode');
+    // Both destinations are global (user-level); a project-local install is not offered.
+    expect(script).toContain("'.claude', 'skills', 'pingcode'");
+    expect(script).toContain("'.config', 'opencode'");
+    expect(script).not.toContain('process.cwd()');
     expect(script).toContain('--dry-run');
   });
 });
