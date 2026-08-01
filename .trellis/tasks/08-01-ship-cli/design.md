@@ -121,7 +121,10 @@ Identical contracts to the pjm surface (M§7.2, M§7.3):
 
 - Human mode: a width-aware table. `idea list` columns: identifier, title, state, priority,
   assignee, suite. `product list`: identifier, name, state, owner.
-- `--json`: stdout is JSON only. Single page → the raw envelope shape
+- `--json`: stdout is JSON only, but **not byte-faithful to the wire**: `api/parse.ts` normalises
+  `null` and `""` to `undefined`, so those keys are absent from the output (§14.5). An absent key
+  means null, empty, or genuinely missing, and consumers must not distinguish them.
+  Single page → the raw envelope shape
   `{page_index,page_size,total,values}`; `--all` → `{values,count,all:true}`; small config
   reads (`meta idea-*`, `meta product-members`) → `{values,count}`.
 - Timestamps stay raw unix seconds under `--json`, localised only in human mode.
@@ -131,7 +134,8 @@ Identical contracts to the pjm surface (M§7.2, M§7.3):
 ## 10. Types
 
 Hand-written in `src/types/api.ts` for the ~11 endpoints above, snake_case with an index
-signature so `--json` stays faithful and custom `properties` survive. Normalisation
+signature so unknown fields — including custom `properties` — survive into `--json` untouched.
+(Unknown fields survive; `null` and `""` do not, see §9 and §14.5.) Normalisation
 (0/1 → boolean, singular/plural drift) happens once, in `api/parse.ts`. Do not generate types
 from `api_data.json` in this slice — that remains a follow-up.
 
@@ -178,46 +182,53 @@ the product-scoped resolver cache, and the shared command plumbing.
 
 There is **no ticket DELETE** (S§K), exactly as with ideas: smoke artifacts can only be marked.
 
-### §13.2 Transition pre-validation (tickets only)
+### §13.2 Transitions: advisory, not pre-validated (tickets)
 
-`ticket transition <ref> --state <name|id>`:
+*Rewritten in S7b; supersedes the original §13.2 step list and all of §13.2a, which specified a
+local refusal. Evidence: `research/s7-smoke.md` F5.*
 
-1. GET the ticket → learn `product_id`, current `state`, and the state plan reference.
-2. Resolve the target state name against `ticket/states?product_id=` (id passes through untouched).
-3. Read `ticket_state_flows` for the plan and check the current → target edge exists.
-   - Not in the flow → `UsageError` (exit 2) naming the reachable states.
-   - Flows unavailable (404/403/undocumented plan shape) → **do not block**: warn on stderr and let
-     the server decide. Losing the ability to move a ticket because a lookup failed is worse than a
-     server-side rejection.
-4. PATCH `state_id`. A server rejection is printed verbatim plus the configured states.
+`ticket transition <ref> --state <name|id>` sends the PATCH. The only thing refused locally is a
+move to the state the ticket is already in — judgeable from the ticket alone, tenant-independent,
+exit 2.
 
-If the ticket response does not actually carry a state-plan reference, that is a research
-contradiction: record it in `research/ship-api.md` and fall back to step 3's warn-and-continue path.
-Do not invent a plan id.
+The state plan is still read, but only on paths where the answer is a nicety:
 
-### §13.2a Resolution of the state-plan gap (recorded during S5b)
+1. **On a server refusal**, `explainStateRejection` appends to the error's `message`: the product's
+   configured states, the current state, and — if a plan can be found — the states reachable from
+   it. The reachable set goes in the **`message`**, never the `hint`, because `--json` errors are
+   `{kind,message,code,exit}` and drop the hint; an agent told "no" must still be able to learn
+   "then what".
+2. **On `--dry-run`**, the reachable set is printed to stderr before the request plan. The user
+   explicitly asked what would happen, cost is irrelevant, and nothing can be refused.
 
-It does not. `ship-api.md` §3.3 lists no state-plan reference on the ticket schema, so step 1 above
-cannot be satisfied as written; this is now **GOTCHA #33** in the research file. Step 1 is amended to:
+Plan discovery is unchanged as a *procedure* and unchanged in its failure mode — read
+`state_plan` / `ticket_state_plan` / `state_plan_id` off the ticket opportunistically (the wire
+carries none of them, §14.4), else scan every `GET /v1/ship/ticket_state_plans` and match the
+embedded `product.id`, else fall back to the **single `product: null` org-default plan**. Any
+obstacle — no product, no plan, no flows, a 403 on the `pcp:read:ship:configuration` scope the flow
+read needs — simply yields no suggestion. Nothing throws, nothing blocks.
 
-1. Read `state_plan` / `ticket_state_plan` / `state_plan_id` off the ticket **opportunistically** —
-   the docs are hand-maintained and the wire may be richer. Nothing is invented if they are absent.
-2. Otherwise locate the plan the way §9.11 and GOTCHA #23 describe: list every
-   `GET /v1/ship/ticket_state_plans`, skip the `product: null` org-default rows, and match the
-   embedded `product.id`. O(all plans), no `?product_id=` filter exists. Cached under the product id
-   (kind `ship-ticket-state-plan`).
-3. If neither yields a plan → warn on stderr and send the PATCH. This is the §13.2 step-3 rule
-   applied one level earlier.
+Why the refusal had to go, in the order the arguments settled it:
 
-Two further refinements settled while implementing:
+- **It prevents nothing.** The server refuses atomically; the ticket is unchanged either way. The
+  entire benefit was one saved round-trip and exit 2 instead of the server's code.
+- **It can be wrong in the one direction that matters.** A mis-identified plan produces a *false*
+  refusal, and there is no escape hatch: `--state-id` skipped the name lookup but not the plan
+  check, and `--no-cache` cannot fix a plan that was never the right plan. An agent told a legal
+  move is impossible stops.
+- **Its cost is permanent**: an O(all plans) scan plus a flow read on every transition, on the
+  happy path, depending on a scope (`pcp:read:ship:configuration`) that is *optional* everywhere
+  else.
+- **It made identical input exit differently on different tenants** — 2 where a product-scoped plan
+  exists, 7 where only the org default does.
+- **It dragged in a stale-cache hazard class of its own**: a cached flow list could invent an
+  illegal transition, which is why the code had grown a cache-bypassed re-read before every
+  refusal. Advisory output needs none of that.
 
-- The reachable-state list goes in the error **`message`**, not the `hint`, because `--json` errors
-  are `{kind,message,code,exit}` and drop the hint — an agent would otherwise be told "no" with no
-  way to learn "then what".
-- A local refusal is re-checked once against a **cache-bypassed** flow read before it is raised. A
-  stale 24 h flow cache must never be able to invent an illegal transition.
-- `ticket update --state` is validated on the same path as `ticket transition`; `--state-id` is
-  validated too, so the escape hatch skips the *name lookup*, not the *plan*.
+Note how the GOTCHA #23 contradiction dissolves. The docs say to skip `product: null` plans, and
+that rule is right for *authoritative* use — of which there is now none. For *advisory* use a
+guessed plan yields a slightly-wrong suggestion inside an already-failing message, which is
+harmless. `ship-api.md` §10 records the same conclusion.
 
 ### §13.2b Corrections to this design found while implementing
 
@@ -275,25 +286,52 @@ unreachable through this endpoint. Name resolution itself works (verified on 13 
 wrong, and becomes correct the moment `parent` appears. §5's last paragraph should be read as
 conditional.
 
-### §14.3 §13.2a's plan lookup can never succeed on a default org — G3b/AC9 is blocked
+### §14.3 The plan lookup can never succeed on a default org — **resolved in S7b: advisory, accepted**
 
-`GET /v1/ship/ticket_state_plans` returned **one** row, `{id, url, product: null}`. §13.2a step 2
-skips `product: null` rows, so no plan is matched, and every `ticket transition` takes the step-3
-warn-and-proceed path. Live consequences: legal transitions succeed with a spurious warning; an
-illegal one is refused by the *server* with exit 7, not locally with exit 2; and because the local
-check was skipped, `withCacheInvalidation` misreads the rejection as a stale id and **retries the
-doomed PATCH once**.
+The finding: `GET /v1/ship/ticket_state_plans` returned **one** row, `{id, url, product: null}`.
+The original §13.2a step 2 skipped `product: null` rows, so no plan was ever matched, every
+transition took the warn-and-proceed path, and a server refusal additionally cost a second PATCH
+because `withCacheInvalidation` misread it as a stale id. The org-default plan *is* the effective
+plan: its flows are readable (`200`) and its 4 edges match what the server enforces.
 
-The org-default plan *is* the effective plan: its `ticket_state_flows` is reachable (`200`) and its
-4 edges match exactly what the server enforces.
+**Decision (architecture review, S7b): local pre-validation is removed; the flow read becomes
+advisory.** The reasoning is recorded in the rewritten §13.2. In short — a local check prevents no
+damage because the server refuses atomically, so its entire value was one round-trip and a nicer
+exit code, against a permanent cost (a scan plus a flow read on every transition, an optional scope
+on the happy path, a stale-cache hazard class, tenant-dependent exit codes) and one intolerable
+failure mode: a false refusal of a legal move, with no flag to override it.
 
-**Proposed design change (not implemented — needs approval):** in the plan resolver, after failing
-to match `product.id`, fall back to the single `product: null` plan and use it; keep step 3's
-warn-and-proceed only when there is no plan at all or the flow read fails. Optionally, suppress the
-`withCacheInvalidation` retry when the rejected id came from a *validated* transition, so an illegal
-transition costs one PATCH instead of two. This contradicts §13.2a step 2 and `ship-api.md`
-GOTCHA #23 as written, which is why S7 stopped at recording it. Until it lands, **AC9's "refused
-locally with exit 2, proven against the real API" is provable only by unit test**, not live.
+What changed in the code:
+
+- `verifyTicketTransition` → `checkNoOpTransition`: the "already in state X" branch survives, the
+  plan-based refusal and its cache-bypassed re-read do not.
+- `findTicketStatePlanId` falls back to the lone `product: null` plan. Safe precisely because the
+  output is advisory.
+- `explainStateRejection` (the failure path) now appends the reachable set to the error `message`;
+  `--dry-run` previews it on stderr.
+- The double-PATCH is fixed independently and generally — see §14.3a.
+
+**AC9 was rewritten** to match: an illegal transition must leave the ticket unchanged, exit
+non-zero, and name the reachable states in the `--json` error `message`. That is observable, and it
+is falsifiable on this org — the old wording was neither.
+
+### §14.3a Settled negative: the double write cannot be fixed by classifying the error
+
+The obvious repair for the retried PATCH was to stop treating a rejection as a stale id when it
+looks like a refusal. **This is impossible on this API and should not be attempted again.** Ship
+returns `100702` / `工单状态不存在` both for a state id that does not exist *and* for a state that
+exists but is unreachable under the plan (`s7-smoke.md` F5). The vendor code is the same, the
+message is the same, and the message is Chinese prose that is not a contract. No allowlist can
+discriminate them.
+
+The axis that does work is **id identity**, not error semantics: invalidate, re-resolve, and if
+every resolved id came back identical, the retry would send a byte-identical body — so rethrow the
+original error and send nothing. Implemented in `runWrite` (`cli/commands/common.ts`), which is the
+only layer that can see both passes' resolutions; `withCacheInvalidation` learns nothing about
+errors and only gains a `RetryWouldBeIdentical` signal to obey. This fixes pjm as well as ship.
+
+**Invariant, now stated in `.trellis/spec/backend/error-handling.md`: the CLI never sends the same
+mutating body twice in one invocation.**
 
 ### §14.4 §13.2b's `html_url` claim is wrong — short_id and identifier both resolve
 
@@ -305,22 +343,43 @@ happen. `core/metadata.ts`'s `IDENTIFIER_RE` also does not match dash-containing
 of two, and it works. **Deliberately not "fixed"**: broadening the regex would trade a working
 1-request path for a 2-request one. Both paths are exercised and correct.
 
-### §14.5 §9/§10's "`--json` stays faithful" is too strong
+### §14.5 §9/§10's "`--json` stays faithful" was too strong — claim fixed in S7b, code deferred
 
 `api/parse.ts` normalises `null` **and `""`** to `undefined`, and `JSON.stringify` drops those keys.
 So the wire's `plan_at: null`, `score: null`, `product.description: ""`, `ticket.solution: null`
-simply vanish from `--json`. Semantically harmless, but it means our `--json` cannot be diffed
-against the vendor field lists (this smoke run initially "found" four missing idea fields that way).
-This is inherited pjm-wide behaviour, not ship-specific; changing it would alter the output of every
-existing command, so it is an orchestrator decision, not a smoke-run patch.
+simply vanish from `--json`. It is inherited pjm-wide behaviour, not something ship introduced.
 
-### §14.6 Exit 5 is unreachable for server-side not-founds (again)
+**S7b fixes the claim, not the code.** §9 and §10 above, README and SKILL.md no longer promise
+fidelity; SKILL.md instead tells the agent the rule it must code against: *an absent key means null
+or empty; the CLI does not distinguish them — read keys defensively.*
 
-Ship answers `400` + a vendor code for a missing record (`100725` idea) and for an invalid state id
-(`100719` idea, `100702` ticket), never `404`. This is the pjm smoke's finding F2, reconfirmed. Any
-repair touches the frozen `core/errors.ts` / `core/http.ts` mapping or introduces vendor-code
-translation in the api layer — both are contract changes. Exit 5 still fires for client-side
-identifier misses.
+The two halves should **not** be lumped together, as this section originally did:
+
+- `null` → absent is **defensible**. Almost every consumer treats a null field and a missing field
+  the same way, and dropping it keeps the output small.
+- `""` → absent is a **genuine bug**. An empty string is a value a user deliberately set; erasing a
+  cleared description is losing information, not tidying it.
+
+The real fix — preserve `null` and `""`, reserve `undefined` for genuinely-missing — is a
+**breaking output change**, wants its own commit, and is a 1.0 blocker: it is far cheaper now than
+once anything parses this output. Recorded in README's follow-up list.
+
+### §14.6 Exit 5 was unreachable for server-side not-founds — **fixed in S7b, two table rows**
+
+Ship answers `400` + a vendor code for a missing record, never `404`: `100725` for an idea,
+`100711` for a ticket (probed in S7b; tickets do *not* share the idea code). This is the pjm smoke's
+finding F2, reconfirmed.
+
+The repair is the documented maintenance path for `ERROR_CODE_OVERRIDES`
+(`.trellis/spec/backend/error-handling.md`: extend the table given a recorded observation in
+`research/`, cited in the comment), not a contract change — `core/errors.ts` and the exit table are
+untouched. It also removes a real cross-module inconsistency: pjm already mapped `100317` (unknown
+work item) to exit 5, so the identical mistake exited 5 on pjm and 7 on ship.
+
+**Deliberately not mapped: `100719` / `100702`.** Under §13.2's advisory model those codes will
+usually mean "that transition is not allowed", not "that state does not exist" — see §14.3a. Saying
+`not_found` about a state the user can see in `meta ticket-states` would be worse than saying
+nothing. They stay on exit 7.
 
 ### §14.7 Q1 — the ten metadata lookups are *not* behind a configuration scope
 

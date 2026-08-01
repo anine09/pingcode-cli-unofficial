@@ -200,7 +200,7 @@ sending it. Read requests still run, so ids are genuinely resolved first.
 | 7 | `api` | any other non-2xx, carrying the API's `{code, message}` |
 | 8 | `transport` | DNS / TCP / TLS / timeout / unparseable body |
 
-This API answers **HTTP 400 where REST convention would use 401 or 404**, so three observed API
+This API answers **HTTP 400 where REST convention would use 401 or 404**, so five observed API
 `code` values are mapped by code rather than by status (`src/core/wire.ts`):
 
 | API `code` | HTTP | Observed on | → exit |
@@ -208,10 +208,14 @@ This API answers **HTTP 400 where REST convention would use 401 or 404**, so thr
 | `100024` | 400 | `GET /v1/auth/token` with a wrong client id/secret | 3 (`auth`) |
 | `100317` | 400 | `GET /v1/pjm/work_items/{unknown id}` | 5 (`not_found`) |
 | `100303` | 400 | `PATCH` with an unknown `state_id` | 5 (`not_found`) |
+| `100725` | 400 | `GET /v1/ship/ideas/{unknown id}` | 5 (`not_found`) |
+| `100711` | 400 | `GET /v1/ship/tickets/{unknown id}` | 5 (`not_found`) |
 
 Any other code keeps the status-first mapping and is surfaced verbatim on exit 7 — read `code`
 before drawing conclusions. (An invalid *bearer* token on a resource endpoint does return a real
-401, so the 401 branch is still live.)
+401, so the 401 branch is still live.) Note what is deliberately **absent**: ship's `100719` /
+`100702` ("state does not exist") also fire for a state that exists but is unreachable under the
+state plan, so mapping them to `not_found` would be a lie — they stay on exit 7.
 
 ---
 
@@ -259,16 +263,20 @@ Everything above still applies. These are the differences that will cost you tim
   assignee, date or custom property. The DSL allows **one operator per field and no `$and`/`$or`**;
   several filters are AND-ed. Body pagination puts the cursor in `payload.page_index`, and the CLI
   applies the same `--page` / `--page-size` (≤100) / `--all` / `--limit` semantics as elsewhere.
-- **Ticket transitions are pre-validated; idea state changes are not.** Ship publishes the legal
-  transitions of a ticket state plan, so `ticket transition` refuses an illegal target locally with
-  exit 2 and names the reachable states without sending anything. Ship publishes **no idea
-  state-flow endpoint at all**, so `idea update --state` can only be judged by the server; on
-  rejection the CLI prints the product's configured states on stderr. If the flow lookup itself
-  fails — no `pcp:read:ship:configuration`, or no plan matched — the CLI warns and sends the
-  transition rather than blocking a write on a failed read.
-- **Locating a ticket's state plan is a scan.** The ticket payload carries no plan reference and the
-  plan list has no `product_id` filter, so the CLI lists every plan and matches the embedded
-  `product.id` (cached per product). This is the only route the API documents.
+- **State changes are decided by the server; ticket refusals are explained.** Ship publishes the
+  legal transitions of a ticket state plan, and the CLI reads them — but only to *explain* a
+  refusal, never to pre-empt one. `ticket transition` sends the PATCH; if the server refuses, the
+  error `message` carries the configured states, the current state and the states reachable from
+  it. `ticket transition --dry-run` previews that reachable set on stderr without writing. Ideas
+  have **no state-flow endpoint at all**, so `idea update --state` gets the configured states on
+  rejection and nothing more. The only local refusal is moving a ticket to the state it is already
+  in. Rationale: the server refuses atomically, so nothing is saved by checking first, while a
+  mis-identified plan would block a legal move outright (`s7-smoke.md` F5).
+- **Locating a ticket's state plan is a scan, and only ever advisory.** The ticket payload carries
+  no plan reference and the plan list has no `product_id` filter, so the CLI lists every plan and
+  matches the embedded `product.id`, falling back to the org-default (`product: null`) plan when
+  there is exactly one — which live is the common case. Cached per product. Since the answer only
+  feeds an explanation, a wrong guess costs a wrong suggestion, never a blocked write.
 - **`--set key=value` sends the value verbatim, and select-type properties want the option `_id`,
   not its label.** `meta idea-properties` / `meta ticket-properties` print both, and are also the
   authoritative list of writable keys. `properties` replaces wholesale.
@@ -401,8 +409,18 @@ Deliberately out of the MVP, recorded rather than forgotten:
 - **Codegen from `api_data.json`.** PingCode publishes no OpenAPI spec, but its apiDoc source at
   `https://open.pingcode.com/api_data.json` describes 460 endpoints. The MVP hand-writes types for
   its ~15; generating them would remove the drift risk.
-- **`state_flows` pre-validation.** Illegal transitions are only caught by the server. Reading the
-  type's state flow up front would let the CLI reject them locally with better messages.
+- **`state_flows` pre-validation — tried on ship, and deliberately rolled back.** Reading the state
+  flow up front to reject illegal transitions locally sounds better than it is: live evidence
+  (`08-01-ship-cli/research/s7-smoke.md` F5) showed the server refuses atomically anyway, so
+  nothing is saved, while plan discovery is a scan, depends on an optional scope, and can
+  mis-identify the plan — turning a legal move into a terminal local refusal with no override. Ship
+  now reads the flows only to *explain* a refusal and to answer `--dry-run`. If pjm ever grows the
+  same feature, it should be advisory in the same way.
+- **`--json` drops `null` and `""` fields.** `api/parse.ts` normalises both to `undefined`, so they
+  vanish from the output; an absent key currently means "null, empty, or genuinely missing". `null`
+  → absent is defensible, `""` → absent is not (an empty string is a value someone chose). The fix
+  — preserve both and reserve `undefined` for genuinely missing — is a **breaking output change**
+  and wants its own commit before there are consumers.
 - **`POST /v1/pjm/work_items/search`.** The advanced filter/search endpoint is unused, so complex
   queries (multi-value filters, keyword scoring) are not expressible.
 - **Bulk `PATCH /v1/pjm/work_items`.** One-field-across-≤100-items updates are not wired up.

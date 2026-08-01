@@ -381,3 +381,73 @@ reading the enum would reject real data.
 - **`properties` writes** (`--set`) were not exercised against a real select-typed property, so
   GOTCHA #6 (out-of-view key rejected vs silently dropped) is still open.
 - **Rate-limit behaviour**, deliberately not provoked.
+
+---
+
+## S7b — re-verification after the architecture review (2026-08-02)
+
+The three STOP-and-report items above went to review; the decisions and their reasoning live in
+`design.md` §13.2, §14.3, §14.3a, §14.5 and §14.6. This section records only what the live API said
+during the re-run. Same redaction policy, same product `PD-YYHC`, and — as instructed — **no new
+records were created**: everything reuses the S7 smoke ticket `PD-YYHC-T19`.
+
+### The code probe that decision 3 asked for
+
+| command | exit | body |
+|---|---|---|
+| `ticket get 000000000000000000000000 --json` (before the fix) | 7 | `{"kind":"api","code":"100711","message":"工单不存在或无权访问 (HTTP 400 …)"}` |
+
+**Tickets do not share the idea's code.** `100725` is idea-only; tickets answer **`100711`**. Both
+were added to `ERROR_CODE_OVERRIDES`, because mapping only the idea code would have left the exact
+cross-module inconsistency the decision set out to remove — an unknown ticket id exiting 7 while an
+unknown work-item id exits 5. This is the one place S7b went beyond the literal wording of a
+decision ("add `100725` only"); the decision's own justification for the probe called for it.
+`100719` / `100702` remain unmapped, as instructed.
+
+### Re-verification table
+
+| # | command | exit | verdict |
+|---|---|---|---|
+| 1 | `ticket get 000000000000000000000000 --json` | **5** | ✅ `{"kind":"not_found","code":"100711",…}` |
+| 2 | `idea get 000000000000000000000000 --json` | **5** | ✅ `{"kind":"not_found","code":"100725",…}` — AC6 now holds for server-side misses |
+| 3 | `ticket transition PD-YYHC-T19 --state 待处理 --json --dry-run --no-cache` | 0 | ✅ zero writes; stderr: *the state plan lists no transition out of 已关闭, so the server will very likely refuse this move* |
+| 4 | `ticket transition PD-YYHC-T19 --state 待处理 --json --verbose` (**illegal**) | **7** | ✅ **exactly one `→ PATCH` in the trace** (was two); ticket unchanged; `message` = server text `工单状态不存在` + configured states + `current state: 已关闭` + the dead-end note |
+| 5 | `ticket transition PD-YYHC-T17 --state 处理中 --json --dry-run --verbose` (pre-existing ticket, read-only) | 0 | ✅ zero writes, nothing modified; stderr: *per the state plan, reachable from 待处理: 处理中 (…)* |
+| 6 | `ticket transition PD-YYHC-T19 --state 已关闭 --json --verbose` (no-op) | **2** | ✅ `PD-YYHC-T19 is already in state 已关闭`, zero requests after the resolving GET |
+| 7 | `ticket update PD-YYHC-T19 --title "… (S7b re-verified)" --json --verbose` | 0 | ✅ one PATCH, write path healthy |
+
+Step 4 is the whole S7b thesis in one trace: `GET tickets/PD-YYHC-T19` → `PATCH` → *then* the
+states / plans / flows reads, all of them after the failure. Nothing is read from the state plan
+before a transition is sent any more.
+
+### What could not be re-verified, and why
+
+**A live *legal* transition.** `PD-YYHC-T19` is in `已关闭`, and the plan's four edges
+(待处理→处理中, 处理中→已计划, 已计划→已完成, 处理中→已关闭) contain **no edge out of `已关闭`** — the
+state is terminal. S7's own closing step put the ticket there. Since S7b forbids creating a new
+ticket and forbids writing to pre-existing ones, no legal transition is reachable. Substituted:
+
+- step 5, a dry run on a pre-existing `待处理` ticket, which prints the exact `state_id` that a legal
+  transition would PATCH and reads the reachable set successfully;
+- step 7, a real successful ticket write, proving the write path itself;
+- step 4's trace, which proves the happy path no longer touches the plan — the only thing S7b
+  changed about a legal transition is what it *stops* doing.
+
+S7 steps 30 and 35 already exercised two real legal transitions through the same `updateTicket`
+call, and that code is untouched.
+
+### Findings from the re-run
+
+**F9 · The server enforces the flows in both directions, including terminal states.**
+`已关闭 → 待处理` was refused (`400`, `100702`) even though "reopen" is a plausible operation. So the
+flow list is not merely advisory server-side: a state with no outgoing edge really is a dead end via
+the API. Practical consequence for an agent: closing a ticket through the API is irreversible
+through the API.
+
+**F10 · "no plan readable" and "the plan says nowhere" must not share a message.** The first cut of
+the advisory code returned a bare `undefined` for both, so a dry run on the closed `PD-YYHC-T19`
+claimed *could not read the state plan* when the plan had been read perfectly and simply had no
+outgoing edge. Reachability is now a three-way answer (`unknown` / `none` / `some`) with distinct
+wording, and a regression test covers the dead-end case. This was found only because the reusable
+smoke artifact happened to be in a terminal state — a reminder that the interesting cases live at
+the edges of the data, not in the middle.

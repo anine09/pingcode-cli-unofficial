@@ -115,15 +115,24 @@ The command surface gains a third group, `pingcode ticket`, with the same shape 
 (S§K, 5 endpoints) and share the product-scoped metadata pattern, so the marginal cost over idea is
 mostly command-layer surface, not new architecture.
 
-### D11 — tickets CAN pre-validate transitions, ideas cannot
+### D11 — tickets CAN publish their legal transitions, ideas cannot — and the CLI only *explains* with them
 
 Unlike idea, ticket exposes `GET /v1/ship/ticket_state_plans/{plan_id}/ticket_state_flows`
-(S§K2/K3). `ticket transition` therefore resolves the legal target states before sending the PATCH
-and fails locally with exit 2 — listing the reachable states — when the requested transition is not
-in the flow. It still surfaces a server rejection verbatim if the server disagrees.
+(S§K2/K3), and live that endpoint returns real, enforced edges. The CLI reads them to **explain** a
+rejection — the error `message` names the states reachable from the current one — and to answer
+`ticket transition --dry-run`. It does **not** refuse a transition locally.
 
-This asymmetry is deliberate and must be documented in SKILL.md: `idea transition` can only be
-validated by the server, `ticket transition` is validated locally first.
+*Amended in S7b after the live run (`research/s7-smoke.md` F5; design §13.2, §14.3).* Local
+refusal was implemented, then removed: the server refuses atomically with no state change, so
+pre-validation prevents no damage and saves only a round-trip, while a mis-identified state plan
+would refuse a **legal** move with no escape hatch (`--state-id` cannot skip a plan check,
+`--no-cache` cannot fix a wrong plan). Telling an agent "you cannot get there from here" when it
+can is far more expensive than one wasted request. The one surviving local refusal is a no-op move
+to the ticket's current state, which is tenant-independent and needs no API knowledge.
+
+The asymmetry is still real and still belongs in SKILL.md, but it is now about explanation:
+`idea update --state` can be told only which states exist, `ticket transition` can also be told
+which are reachable.
 
 ### D12 — `type_id` is mandatory on ticket create
 
@@ -152,7 +161,13 @@ exactly as idea does. `meta` gains the five ticket lookups.
 
 - `ticket create --product <p> --type <t> --title '[CLI smoke] …'` creates a real ticket and prints
   its identifier; `--dry-run --json` before it sends zero writes.
-- `ticket transition` refuses an illegal target state locally with exit 2 and lists the reachable
-  states, proven against the real API.
+- An illegal `ticket transition` leaves the ticket unchanged, exits non-zero, and the `--json`
+  error `message` names the states reachable from the current one — proven live.
+  *(Amended in S7b. The original wording demanded exit 2 from a local refusal. Two lessons: an AC
+  must specify an **observable outcome**, not an exit code — the outcome that matters is "unchanged
+  ticket, an error that says what to do instead", which the server delivers. And an AC must be
+  falsifiable in **your** environment: the original was contingent on the org having a
+  product-scoped state plan, which a default org does not, so it could not have been proven here
+  no matter how correct the code was.)*
 - `ticket update` with no fields exits 2, same as idea.
 - SKILL.md states the idea-vs-ticket transition asymmetry.
