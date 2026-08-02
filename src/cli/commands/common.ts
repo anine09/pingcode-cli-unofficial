@@ -128,6 +128,98 @@ export function requireFlag(value: string | undefined, flag: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// date range boundaries: --start / --end
+// ---------------------------------------------------------------------------
+
+/** Which end of a date range a value is being read for. */
+export type DateBoundary = 'start' | 'end';
+
+/** The two accepted spellings, quoted in every rejection message. */
+const DATE_BOUNDARY_FORMS = 'a calendar date (2026-08-31) or a 10-digit unix seconds value';
+
+const CALENDAR_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const UNIX_SECONDS_RE = /^\d{10}$/;
+
+/**
+ * Read a `--start` / `--end` flag into the 10-digit unix **seconds** the API
+ * speaks.
+ *
+ * Two accepted forms, distinguished by shape, so one flag suffices and no `-id`
+ * partner is needed — these are values, not references:
+ *
+ *  - `YYYY-MM-DD`, converted using the rule below;
+ *  - a 10-digit unix seconds integer, **passed through verbatim** as the escape
+ *    hatch for a caller who wants an exact instant.
+ *
+ * **The boundary rule, and why it is asymmetric:**
+ *
+ *  - `--start 2026-08-10` → `00:00:00` **local** on that date;
+ *  - `--end 2026-08-31` → `23:59:59` **local** on that date.
+ *
+ * A user writing a date range means the plan runs *through* the end date.
+ * Mapping both ends to local midnight would silently shorten every range by a
+ * day — and that error is invisible in a smoke run, because the CLI would echo
+ * back exactly what it sent. The asymmetry is surprising enough that it belongs
+ * in `--help`, and it is pinned by a timezone-fixed test rather than one that
+ * trusts the runner's zone.
+ *
+ * **Local, not UTC**, because `formatTimestamp` renders in local time: a
+ * UTC-in / local-out pair would make a `get` disagree with the `create` that
+ * produced it.
+ *
+ * Anything else — `2026-8-1`, `08/31/2026`, a 13-digit millisecond value — is a
+ * `UsageError` (exit 2) naming both accepted forms, raised before any request.
+ * `Date.parse` is deliberately **not** used as a fallback: it accepts far more
+ * than it should (`"2026"`, `"Aug 31"`) and resolves the ambiguous forms by
+ * guessing, which is the one thing a date flag must never do.
+ */
+export function parseDateBoundaryFlag(
+  value: string | undefined,
+  flag: string,
+  boundary: DateBoundary,
+): number {
+  const trimmed = requireFlag(value, flag);
+
+  if (UNIX_SECONDS_RE.test(trimmed)) return Number(trimmed);
+
+  const match = CALENDAR_DATE_RE.exec(trimmed);
+  if (match === null) throw badDateBoundary(flag, trimmed);
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  const at =
+    boundary === 'start'
+      ? new Date(year, month - 1, day, 0, 0, 0, 0)
+      : new Date(year, month - 1, day, 23, 59, 59, 0);
+
+  // `new Date(2026, 1, 30)` silently rolls into March, so the components are
+  // read back rather than trusted: an impossible date is a typo, not a request.
+  if (
+    at.getFullYear() !== year ||
+    at.getMonth() !== month - 1 ||
+    at.getDate() !== day ||
+    Number.isNaN(at.getTime())
+  ) {
+    throw new UsageError(`${flag} is not a real date: "${trimmed}"`, {
+      hint: `pass ${DATE_BOUNDARY_FORMS}`,
+    });
+  }
+
+  return Math.floor(at.getTime() / 1000);
+}
+
+function badDateBoundary(flag: string, value: string): UsageError {
+  const millisecondish = /^\d{12,14}$/.test(value);
+  return new UsageError(`${flag} is not a date: "${value}"`, {
+    hint: millisecondish
+      ? `${value} looks like milliseconds; the API speaks seconds — pass ${DATE_BOUNDARY_FORMS}`
+      : `pass ${DATE_BOUNDARY_FORMS}, zero-padded (2026-08-01, not 2026-8-1)`,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // state selection: --state <name|id> vs --state-id <id>
 // ---------------------------------------------------------------------------
 
