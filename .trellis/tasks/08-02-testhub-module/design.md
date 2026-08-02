@@ -121,17 +121,29 @@ Reuse `core/metadata.ts` wholesale. New kinds:
 | 'testhub-case-state'
 | 'testhub-case-type'
 | 'testhub-case-important-level'
-| 'testhub-plan'
-| 'testhub-plan-type'
 | 'testhub-run-status'
+| 'testhub-plan'
 ```
 
-**Library-scoped kinds** (cache key must include `library_id`):
-`testhub-library`, `testhub-suite`, `testhub-case-state`, `testhub-case-type`,
-`testhub-run-status`, `testhub-plan`, `testhub-plan-type`.
+**Library-scoped kinds** (cache key includes `library_id`):
+`testhub-suite`, `testhub-case-state`, `testhub-case-type`, `testhub-run-status`,
+`testhub-plan`.
 
-**Org-scoped kinds** (no `library_id` in cache key):
-`testhub-case-important-level`.
+**Unparented kinds** (no `library_id` in the cache key):
+- `testhub-library` — the **bootstrap** hop. It is what *produces* a `library_id`, so by
+  construction it cannot be scoped by one.
+- `testhub-case-important-level` — genuinely **org-level**: the one lookup in the module
+  with no `?library_id=` variant anywhere ([th#40]). Keying it per library would shard one
+  identical list into N cache entries and imply a scoping the API does not have.
+
+> **Corrected in S3.** Two fixes to the lists above.
+> 1. `'testhub-plan-type'` is **dropped**. It has no consumer: plan creation is outside the
+>    PRD's 15-endpoint MVP, S2 therefore ships no `planTypes` wrapper, and the S4 leaf
+>    inventory has no `plans create`. Seven kinds, not eight. (`TestPlanType` remains as a
+>    *type* in `types/api.ts`, where it records that the resource carries no kind
+>    discriminator — see §11.)
+> 2. `'testhub-library'` was listed as library-scoped, which cannot be true of the resolver
+>    that produces the library id. It is unparented, alongside `ship-product`.
 
 Rules carried over unchanged from ship §5 / M§6:
 
@@ -142,15 +154,28 @@ Rules carried over unchanged from ship §5 / M§6:
 - Cache key `(apiBase, clientId, libraryId, kind[, scope])`, 24 h TTL, `--no-cache`
   bypass, cleared by `auth login` / `auth logout`.
 - Writes that used a cached id are wrapped in `withCacheInvalidation`: on rejection, drop
-  the key, resolve again, retry once, then report with the "try `--no-cache`" hint.
+  the key, resolve again, retry once, then report with the "try `--no-cache`" hint. It
+  composes unchanged — no testhub-specific forking was needed.
 
 **Suite tree flattening**: suites are a tree served as a flat list, joined by a
 **`parent` reference object** and carrying a `/`-separated `paths` string ([th#9],
 [th#11]). The resolver flattens it and matches on name; if two nodes in different
 branches share a name, that is an ambiguity error listing both paths, not a silent pick.
-`core/metadata.ts` already has exactly this logic in `loadSuites` (written for ship);
-reuse it with the testhub endpoint rather than writing a second copy. Note that testhub
-suites carry **no `type` discriminator** — that field belongs to *ship* suites.
+Testhub suites carry **no `type` discriminator** — that field belongs to *ship* suites.
+
+S3 generalised ship's `loadSuites` into a shared `loadSuiteTree(ctx, path, query)` rather
+than copying it: the two areas differ only in endpoint and query. It now also accepts the
+server's own `paths` spelling (`登录/短信验证码`) as a typeable alias beside the computed
+`Parent / Child` form, because `paths` is what the API echoes back in `case.suite.paths`
+and therefore the string a user is most likely to paste. Ship sends no `paths`, so that
+addition is inert there.
+
+**Resolver names** (S4 calls these): `resolveTestLibrary(ctx, input)`,
+`resolveTestSuite(ctx, libraryId, input)`, `resolveCaseState(ctx, libraryId, input)`,
+`resolveCaseType(ctx, libraryId, input)`, `resolveRunStatus(ctx, libraryId, input)`,
+`resolveTestPlan(ctx, libraryId, input)`, `resolveCaseImportantLevel(ctx, input)`.
+`--executor` uses the existing org-directory `resolveUser(ctx, input)`; testhub adds no
+kind for it.
 
 **`--library` bootstraps everything else**: the library resolver is the first hop for every
 library-scoped kind. The CLI requires `--library <name|id>` on any command that needs

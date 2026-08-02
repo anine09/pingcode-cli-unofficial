@@ -53,7 +53,25 @@ export type MetaKind =
   /** Parented by the **product** id: which plan a product uses (ship GOTCHA #23). */
   | 'ship-ticket-state-plan'
   /** Parented by the **state plan** id, never by a product (design §13.3). */
-  | 'ship-ticket-state-flow';
+  | 'ship-ticket-state-flow'
+  // Testhub (测试管理). A **library** is the parent scope here, the way a product
+  // is in ship: `state_id`, `type_id`, `status_id`, the suite tree and the plan
+  // list are all resolved inside one library (testhub §5).
+  //
+  // Two exceptions, both deliberate:
+  //  - `testhub-library` is the **bootstrap** hop. It has no parent — it is what
+  //    produces the `library_id` every other kind below needs — so its cache key
+  //    carries no `parentId`.
+  //  - `testhub-case-important-level` is genuinely **org-level**: it is the one
+  //    lookup in the module with no library-scoped variant at all ([th#40]), so
+  //    keying it per library would fragment one list into N identical copies.
+  | 'testhub-library'
+  | 'testhub-suite'
+  | 'testhub-case-state'
+  | 'testhub-case-type'
+  | 'testhub-case-important-level'
+  | 'testhub-run-status'
+  | 'testhub-plan';
 
 export const CACHE_TTL_MS = 24 * 3600 * 1000;
 
@@ -642,7 +660,15 @@ function str(value: unknown): string | undefined {
  * it already is one.
  */
 
-function shipKey(ctx: Ctx, kind: MetaKind, parentId?: string, scope?: string): string {
+/**
+ * Cache key for any *parent-scoped* area resolver.
+ *
+ * Shared by ship (parent = a product, or a state plan for flows) and testhub
+ * (parent = a library). `parentId` is omitted for the bootstrap lookups that
+ * have no parent — `ship-product`, `testhub-library` — and for the genuinely
+ * org-level `testhub-case-important-level`.
+ */
+function scopedKey(ctx: Ctx, kind: MetaKind, parentId?: string, scope?: string): string {
   return cacheKeyFor({
     apiBase: ctx.apiBase,
     clientId: ctx.credentials.clientId,
@@ -663,7 +689,7 @@ export async function resolveProduct(ctx: Ctx, input: string): Promise<ResolveRe
     kind: 'ship-product',
     input,
     label: 'product',
-    cacheKey: shipKey(ctx, 'ship-product'),
+    cacheKey: scopedKey(ctx, 'ship-product'),
     load: (c) => loadList(c, ENDPOINTS.shipProducts, {}, ['identifier']),
   });
 }
@@ -679,7 +705,7 @@ function productScoped(
       kind,
       input,
       label,
-      cacheKey: shipKey(ctx, kind, productId),
+      cacheKey: scopedKey(ctx, kind, productId),
       load: (c) => loadList(c, path_, { product_id: productId }),
       ...(hint === undefined ? {} : { hint }),
     });
@@ -759,37 +785,75 @@ export async function resolveIdeaSuite(
     kind: 'ship-idea-suite',
     input,
     label: 'suite',
-    cacheKey: shipKey(ctx, 'ship-idea-suite', productId),
-    load: (c) => loadSuites(c, productId),
+    cacheKey: scopedKey(ctx, 'ship-idea-suite', productId),
+    load: (c) => loadSuiteTree(c, ENDPOINTS.shipIdeaSuites, { product_id: productId }),
     hint: 'two modules in different branches may share a name — pass the full path ("Parent / Child") or the id',
   });
 }
 
 export const SUITE_PATH_SEPARATOR = ' / ';
 
-async function loadSuites(ctx: Ctx, productId: string): Promise<Candidate[]> {
+/**
+ * Flatten a **tree served as a flat list** into resolver candidates.
+ *
+ * Shared by ship requirement modules (`GET /v1/ship/idea/suites?product_id=`,
+ * ship §D) and testhub case modules
+ * (`GET /v1/testhub/libraries/{id}/suites`, [th#9]/[th#11]) — the two are the
+ * same shape and must not grow two implementations. Only the path and query
+ * differ, so they are parameters.
+ *
+ * Both join on a **`parent` reference object**, never a `parent_id` scalar. That
+ * is the whole load-bearing detail: reading the wrong field yields a forest of
+ * roots, every computed path collapses to a bare name, and cross-branch
+ * ambiguity silently stops being detectable.
+ *
+ * Names are unique among siblings but not across the tree, so each node carries
+ * its full path as the label an ambiguity error prints **and** as a typeable
+ * alias. Two spellings are accepted as aliases:
+ *
+ *  - the path this function computes from the parent chain, `Parent / Child`;
+ *  - whatever the server itself put in `paths`, when it sends one. Testhub does
+ *    (`登录/短信验证码`, no spaces) and it is the string the API echoes back in
+ *    `case.suite.paths`, so it is the form a user is most likely to copy. Ship
+ *    sends no `paths`, where this is simply inert.
+ */
+async function loadSuiteTree(
+  ctx: Ctx,
+  path_: string,
+  query: Record<string, unknown>,
+): Promise<Candidate[]> {
   const rows = await collect(
-    paginate<unknown>(ctx, ENDPOINTS.shipIdeaSuites, { product_id: productId }, {
-      pageSize: 100,
-      limit: 1000,
-    }),
+    paginate<unknown>(ctx, path_, query, { pageSize: 100, limit: 1000 }),
   );
 
-  const nodes = new Map<string, { name: string | undefined; parentId: string | undefined }>();
+  const nodes = new Map<
+    string,
+    { name: string | undefined; parentId: string | undefined; serverPath: string | undefined }
+  >();
   for (const row of rows) {
     if (typeof row !== 'object' || row === null) continue;
     const record = row as Record<string, unknown>;
     const id = str(record.id);
     if (id === undefined) continue;
-    nodes.set(id, { name: str(record.name), parentId: str(refRecord(record.parent)?.id) });
+    nodes.set(id, {
+      name: str(record.name),
+      parentId: str(refRecord(record.parent)?.id),
+      serverPath: str(record.paths),
+    });
   }
 
   const candidates: Candidate[] = [];
   for (const [id, node] of nodes) {
-    const path_ = suitePath(nodes, id);
-    const candidate: Candidate = { id, name: node.name, path: path_ };
-    // The full path is also typeable, which is how a user resolves a collision.
-    if (path_ !== undefined && path_ !== node.name) candidate.aliases = [path_];
+    const path = suitePath(nodes, id);
+    const candidate: Candidate = { id, name: node.name, path };
+    // Every spelling of the path that is not just the bare name is typeable —
+    // that is how a user resolves a collision without looking up an id.
+    const aliases: string[] = [];
+    for (const alias of [path, node.serverPath]) {
+      if (alias === undefined || alias === node.name) continue;
+      if (!aliases.includes(alias)) aliases.push(alias);
+    }
+    if (aliases.length > 0) candidate.aliases = aliases;
     candidates.push(candidate);
   }
   return candidates;
@@ -828,7 +892,7 @@ export async function resolveProductMember(
     kind: 'ship-product-member',
     input,
     label: 'product member',
-    cacheKey: shipKey(ctx, 'ship-product-member', productId),
+    cacheKey: scopedKey(ctx, 'ship-product-member', productId),
     load: (c) => loadProductMembers(c, productId),
     hint: 'only members of this product can be assigned; add them in PingCode first',
   });
@@ -892,7 +956,7 @@ export async function findTicketStatePlanId(
   ctx: Ctx,
   productId: string,
 ): Promise<string | undefined> {
-  const key = shipKey(ctx, 'ship-ticket-state-plan', productId);
+  const key = scopedKey(ctx, 'ship-ticket-state-plan', productId);
   const cached = readCache(ctx, key);
   if (cached !== undefined) return cached[0]?.id;
 
@@ -938,7 +1002,7 @@ export async function loadTicketStateFlows(
   ctx: Ctx,
   statePlanId: string,
 ): Promise<{ edges: StateFlowEdge[]; cacheKey: string; fromCache: boolean }> {
-  const cacheKey = shipKey(ctx, 'ship-ticket-state-flow', statePlanId);
+  const cacheKey = scopedKey(ctx, 'ship-ticket-state-flow', statePlanId);
   const cached = readCache(ctx, cacheKey);
   if (cached !== undefined) {
     return { edges: cached.map(decodeEdge), cacheKey, fromCache: true };
@@ -1087,6 +1151,189 @@ function shipLocatorOf(raw: unknown): ShipLocator {
       str(refRecord(record.ticket_state_plan)?.id) ??
       str(record.state_plan_id),
   };
+}
+
+// ---------------------------------------------------------------------------
+// testhub (测试管理) resolvers — design §5
+// ---------------------------------------------------------------------------
+
+/**
+ * Testhub repeats ship's shape with one substitution: the parent is a
+ * **library**, not a product. `state_id`, `type_id`, `status_id`, the suite tree
+ * and the plan list are all library-scoped (testhub §5), so they are cached
+ * under the library id and never shared across libraries.
+ *
+ * Two things differ from ship and both are load-bearing:
+ *
+ *  - **The lookups are split across three URL shapes.** `case/states`,
+ *    `case/types` and `run/statuses` are *singular*-segment config views taking
+ *    `?library_id=`; `case_important_levels` is an *underscored* org-level list
+ *    taking nothing; suites and plans live *under* `/libraries/{id}/…`. The
+ *    factory below only covers the first shape — the other two get their own
+ *    resolvers rather than a factory parameter that would obscure the split.
+ *  - **The scope requirement is not uniform** (GOTCHA #2). `case/types` needs
+ *    `pcp:read:testhub:testcase`, but `case/states` and `run/statuses` need
+ *    `pcp:read:testhub:configuration`. A token without it cannot resolve a
+ *    `state_id` or a `status_id`, and therefore cannot perform **any** run
+ *    write — so those two resolvers carry a hint that names the scope, because
+ *    the server's bare 403 does not.
+ *
+ * Ids are never shape-validated here either. Testhub ids are 24-hex, but plan
+ * and case `short_id`s are 8-char base62 and users are 32-hex, so every resolver
+ * tries an exact id match first and passes the input through when it already is
+ * one.
+ */
+
+const CONFIGURATION_SCOPE_HINT =
+  'this lookup needs the pcp:read:testhub:configuration scope — a token granted only ' +
+  'testcase+testplan cannot resolve state or status ids, and therefore cannot write a run at all';
+
+/**
+ * The bootstrap hop: nothing else in testhub is reachable without a
+ * `library_id`, so every testhub command resolves this first and feeds the id to
+ * the resolvers below (design §5).
+ *
+ * `GET /v1/testhub/libraries` searches **names only** ([th#12]), exactly as ship
+ * products do, so the whole (small) list is loaded and the `identifier` is
+ * matched client-side as an alias. That is what makes `--library LIB` work.
+ *
+ * No parent, so no `parentId` in the cache key.
+ */
+export async function resolveTestLibrary(ctx: Ctx, input: string): Promise<ResolveResult> {
+  return await resolveWith(ctx, {
+    kind: 'testhub-library',
+    input,
+    label: 'test library',
+    cacheKey: scopedKey(ctx, 'testhub-library'),
+    load: (c) => loadList(c, ENDPOINTS.testhubLibraries, {}, ['identifier']),
+  });
+}
+
+/** The `?library_id=`-scoped config views. Mirrors ship's `productScoped`. */
+function libraryScoped(
+  kind: MetaKind,
+  label: string,
+  path_: string,
+  hint?: string,
+): (ctx: Ctx, libraryId: string, input: string) => Promise<ResolveResult> {
+  return async (ctx, libraryId, input) =>
+    await resolveWith(ctx, {
+      kind,
+      input,
+      label,
+      cacheKey: scopedKey(ctx, kind, libraryId),
+      load: (c) => loadList(c, path_, { library_id: libraryId }),
+      ...(hint === undefined ? {} : { hint }),
+    });
+}
+
+/** Resolves `state_id` — the only route to changing a case's state ([th#25], [th#28]). */
+export const resolveCaseState = libraryScoped(
+  'testhub-case-state',
+  'case state',
+  ENDPOINTS.testhubCaseStates,
+  `${CONFIGURATION_SCOPE_HINT}. A case's state can only be changed through PATCH /cases/{id}`,
+);
+
+/** Resolves `type_id`. The one config view in this group that needs no `configuration` scope. */
+export const resolveCaseType = libraryScoped(
+  'testhub-case-type',
+  'case type',
+  ENDPOINTS.testhubCaseTypes,
+);
+
+/**
+ * Resolves `status_id` — the hard prerequisite for every run write
+ * ([th#57], GOTCHA #5/#10).
+ *
+ * These items carry **no slug**: the English slug a run reports (`pass`) and the
+ * id a write needs are joined only through the localized `name` (通过), a
+ * correspondence the docs never state. Tenants can add their own statuses, whose
+ * names appear in no table at all — which is exactly why this is name
+ * resolution against the live list rather than a hardcoded map.
+ */
+export const resolveRunStatus = libraryScoped(
+  'testhub-run-status',
+  'run status',
+  ENDPOINTS.testhubRunStatuses,
+  `${CONFIGURATION_SCOPE_HINT}. Run statuses have no slug field, so they resolve by their ` +
+    'localized name (通过 / 受阻 / 失败 / 跳过 / 未测), and a tenant may have added its own',
+);
+
+/**
+ * Resolves `important_level_id`.
+ *
+ * **Org-level, and deliberately not library-scoped**: this is the one lookup in
+ * the module with no `?library_id=` variant anywhere ([th#40], testhub §5).
+ * Keying it per library would shard one identical list into N cache entries and
+ * imply a scoping the API does not have.
+ */
+export async function resolveCaseImportantLevel(
+  ctx: Ctx,
+  input: string,
+): Promise<ResolveResult> {
+  return await resolveWith(ctx, {
+    kind: 'testhub-case-important-level',
+    input,
+    label: 'important level',
+    cacheKey: scopedKey(ctx, 'testhub-case-important-level'),
+    load: (c) => loadList(c, ENDPOINTS.testhubCaseImportantLevels, {}),
+    hint: 'importance levels are organisation-wide in testhub — there is no per-library variant',
+  });
+}
+
+/**
+ * Case modules (模块) — a tree served flat, joined by a **`parent` reference
+ * object** and carrying a `/`-separated **`paths`** string ([th#9], [th#11]).
+ *
+ * Shares `loadSuiteTree` with ship, so a name that collides across branches is
+ * an ambiguity error listing both full paths, never a silent pick. Either
+ * spelling of the path is typeable: the computed `Parent / Child` or the
+ * server's own `Parent/Child`.
+ *
+ * The whole tree is loaded — no `?parent_id=` filter — because resolution has to
+ * see every branch to detect a collision at all.
+ */
+export async function resolveTestSuite(
+  ctx: Ctx,
+  libraryId: string,
+  input: string,
+): Promise<ResolveResult> {
+  return await resolveWith(ctx, {
+    kind: 'testhub-suite',
+    input,
+    label: 'suite',
+    cacheKey: scopedKey(ctx, 'testhub-suite', libraryId),
+    load: (c) => loadSuiteTree(c, ENDPOINTS.testhubLibrarySuites(libraryId), {}),
+    hint: 'two modules in different branches may share a name — pass the full path ("Parent / Child") or the id',
+  });
+}
+
+/**
+ * Plans are the only testhub resource addressed **under** their library in the
+ * URL, so the library id goes in the path rather than the query ([th#59]).
+ *
+ * `short_id` is accepted as an alias: `GET …/plans/{plan_id}` takes one
+ * ([th#53]) but `bulkRuns` needs the real id in its path and PATCH is id-only
+ * (GOTCHA #19), so resolving a short_id to an id here is what lets the same
+ * reference work on both a read and a write.
+ *
+ * Plan names are unique per library ([th#47]), so a name collision means two
+ * libraries, not two plans — which the library-scoped cache key already keeps
+ * apart.
+ */
+export async function resolveTestPlan(
+  ctx: Ctx,
+  libraryId: string,
+  input: string,
+): Promise<ResolveResult> {
+  return await resolveWith(ctx, {
+    kind: 'testhub-plan',
+    input,
+    label: 'test plan',
+    cacheKey: scopedKey(ctx, 'testhub-plan', libraryId),
+    load: (c) => loadList(c, ENDPOINTS.testhubLibraryPlans(libraryId), {}, ['short_id']),
+  });
 }
 
 // ---------------------------------------------------------------------------
