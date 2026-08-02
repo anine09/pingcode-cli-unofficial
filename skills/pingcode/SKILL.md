@@ -4,11 +4,12 @@ description: >-
   Use the `pingcode` CLI to work with PingCode (研发管理): 敏捷项目管理 (pjm) projects and work items —
   list and search work items (工作项), read a story/task/bug (需求/任务/缺陷), create one, update fields,
   move it to another state (状态流转) — 产品管理 (ship) products, requirements (需求 / idea) and
-  tickets (工单): search, read, create, update and transition them — and 测试管理 (testhub) test
-  libraries (测试库), test cases (用例), test plans (测试计划) and runs (执行用例): search cases, read
-  one, create and update a case, record a run result, and bulk add/update/delete the runs of a
-  plan. Also resolves project-, product- and library-scoped ids and organisation members
-  (项目/产品/测试库/迭代/成员). Triggers: pingcode, PingCode 工作项, 创建任务, 更新状态, 迭代 sprint,
+    tickets (工单): search, read, create, update and transition them — and 测试管理 (testhub) test
+  libraries (测试库), test cases (用例), test plans (测试计划) and runs (执行用例): create a library,
+  search cases, read one, create and update a case, create a plan, record a run result, and bulk
+  add/update/delete the runs of a plan. Also resolves project-, product- and library-scoped ids and
+  organisation members (项目/产品/测试库/迭代/成员). Triggers: pingcode, PingCode 工作项,
+ 创建任务, 更新状态, 迭代 sprint,
   产品 需求 工单, 测试用例 测试计划 执行用例 测试库, SCR-5 or SLC-1 style identifiers, a work-item or
   idea URL from a PingCode instance. Do NOT use for Wiki pages, customers or external users, the
   org chart beyond a member lookup, Insight/Goals/Flow, or webhooks — none of those are covered by
@@ -70,13 +71,16 @@ Credentials come from a PingCode application, not from a user account:
    flows need `configuration`.
 
    For the testhub (测试管理) commands, add:
-   - `pcp:read:testhub:library` — `pingcode testhub libraries list` / `get`, and the case-module
-     (模块) tree behind `--suite`. Every other testhub command starts by resolving a library, so
-     this one is not optional
+   - `pcp:read:testhub:library` — `pingcode testhub libraries list` / `get`, `testhub meta suites`,
+     and the case-module (模块) tree behind `--suite`. Every other testhub command starts by
+     resolving a library, so this one is not optional
+   - `pcp:write:testhub:library` — `testhub libraries create`, and nothing else. Grant it only if
+     you intend to create libraries: they cannot be deleted afterwards
    - `pcp:read:testhub:testcase` — `testhub cases list` / `get`, and `testhub meta case-types`
    - `pcp:write:testhub:testcase` — `testhub cases create` / `update`
-   - `pcp:read:testhub:testplan` — `testhub plans list` / `get`, and `testhub runs list`
-   - `pcp:write:testhub:testplan` — `testhub runs patch` / `bulk`
+   - `pcp:read:testhub:testplan` — `testhub plans list` / `get`, `testhub meta plan-types`, and
+     `testhub runs list`
+   - `pcp:write:testhub:testplan` — `testhub plans create`, `testhub runs patch` / `bulk`
    - `pcp:read:testhub:configuration` — **not optional, despite the name**: `testhub meta
      case-states`, `testhub meta run-statuses` and `testhub meta important-levels` all sit behind
      it, and they are the only source of a `state_id`, a `status_id` and an `important_level_id`.
@@ -84,8 +88,8 @@ Credentials come from a PingCode application, not from a user account:
      since `PATCH /runs/{id}` requires `status_id`, a token without this scope **cannot write a
       run at all**. The CLI adds that explanation to the 403 for all three of those lookups.
 
-   `--executor` on a run resolves through the organisation directory, so it also needs
-   `pcp:read:global:team`.
+   `--executor` on a run and `--assignee` on a plan both resolve through the organisation
+   directory, so they also need `pcp:read:global:team`.
 4. Copy the `client_id` and `client_secret`.
 
 Then:
@@ -376,6 +380,7 @@ pingcode testhub plans create --library LIB --name "2026 S2 回归" \
 
 `create` takes all five: `--name` (unique within the library), `--type` (from
 `testhub meta plan-types`), `--start`, `--end` and `--assignee`. There is no plan update or delete.
+**Read §4c rule 12 before passing a date** — `--end` lands on 23:59:59, not midnight.
 
 ### Runs 执行用例 — `testhub runs`
 
@@ -488,10 +493,12 @@ sharper write path.
 1. **Resolve the test library first, and never carry an id across libraries.** `state_id`,
    `type_id`, `status_id`, `suite_id` and the plan list are all **library-scoped**: two libraries
    never share a state, type or status id, even when the names are identical. `testhub cases list`,
-   `plans list`, `plans get`, `runs bulk` and the three library-scoped `meta` leaves all require
+   `plans list`, `plans get`, `plans create`, `runs bulk` and the five library-scoped `meta` leaves
+   (`case-states`, `case-types`, `run-statuses`, `plan-types`, `suites`) all require
    `--library <name|id>` and refuse to guess (exit 2). `cases get`, `cases update` and `runs patch`
    do not: they read the resource first and inherit its library. `runs list` needs one only to
    resolve a `--plan` or `--status` **by name** — `--plan-id` / `--status-id` work without it.
+   `libraries create` is the one testhub command with no parent at all.
 2. **`--json` search is the read path.** `testhub cases list` is `POST /v1/testhub/cases/search` and
    `testhub runs list` is `POST /v1/testhub/runs/search`; the plain `GET` lists are never called
    (unfiltered, `GET /v1/testhub/cases` scans every library you can see). One operator per field, no
@@ -542,6 +549,43 @@ sharper write path.
     lookup is outside this endpoint set, so read the keys off an existing case with
     `pingcode testhub cases get <case> --json`. Values for select-typed properties are option ids,
     not labels — the same trap as ship.
+12. **`--start` and `--end` on `plans create`: the end date is inclusive, and that is asymmetric.**
+    Both flags accept either form:
+    - `YYYY-MM-DD`, zero-padded. `--start 2026-08-10` becomes **00:00:00 local** on that date;
+      `--end 2026-08-31` becomes **23:59:59 local** on it.
+    - a **10-digit unix seconds** integer, passed through **verbatim** on both flags — no
+      end-of-day adjustment is applied to it. Use this when you want an exact instant.
+
+    The asymmetry is deliberate: a date range means the plan runs *through* the end date, and mapping
+    both ends to midnight would silently shorten every plan by a day — an error you would never see,
+    because the CLI echoes back exactly what it sent. Local time, not UTC, so that a `plans get`
+    agrees with the `plans create` that produced it.
+
+    Everything else is refused with exit 2 **before any request**: an unpadded `2026-8-1`, slashes
+    (`08/31/2026`), an ISO string with a time in it, a 13-digit **milliseconds** value, and an
+    impossible date such as `2026-02-30` (which JavaScript would otherwise roll silently into
+    March). `--end` earlier than `--start` is refused client-side too, and the message prints both
+    resolved unix values so you can see which end moved.
+13. **`plans create` needs all five fields, and `--assignee` has no default.** `--library`,
+    `--name`, `--type`, `--start`, `--end` and `--assignee` are all required. There is deliberately
+    no "assign it to me": an enterprise (client-credentials) token acts as the **bot user**, so a
+    default would quietly make a bot the owner 负责人 of every plan the CLI creates, and nobody would
+    notice until they went looking for whom to ask. Name a real person —
+    `pingcode settings users --keywords <name> --json` is the candidate set.
+14. **A plan type carries no `kind`, so the CLI cannot tell you which types need more.** Iteration
+    and release plan types additionally require `sprint_id` / `version_id` (and the `project_id`
+    they make mandatory), but the plan-type resource exposes only `id` / `name` / `url` / `library`
+    — there is **no `kind` discriminator**, and guessing from the localized name is not safe because
+    tenants rename them. `testhub meta plan-types` therefore lists names only, `plans create` sends
+    just the five fields, and if you pick a type that needs more, **the server's refusal is what you
+    see** — not a local warning. Pick the plain (普通) type unless you know the tenant's setup.
+15. **A library can be created but never updated or deleted.** `--identifier` on
+    `testhub libraries create` must be **unique across the organisation** and the server enforces it
+    (a duplicate is rejected server-side; the CLI does not pre-check, because a probe would race).
+    Testhub publishes no library DELETE and no library PATCH, so a library created here is permanent
+    and unrenameable: get the name and identifier right the first time, and mark throwaway ones
+    (for example `[CLI smoke] …`) *before* creating them. The CLI says so on stderr after each
+    create.
 
 ## 5. Agent workflow
 
@@ -558,8 +602,12 @@ sharper write path.
      `product meta members --product <p> --json` before setting an assignee, and
      `product meta ticket-types --product <p> --json` before creating a ticket — `--type` is required there.
    - testhub: `pingcode testhub meta case-states --library <l> --json`, `case-types`,
-     `run-statuses` (the source of `--status`, needed by every run write) and the org-wide
-     `important-levels`. Find the plan with `pingcode testhub plans list --library <l> --json`.
+     `run-statuses` (the source of `--status`, needed by every run write), `suites` (the `PATH`
+     column is the spelling `--suite` takes) and the org-wide `important-levels`. Find the plan with
+     `pingcode testhub plans list --library <l> --json`, or create one — `testhub meta plan-types
+     --library <l> --json` first, since `--type` on `plans create` comes from there. If the tenant
+     has no usable library at all, `pingcode testhub libraries create` is the bootstrap; read §4c
+     rule 15 first, because it cannot be undone.
 4. Read before writing: `pingcode project work-item get <ref> --json`, `pingcode product idea get <ref> --json`,
    `pingcode product ticket get <ref> --json` or `pingcode testhub cases get <ref> --json` — and for a
    step-level run edit, read the run's steps first, because `--step` must cover all of them.
@@ -579,9 +627,12 @@ attachments, Insight/Goals/Flow/Plan, and webhooks. PingCode has no REST API for
 they are configured in PingCode Flow's UI.
 
 Inside testhub, this version deliberately leaves out: case **deletion** (irreversible, with no
-undelete), library and case-module writes, plan create/update, `POST /v1/testhub/runs` and
-`PUT /runs/{id}` (documented to blank the executor when the field is omitted — untested and not
-worth testing), every configuration write, the case/run history reads, and the case-property lookup.
+undelete), library **update** and the four library-member endpoints, case-module (suite) writes,
+plan **update** and **delete**, `POST /v1/testhub/runs` and `PUT /runs/{id}` (documented to blank the
+executor when the field is omitted — untested and not worth testing), every configuration write, the
+case/run history reads, and the case-property lookup. Library and plan *creation* **are** covered
+(`testhub libraries create`, `testhub plans create`), so the CLI can bootstrap its own fixtures; only
+iteration and release plan types are out of reach, for the reason in §4c rule 14.
 
 ## 7. Installing this skill elsewhere
 

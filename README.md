@@ -63,11 +63,12 @@ The CLI authenticates as an **application**, not as a user, using the OAuth
    | `pcp:read:ship:ticket` | `product ticket list` / `get`, `product meta ticket-states` / `ticket-priorities` / `ticket-types` / `ticket-channels` / `ticket-properties` |
    | `pcp:write:ship:ticket` | `product ticket create` / `update` / `transition` |
    | `pcp:read:ship:configuration` | optional — only the state-plan pre-check in `product ticket transition`; without it the CLI warns and lets the server judge |
-   | `pcp:read:testhub:library` | `testhub libraries list` / `get`, and the case-module (模块) tree behind `--suite` |
+   | `pcp:read:testhub:library` | `testhub libraries list` / `get`, `testhub meta suites`, and the case-module (模块) tree behind `--suite` |
+   | `pcp:write:testhub:library` | `testhub libraries create` — grant it only if you mean to create libraries; they cannot be deleted |
    | `pcp:read:testhub:testcase` | `testhub cases list` / `get`, `testhub meta case-types` |
    | `pcp:write:testhub:testcase` | `testhub cases create` / `update` |
-   | `pcp:read:testhub:testplan` | `testhub plans list` / `get`, `testhub runs list` |
-   | `pcp:write:testhub:testplan` | `testhub runs patch` / `bulk` |
+   | `pcp:read:testhub:testplan` | `testhub plans list` / `get`, `testhub meta plan-types`, `testhub runs list` |
+   | `pcp:write:testhub:testplan` | `testhub plans create`, `testhub runs patch` / `bulk` |
    | `pcp:read:testhub:configuration` | **not optional** — `testhub meta case-states` / `run-statuses` / `important-levels`, i.e. every `state_id`, `status_id` and `important_level_id` |
 
    Every ship command begins by resolving a product name, so `pcp:read:ship:product` is required
@@ -79,7 +80,8 @@ The CLI authenticates as an **application**, not as a user, using the OAuth
    `pcp:read:testhub:configuration` is *not* optional despite the name, because `case/states` and
    `run/statuses` live behind it while their sibling `case/types` does not. A token without it can
    list cases, plans and runs but cannot resolve a `status_id`, and `PATCH /runs/{id}` requires one,
-   so it cannot write a run at all. `--executor` also needs `pcp:read:global:team`.
+   so it cannot write a run at all. `--executor` on a run and `--assignee` on a plan both resolve
+   through the organisation directory, so they also need `pcp:read:global:team`.
 
 4. Copy the `client_id` and `client_secret`.
 
@@ -137,11 +139,12 @@ pingcode project work-item  list | get <ref> | create | update <ref> | transitio
 pingcode project meta       types | states | priorities | sprints
 
 # testhub (测试管理)
-pingcode testhub libraries  list | get <library>
+pingcode testhub libraries  list | get <library> | create
 pingcode testhub cases      list | get <ref> | create | update <ref>
-pingcode testhub plans      list | get <ref>
+pingcode testhub plans      list | get <ref> | create
 pingcode testhub runs       list | patch <run> | bulk
 pingcode testhub meta       case-states | case-types | important-levels | run-statuses
+                            plan-types | suites
 
 # 后台设置
 pingcode settings  users
@@ -197,10 +200,14 @@ pingcode product ticket transition SLC-7 --state 处理中 --json
 # testhub: resolve the test library first — states, types, statuses, modules and plans hang off it
 pingcode testhub libraries list --json
 pingcode testhub libraries get LIB --json
+pingcode testhub libraries create --name "Payments" --identifier PAY --json   # permanent: no DELETE
 
 pingcode testhub meta case-states      --library LIB --json   # --state / state_id
 pingcode testhub meta case-types       --library LIB --json   # --type / type_id
 pingcode testhub meta run-statuses     --library LIB --json   # --status / status_id
+pingcode testhub meta plan-types       --library LIB --json   # --type on `plans create`
+pingcode testhub meta suites           --library LIB --json   # --suite; the PATH column is the key
+pingcode testhub meta suites           --library LIB --parent-id root --json   # top level only
 pingcode testhub meta important-levels --json                 # org-wide: takes no --library
 
 pingcode testhub cases list --library LIB --state 已评审 --json
@@ -210,6 +217,8 @@ pingcode testhub cases update aB3dEf9h --state 已评审 --json
 
 pingcode testhub plans list --library LIB --json
 pingcode testhub plans get "2026 S1 回归" --library LIB --json
+pingcode testhub plans create --library LIB --name "2026 S2 回归" \
+  --type 普通测试 --start 2026-08-10 --end 2026-08-31 --assignee 张三 --dry-run --json
 
 pingcode testhub runs list --library LIB --plan "2026 S1 回归" --json
 pingcode testhub runs patch 7hK2mQ9x --status 通过 --remark "retested on iOS" --json
@@ -350,10 +359,11 @@ the sharpest in the CLI:
 
 - **A test library is testhub's project.** `state_id`, `type_id`, `status_id`, `suite_id` and the
   plan list are all library-scoped — two libraries never share a state, type or status id, even when
-  the names match. `testhub cases list`, `plans list`, `plans get`, `runs bulk` and the three
-  library-scoped `meta` leaves require `--library <name|id>` (exit 2 without it). `cases get`,
-  `cases update` and `runs patch` read the resource first and inherit its library; `runs list` needs
-  one only to resolve `--plan` / `--status` by name.
+  the names match. `testhub cases list`, `plans list`, `plans get`, `plans create`, `runs bulk` and
+  the five library-scoped `meta` leaves (`case-states`, `case-types`, `run-statuses`, `plan-types`,
+  `suites`) require `--library <name|id>` (exit 2 without it). `cases get`, `cases update` and
+  `runs patch` read the resource first and inherit its library; `runs list` needs one only to
+  resolve `--plan` / `--status` by name. `libraries create` is the one testhub leaf with no parent.
 - **`cases list` and `runs list` are `POST …/search`.** The plain `GET` lists are never used —
   unfiltered, `GET /v1/testhub/cases` scans every library the token can see. Same DSL limits as
   ship: one operator per field, no `$and`/`$or`, no sorting.
@@ -389,9 +399,35 @@ the sharpest in the CLI:
   keys have no discovery command in this version — testhub's case-property lookup is outside the
   implemented endpoint set, so read the keys off an existing case with `cases get <case> --json`.
   Select-typed values are option ids, not labels.
-- **Not exposed on purpose:** case deletion (irreversible), library and module writes, plan
-  create/update, `POST /v1/testhub/runs` and `PUT /runs/{id}` (documented to blank the executor when
-  the field is omitted — unverified and untested), configuration writes, and the history reads.
+- **`--start` / `--end` on `plans create`: the end date is inclusive.** Both flags take either a
+  zero-padded `YYYY-MM-DD` or a 10-digit unix **seconds** integer. A calendar date resolves to
+  **00:00:00 local** for `--start` and **23:59:59 local** for `--end`; a raw integer is passed
+  through **verbatim** on both, with no end-of-day adjustment. The asymmetry is deliberate — a range
+  runs *through* its end date, and mapping both ends to midnight would silently shorten every plan
+  by a day, which no smoke run would catch because the CLI echoes back what it sent. Local rather
+  than UTC so that `plans get` agrees with the `plans create` that produced it. Rejected with exit 2
+  **before any request**: an unpadded `2026-8-1`, slashes, an ISO string carrying a time, a 13-digit
+  milliseconds value, and an impossible date like `2026-02-30` (which JS would roll into March).
+  `--end` before `--start` is refused client-side, printing both resolved unix values.
+- **`plans create` requires all five fields and `--assignee` has no default.** `--library`,
+  `--name` (unique within the library), `--type`, `--start`, `--end`, `--assignee`. There is no
+  "assign to me" because a client-credentials token acts as the **bot user**, so a default would
+  quietly make a bot the 负责人 of every plan the CLI creates.
+- **A plan type carries no `kind`, so the CLI cannot classify it.** Iteration and release types also
+  need `sprint_id` / `version_id` (and the `project_id` those make mandatory), but the plan-type
+  resource exposes only `id` / `name` / `url` / `library` — and tenants rename these, so the name is
+  not a safe discriminator. `plans create` sends the five fields and surfaces the **server's**
+  refusal for a type that needs more; it does not warn locally. Use the plain (普通) type unless you
+  know the tenant's configuration.
+- **A library can be created but never updated or deleted.** `--identifier` is unique across the
+  organisation and the server enforces it (no client-side probe: it would race and double the
+  request count). Testhub publishes neither a library DELETE nor a library PATCH, so name it right
+  the first time — the CLI prints that warning on stderr after every create.
+- **Not exposed on purpose:** case deletion (irreversible), library **update** and the member
+  endpoints, case-module (suite) writes, plan **update**/**delete**, `POST /v1/testhub/runs` and
+  `PUT /runs/{id}` (documented to blank the executor when the field is omitted — unverified and
+  untested), configuration writes, and the history reads. Library and plan *creation* are covered,
+  which is what lets the CLI bootstrap its own fixtures.
 
 
 ---

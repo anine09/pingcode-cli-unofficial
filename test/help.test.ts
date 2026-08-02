@@ -29,6 +29,18 @@ function leafPaths(command: Command, prefix: string[] = []): string[][] {
   return children.flatMap((child) => leafPaths(child, own));
 }
 
+/**
+ * Every command that *has* children, i.e. the containers rather than the leaves.
+ * Returned relative to the root, so a top-level group is one segment and a
+ * subgroup is two.
+ */
+function containerPaths(command: Command, prefix: string[] = []): string[][] {
+  const own = [...prefix, command.name()];
+  const children = command.commands.filter((child) => child.name() !== 'help');
+  if (children.length === 0) return [];
+  return [own, ...children.flatMap((child) => containerPaths(child, own))];
+}
+
 describe('command surface', () => {
   const program = buildProgram();
 
@@ -42,7 +54,7 @@ describe('command surface', () => {
     ]);
   });
 
-  it('registers every subcommand and nothing else', () => {
+  it('registers every leaf command and nothing else', () => {
     const paths = program.commands
       .filter((command) => command.name() !== 'help')
       .flatMap((command) => leafPaths(command))
@@ -104,6 +116,44 @@ describe('command surface', () => {
       'testhub meta suites',
       'settings users',
     ]);
+  });
+
+  /**
+   * The shape of the tree, in the three numbers the planning documents keep
+   * conflating — asserted separately from the exhaustive leaf list above so the
+   * arithmetic is written down once and stops being re-derived by hand.
+   *
+   * `implement.md` S5 asked for "still 15 subgroups". That is two numbers added
+   * together: there are **10** subgroups (`product idea|ticket|meta`,
+   * `project work-item|meta`, `testhub libraries|cases|plans|runs|meta`), and 15
+   * is what you get by including the 5 top-level groups — i.e. every command that
+   * has children at all. Groups + subgroups + leaves is therefore 5 + 10 + 55,
+   * and "subgroup" here always means the second level only.
+   */
+  it('is 5 groups, 10 subgroups and 55 leaves', () => {
+    const roots = program.commands.filter((command) => command.name() !== 'help');
+    const containers = roots.flatMap((command) => containerPaths(command));
+    const groups = containers.filter((parts) => parts.length === 1);
+    const subgroups = containers.filter((parts) => parts.length === 2);
+    const leaves = roots.flatMap((command) => leafPaths(command));
+
+    expect(groups.map((parts) => parts.join(' '))).toHaveLength(5);
+    expect(subgroups.map((parts) => parts.join(' '))).toEqual([
+      'product idea',
+      'product ticket',
+      'product meta',
+      'project work-item',
+      'project meta',
+      'testhub libraries',
+      'testhub cases',
+      'testhub plans',
+      'testhub runs',
+      'testhub meta',
+    ]);
+    expect(leaves).toHaveLength(55);
+    // Nothing nests deeper than a subgroup: every leaf is 2 or 3 segments.
+    expect(containers.filter((parts) => parts.length > 2)).toEqual([]);
+    expect(leaves.every((parts) => parts.length === 2 || parts.length === 3)).toBe(true);
   });
 
   it('accepts the global flags after the subcommand too', () => {
@@ -264,6 +314,8 @@ describe('SKILL.md agrees with the CLI (R4.5)', () => {
   it('names every testhub scope the commands need (Gate G3)', () => {
     for (const scope of [
       'pcp:read:testhub:library',
+      // `libraries create` — the only write scope the module gained this milestone.
+      'pcp:write:testhub:library',
       'pcp:read:testhub:testcase',
       'pcp:write:testhub:testcase',
       'pcp:read:testhub:testplan',
@@ -272,6 +324,28 @@ describe('SKILL.md agrees with the CLI (R4.5)', () => {
     ]) {
       expect(skill, scope).toContain(scope);
     }
+  });
+
+  it('states the --start/--end date rule with its end-of-day asymmetry (Gate G3)', () => {
+    // `--help` states the rule per flag, but only the prose can explain *why* the
+    // two ends differ — and a silent one-day-short plan is invisible in a smoke
+    // run, because the CLI echoes back exactly what it sent.
+    expect(skill).toMatch(/YYYY-MM-DD/);
+    expect(skill).toMatch(/10-digit\s+unix\s+seconds/i);
+    expect(skill).toMatch(/00:00:00/);
+    expect(skill).toMatch(/23:59:59/);
+    expect(skill).toMatch(/local/i);
+    // the markdown emphasises *through*, so the asterisks are optional here
+    expect(skill).toMatch(/\*?through\*?\s+the\s+end\s+date/i);
+    // the rejected forms, so an agent does not retry a slash date three times
+    expect(skill).toMatch(/2026-8-1/);
+    expect(skill).toMatch(/milliseconds/i);
+  });
+
+  it('states that --assignee has no default because the token is a bot (Gate G3)', () => {
+    expect(skill).toMatch(/no\s+default/i);
+    expect(skill).toMatch(/bot\s+user/i);
+    expect(skill).toMatch(/`?--assignee`?/);
   });
 
   it('states the testhub rules that only prose can carry (Gate G3)', () => {
@@ -291,6 +365,17 @@ describe('SKILL.md agrees with the CLI (R4.5)', () => {
     expect(skill).toMatch(/`?short_id`?\s+is\s+read-only/i);
     expect(skill).toMatch(/no\s+`?--maintenance`?\s+flag/i);
     expect(skill).toMatch(/no\s+discovery\s+command|no\s+property-lookup\s+command/i);
+  });
+
+  it('states the bootstrap-leaf rules the server will otherwise teach you (Gate G3)', () => {
+    // `libraries create` and `plans create` are the module's two irreversible-ish
+    // writes: a library can never be deleted, and a plan type the CLI cannot
+    // classify fails server-side with no local warning.
+    expect(skill).toMatch(/unique\s+across\s+the\s+organisation/i);
+    expect(skill).toMatch(/no\s+library\s+update\s+or\s+delete/i);
+    expect(skill).toMatch(/all\s+five/i);
+    expect(skill).toMatch(/no\s+`?kind`?\s+discriminator|carries\s+no\s+kind/i);
+    expect(skill).toMatch(/--end`?\s+(earlier\s+than|before|that\s+precedes)/i);
   });
 
   it('no longer tells the agent that ship is out of scope', () => {
