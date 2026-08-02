@@ -743,7 +743,14 @@ export function parseTestRunStatus(raw: unknown): TestRunStatus {
   return status;
 }
 
-/** No wrapper in this slice (plan creation is out of scope); parser kept beside its type. */
+/**
+ * Plan types ([th#60]). Read by `planTypes()` to resolve the `type_id` that
+ * `createPlan()` requires.
+ *
+ * There is **no `kind` discriminator** — only `id` / `url` / `name` / `library`
+ * — so nothing here can tell a 迭代测试 from a 发布测试, and the localized name
+ * must not be used to guess: tenants rename them (testhub §10.7).
+ */
 export function parseTestPlanType(raw: unknown): TestPlanType {
   const record = asRecord(raw);
   const planType: TestPlanType = {

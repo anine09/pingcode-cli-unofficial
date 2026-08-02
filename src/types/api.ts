@@ -692,13 +692,14 @@ export type TestRunStatus = {
 };
 
 /**
- * `GET /v1/testhub/libraries/{library_id}/plan_types` — read for completeness;
- * **no endpoint or wrapper is exposed in this slice** (plan creation is out of
- * PRD scope).
+ * `GET /v1/testhub/libraries/{library_id}/plan_types` ([th#60]) — the source of
+ * the `type_id` that plan creation requires.
  *
  * The resource is `{id, url, library, name}`: there is **no kind discriminator**,
  * so telling a 迭代测试 from a 发布测试 is only possible by matching the
- * localized `name` (testhub §10.7).
+ * localized `name` (testhub §10.7) — which tenants rename, so the CLI does not
+ * try. The consequence is that a type demanding `sprint_id` / `version_id`
+ * cannot be identified before the server refuses it.
  */
 export type TestPlanType = {
   id: string;

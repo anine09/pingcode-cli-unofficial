@@ -115,6 +115,17 @@ export const ENDPOINTS = {
 
   testhubLibraryPlans: (libraryId: string): string =>
     `/v1/testhub/libraries/${encodeURIComponent(libraryId)}/plans`,
+  /**
+   * Plan types ([th#60]). Scope is **`pcp:read:testhub:testplan`**, not
+   * `configuration` — unlike the `case/states` and `run/statuses` config views
+   * this one sits beside, so a 403 here must not be blamed on the
+   * configuration scope.
+   *
+   * The resource carries no `kind` discriminator, so which types demand a
+   * `sprint_id` or a `version_id` is not knowable from this list (testhub §10.7).
+   */
+  testhubLibraryPlanTypes: (libraryId: string): string =>
+    `/v1/testhub/libraries/${encodeURIComponent(libraryId)}/plan_types`,
   /** `plan_id` accepts **id or short_id** on GET ([th#53]); PATCH is id-only ([th#62]). */
   testhubLibraryPlan: (libraryId: string, planId: string): string =>
     `/v1/testhub/libraries/${encodeURIComponent(libraryId)}/plans/${encodeURIComponent(planId)}`,

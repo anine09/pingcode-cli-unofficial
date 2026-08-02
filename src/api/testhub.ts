@@ -10,6 +10,7 @@ import type {
   TestCaseType,
   TestLibrary,
   TestPlan,
+  TestPlanType,
   TestRun,
   TestRunBulkResult,
   TestRunStatus,
@@ -28,6 +29,7 @@ import {
   parseTestCaseType,
   parseTestLibrary,
   parseTestPlan,
+  parseTestPlanType,
   parseTestRun,
   parseTestRunBulkResult,
   parseTestRunStatus,
@@ -57,8 +59,14 @@ import {
  * Deliberately absent, per PRD scope: `PUT /runs/{id}` (strictly worse than
  * PATCH — it forces the whole `steps[]` array and blanks the executor when
  * `executor_id` is omitted, GOTCHA #8), `DELETE /cases/{id}` (irreversible, no
- * undelete endpoint), the `cases/bulk` and `runs/bulk` importer endpoints, plan
- * create/update, every configuration **write**, and the three history reads.
+ * undelete endpoint), the `cases/bulk` and `runs/bulk` importer endpoints,
+ * library / suite / plan **update** and **delete**, the library-member
+ * endpoints, every configuration **write**, and the three history reads.
+ *
+ * Library and plan **create** were on that list until this milestone. They are
+ * here now because the module could not otherwise produce the fixtures its own
+ * acceptance run needs — the previous smoke had to bootstrap a library over raw
+ * HTTP.
  */
 
 // ---------------------------------------------------------------------------
@@ -113,6 +121,32 @@ export async function getLibrary(
     method: 'GET',
     path: ENDPOINTS.testhubLibrary(libraryId),
     query: { ...options },
+  });
+  return parseTestLibrary(raw);
+}
+
+/**
+ * Required: `name`, `identifier` ([th#2]). The `identifier` is
+ * **organisation-unique** and the server enforces it; the CLI does not probe
+ * first, because a client-side existence check would double the request count,
+ * race, and still be wrong under concurrent writes.
+ *
+ * `scope_type` / `scope_id` / `members[]` are deliberately not exposed: the CLI
+ * creates organisation-scoped libraries, which is the API default, and member
+ * management is out of scope. `visibility` defaults to `private` server-side.
+ */
+export type CreateLibraryInput = {
+  name: string;
+  identifier: string;
+  description?: string | undefined;
+  visibility?: 'public' | 'private' | string | undefined;
+};
+
+export async function createLibrary(ctx: Ctx, input: CreateLibraryInput): Promise<TestLibrary> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.testhubLibraries,
+    body: compact(input),
   });
   return parseTestLibrary(raw);
 }
@@ -318,6 +352,56 @@ export async function getPlan(
     path: ENDPOINTS.testhubLibraryPlan(libraryId, planId),
   });
   return parseTestPlan(raw);
+}
+
+/**
+ * Required: `name` (unique **per library**), `type_id`, `start_at`, `end_at`,
+ * `assignee_id` ([th#47]). All five, always — there is no partial plan.
+ *
+ * `project_id` / `sprint_id` / `version_id` are **not** exposed. They are
+ * conditionally required — `project_id` whenever either of the other two is
+ * set, `sprint_id` only for an iteration type, `version_id` only for a release
+ * type — and a plan type carries no `kind` discriminator, so the CLI cannot
+ * tell which of the three a given `type_id` demands. A plain (普通) plan needs
+ * none of them; for the other two kinds the server's refusal is what the user
+ * sees, which is honest rather than guessed.
+ *
+ * `start_at` / `end_at` are 10-digit unix **seconds**. Turning a user's date
+ * into one is the command layer's job (`parseDateBoundaryFlag`), not this
+ * wrapper's.
+ */
+export type CreatePlanInput = {
+  name: string;
+  type_id: string;
+  start_at: number;
+  end_at: number;
+  assignee_id: string;
+};
+
+export async function createPlan(
+  ctx: Ctx,
+  libraryId: string,
+  input: CreatePlanInput,
+): Promise<TestPlan> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.testhubLibraryPlans(libraryId),
+    body: compact(input),
+  });
+  return parseTestPlan(raw);
+}
+
+/**
+ * Plan types of one library ([th#60]) — the only source of a `type_id`.
+ *
+ * **Scope `pcp:read:testhub:testplan`**, not `configuration`: this endpoint
+ * lives under `/libraries/{id}/…` rather than beside the singular-segment
+ * config views, and attaching a configuration-scope hint to its 403 would
+ * misdirect. Loaded whole, like the other lookups — the list is small and the
+ * endpoint declares no paging.
+ */
+export async function planTypes(ctx: Ctx, libraryId: string): Promise<TestPlanType[]> {
+  return await listAllOf(ctx, ENDPOINTS.testhubLibraryPlanTypes(libraryId), {}, parseTestPlanType);
 }
 
 // ---------------------------------------------------------------------------

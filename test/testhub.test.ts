@@ -20,6 +20,8 @@ import {
   caseStates,
   caseTypes,
   createCase,
+  createLibrary,
+  createPlan,
   getCase,
   getLibrary,
   getPlan,
@@ -34,6 +36,7 @@ import {
   listPlans,
   listSuites,
   patchRun,
+  planTypes,
   runStatuses,
   searchCases,
   searchRuns,
@@ -290,6 +293,48 @@ describe('libraries api', () => {
     await getLibrary(ctx, 'a b');
     expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/libraries/a%20b');
   });
+
+  it('creates a library with name and identifier only ([th#2])', async () => {
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ id: 'lib-new', identifier: 'CLIB', name: 'CLI Bootstrap', is_archived: 0 }),
+    ]);
+    const library = await createLibrary(ctx, { name: 'CLI Bootstrap', identifier: 'CLIB' });
+    expect(library.id).toBe('lib-new');
+    expect(fake.calls[0]?.method).toBe('POST');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/libraries');
+    // No scope_type/scope_id/members: organisation scope is the API default.
+    expect(fake.calls[0]?.body).toEqual({ name: 'CLI Bootstrap', identifier: 'CLIB' });
+  });
+
+  it('sends the optional library fields when given, and omits them otherwise', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'lib-new' })]);
+    await createLibrary(ctx, {
+      name: 'CLI Bootstrap',
+      identifier: 'CLIB',
+      description: 'smoke fixtures',
+      visibility: 'public',
+    });
+    expect(fake.calls[0]?.body).toEqual({
+      name: 'CLI Bootstrap',
+      identifier: 'CLIB',
+      description: 'smoke fixtures',
+      visibility: 'public',
+    });
+  });
+
+  it('drops undefined library fields rather than sending them as null (compact)', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'lib-new' })]);
+    await createLibrary(ctx, {
+      name: 'CLI Bootstrap',
+      identifier: 'CLIB',
+      description: undefined,
+      visibility: undefined,
+    });
+    const body = fake.calls[0]?.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(['identifier', 'name']);
+    expect('description' in body).toBe(false);
+    expect('visibility' in body).toBe(false);
+  });
 });
 
 describe('suites api', () => {
@@ -435,6 +480,77 @@ describe('plans api', () => {
     expect(plan.state?.type).toBe('in_progress');
     expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/libraries/lib-1/plans/zz99');
     expect(fake.calls[0]?.method).toBe('GET');
+  });
+
+  it('creates a plan under its library with all five required fields ([th#47])', async () => {
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ id: 'plan-new', short_id: 'ab12', name: 'Bootstrap Plan' }),
+    ]);
+    const plan = await createPlan(ctx, 'lib-1', {
+      name: 'Bootstrap Plan',
+      type_id: 'pt-plain',
+      start_at: 1_754_784_000,
+      end_at: 1_756_684_799,
+      assignee_id: 'user-7',
+    });
+    expect(plan.short_id).toBe('ab12');
+    expect(fake.calls[0]?.method).toBe('POST');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/libraries/lib-1/plans');
+    // project_id / sprint_id / version_id are deliberately not exposed.
+    expect(fake.calls[0]?.body).toEqual({
+      name: 'Bootstrap Plan',
+      type_id: 'pt-plain',
+      start_at: 1_754_784_000,
+      end_at: 1_756_684_799,
+      assignee_id: 'user-7',
+    });
+  });
+
+  it('keeps the plan dates as raw unix seconds, formatting nothing', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'plan-new' })]);
+    await createPlan(ctx, 'lib-1', {
+      name: 'p',
+      type_id: 't',
+      start_at: 1_754_784_000,
+      end_at: 1_756_684_799,
+      assignee_id: 'u',
+    });
+    const body = fake.calls[0]?.body as { start_at: unknown; end_at: unknown };
+    expect(typeof body.start_at).toBe('number');
+    expect(typeof body.end_at).toBe('number');
+  });
+
+  it('percent-encodes the library id into the plan-create path', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'plan-new' })]);
+    await createPlan(ctx, 'a b', {
+      name: 'p',
+      type_id: 't',
+      start_at: 1,
+      end_at: 2,
+      assignee_id: 'u',
+    });
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/libraries/a%20b/plans');
+  });
+
+  it('lists plan types under the library, with no library_id query ([th#60])', async () => {
+    const { ctx, fake } = ctxFor([
+      () => envelope([{ id: 'pt-plain', name: '普通测试' }, { id: 'pt-sprint', name: '迭代测试' }]),
+    ]);
+    const types = await planTypes(ctx, 'lib-1');
+    expect(types.map((type) => type.name)).toEqual(['普通测试', '迭代测试']);
+    const url = new URL(fake.urls()[0] ?? '');
+    // Nested under the library, unlike the singular-segment config views which
+    // take ?library_id= — a different URL shape and a different scope.
+    expect(url.pathname).toBe('/v1/testhub/libraries/lib-1/plan_types');
+    expect(url.searchParams.get('library_id')).toBeNull();
+    expect(fake.calls[0]?.method).toBe('GET');
+  });
+
+  it('exposes no kind discriminator on a plan type (testhub §10.7)', async () => {
+    const { ctx } = ctxFor([() => envelope([{ id: 'pt-plain', name: '普通测试' }])]);
+    const type = (await planTypes(ctx, 'lib-1'))[0];
+    expect(type?.kind).toBeUndefined();
+    expect(type?.type).toBeUndefined();
   });
 });
 
@@ -598,8 +714,20 @@ describe('the api layer neither logs nor sends under --dry-run', () => {
 
   it('halts every testhub write under --dry-run with zero requests sent', async () => {
     const writes: Array<[string, (ctx: ReturnType<typeof ctxFor>['ctx']) => Promise<unknown>]> = [
+      ['createLibrary', (ctx) => createLibrary(ctx, { name: 'n', identifier: 'I' })],
       ['createCase', (ctx) => createCase(ctx, { test_library_id: 'lib-1', title: 't' })],
       ['updateCase', (ctx) => updateCase(ctx, 'c1', { title: 't' })],
+      [
+        'createPlan',
+        (ctx) =>
+          createPlan(ctx, 'lib-1', {
+            name: 'p',
+            type_id: 't',
+            start_at: 1,
+            end_at: 2,
+            assignee_id: 'u',
+          }),
+      ],
       ['patchRun', (ctx) => patchRun(ctx, 'r1', { status_id: 'rs1', executor_id: 'u1' })],
       ['bulkRuns', (ctx) => bulkRuns(ctx, 'lib-1', 'p1', { deletes: ['r9'] })],
     ];
