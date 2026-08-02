@@ -31,6 +31,13 @@ and the api-layer suite wrappers, so three of the four new leaves are assembly r
 scope)", which this milestone makes obsolete and must be corrected), `TestLibrary`, `TestPlan`,
 `parseTestLibrary`, `parseTestPlan`, `listSuites` / `iterateSuites` (`src/api/testhub.ts:134,149`).
 
+> **Corrected in S4 — AC8 is not fully met by `meta suites`.** The leaf collects the whole tree via
+> `iterateSuites`, because a paged tree yields partial paths and a lookup wants all of it. So
+> `iterateSuites` now has a production caller and **`listSuites` still does not**. Adding
+> `--page` / `--page-size` to `meta suites` purely to satisfy AC8 would degrade the leaf, so it was
+> not done. **S6 must choose**: delete `listSuites` as dead code, or relax AC8's "no api-layer
+> wrapper remains without a production caller" wording. Deleting it is the recommendation on record.
+
 ## 2. Endpoints
 
 | Constant | Path | Method | Scope |
@@ -143,6 +150,12 @@ Four leaves, taking the group from 51 to **55**.
 acts as the bot user, so "me" is not a meaningful assignee and an implicit default would silently
 assign every plan to a bot.
 
+> **Added in S4.** `plans create` also refuses an `--end` that precedes `--start`, as a `UsageError`
+> at exit 2 before any request. This section omitted the case. The API's behaviour on an inverted
+> range is **unverified** — it may well accept one silently — so the refusal is client-side and
+> deliberately conservative; if S8 observes that the server rejects it with a usable code, this
+> guard can be reconsidered.
+
 Column sets follow the module's existing shape — `ID` / `NAME` first, with `refName` for
 references and `timestampCell` for `start_at` / `end_at`. `meta suites` needs a `PATH` column
 showing the computed `Parent / Child` form, since that is the spelling `--suite` accepts; note the
@@ -178,8 +191,16 @@ value. Two candidate fixes, to be chosen after reading `withCacheInvalidation`:
 2. Skip the retry for error codes known to be caller-input rejections rather than stale-id
    rejections — a small allow/deny list beside `ERROR_CODE_OVERRIDES`, driven by observed codes.
 
-(2) is preferred: it is code-driven rather than text-driven, and it composes with the evidence rule
-already in force. **This helper is shared with pjm and ship**, so whichever is chosen,
+**Correction (S1–S3, 2026-08-02): (2) is not simply preferable, and may not be viable at all.** The
+docstring on `RetryWouldBeIdentical` in `src/core/metadata.ts` already argues against a code-driven
+list, with evidence: ship returns `100702` **both** for a genuinely unknown state id and for an
+existing state the flow forbids. One code, two causes — a stale cache and a refused input — so no
+allow/deny list keyed on the code can separate them. Whoever takes S7 must reconcile that argument
+**before** choosing an approach, not mid-slice. If neither (1) nor (2) survives it, the honest
+outcome is to leave the retry as it is and record why; the current behaviour is harmless because the
+API rejects these batches atomically.
+
+**This helper is shared with pjm and ship**, so whichever is chosen,
 `test/shipCommands.test.ts` and `test/commands.test.ts` must pass unmodified, and the existing
 stale-id retry path must keep its coverage. If neither option can be made safe without changing
 shared behaviour, stop and report — a mis-scoped fix here is worse than the harmless extra request.

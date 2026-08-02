@@ -85,12 +85,14 @@ describe('command surface', () => {
       'project meta sprints',
       'testhub libraries list',
       'testhub libraries get',
+      'testhub libraries create',
       'testhub cases list',
       'testhub cases get',
       'testhub cases create',
       'testhub cases update',
       'testhub plans list',
       'testhub plans get',
+      'testhub plans create',
       'testhub runs list',
       'testhub runs patch',
       'testhub runs bulk',
@@ -98,6 +100,8 @@ describe('command surface', () => {
       'testhub meta case-types',
       'testhub meta important-levels',
       'testhub meta run-statuses',
+      'testhub meta plan-types',
+      'testhub meta suites',
       'settings users',
     ]);
   });

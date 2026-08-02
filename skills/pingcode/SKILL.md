@@ -315,11 +315,13 @@ states, case types, run results, the module tree and the plan list are **all lib
 pingcode testhub libraries list --json
 pingcode testhub libraries list --keywords payment --json
 pingcode testhub libraries get LIB --json        # name, identifier such as LIB, or id
+pingcode testhub libraries create --name "Payments" --identifier PAY --json
 ```
 
-`--keywords` searches library **names** only — the identifier is not searchable server-side. There
-is no library create/update/delete: testhub publishes no library DELETE, so library governance stays
-in the console.
+`--keywords` searches library **names** only — the identifier is not searchable server-side. The
+`--identifier` given to `create` must be unique across the organisation and the server enforces it.
+There is no library update or delete: testhub publishes no library DELETE, so anything created here
+is permanent.
 
 ### `testhub meta` — the ids a testhub write cannot be built without
 
@@ -327,12 +329,16 @@ in the console.
 pingcode testhub meta case-states       --library LIB --json   # --state / state_id
 pingcode testhub meta case-types        --library LIB --json   # --type / type_id
 pingcode testhub meta run-statuses      --library LIB --json   # --status / status_id
+pingcode testhub meta plan-types        --library LIB --json   # --type on `plans create`
+pingcode testhub meta suites            --library LIB --json   # --suite; PATH is what --suite takes
 pingcode testhub meta important-levels  --json                 # --important-level; org-wide
 ```
 
 `important-levels` is the one lookup in the module with **no per-library variant**, so it *refuses*
 `--library` with exit 2 rather than ignoring it (the flag is hidden from `--help`, which is why it
-is spelled out here). The other three require `--library`.
+is spelled out here). The others require `--library`.
+
+`suites` accepts `--parent-id root` for the top level only, or a node id for that node's children.
 
 ### Test cases 用例 — `testhub cases`
 
@@ -364,9 +370,12 @@ the library's initial state, so `cases create` has no `--state`.
 pingcode testhub plans list --library LIB --json
 pingcode testhub plans list --library LIB --name "2026 S1 回归" --json
 pingcode testhub plans get "2026 S1 回归" --library LIB --json    # name, id or short_id
+pingcode testhub plans create --library LIB --name "2026 S2 回归" \
+  --type 普通测试 --start 2026-08-10 --end 2026-08-31 --assignee 张三 --json
 ```
 
-Read-only in this version: plans are created and edited in the GUI.
+`create` takes all five: `--name` (unique within the library), `--type` (from
+`testhub meta plan-types`), `--start`, `--end` and `--assignee`. There is no plan update or delete.
 
 ### Runs 执行用例 — `testhub runs`
 

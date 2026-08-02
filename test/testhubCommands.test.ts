@@ -317,6 +317,135 @@ describe('testhub libraries', () => {
   });
 });
 
+describe('testhub libraries create', () => {
+  const created = () =>
+    jsonResponse({
+      id: 'lib-new',
+      identifier: 'CLIB',
+      name: 'CLI Bootstrap',
+      visibility: 'private',
+      members: [],
+      is_archived: 0,
+    });
+
+  it('sends name and identifier only, and resolves nothing first', async () => {
+    const run = await runCli(
+      ['testhub', 'libraries', 'create', '--name', 'CLI Bootstrap', '--identifier', 'CLIB', '--json'],
+      [created],
+    );
+    expect(run.exit).toBe(0);
+    // Nothing is name-resolved, so this is the very first request.
+    expect(run.calls).toHaveLength(1);
+    expect(mutations(run)).toHaveLength(1);
+    expect(pathOf(mutations(run)[0])).toBe('/v1/testhub/libraries');
+    expect(mutations(run)[0]?.method).toBe('POST');
+    expect(mutations(run)[0]?.body).toEqual({ name: 'CLI Bootstrap', identifier: 'CLIB' });
+    expect(parseStdout(run)).toMatchObject({ id: 'lib-new' });
+  });
+
+  it('passes --description and --visibility through when given', async () => {
+    const run = await runCli(
+      [
+        'testhub',
+        'libraries',
+        'create',
+        '--name',
+        'CLI Bootstrap',
+        '--identifier',
+        'CLIB',
+        '--description',
+        'smoke fixtures',
+        '--visibility',
+        'public',
+        '--json',
+      ],
+      [created],
+    );
+    expect(mutations(run)[0]?.body).toEqual({
+      name: 'CLI Bootstrap',
+      identifier: 'CLIB',
+      description: 'smoke fixtures',
+      visibility: 'public',
+    });
+  });
+
+  it('--dry-run prints the plan on stdout and sends nothing at all', async () => {
+    const run = await runCli(
+      [
+        'testhub',
+        'libraries',
+        'create',
+        '--name',
+        'CLI Bootstrap',
+        '--identifier',
+        'CLIB',
+        '--dry-run',
+        '--json',
+      ],
+      [],
+    );
+    expect(run.exit).toBe(0);
+    const plan = parseStdout(run) as {
+      dry_run: boolean;
+      request: { method: string; url: string; body: unknown };
+    };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.method).toBe('POST');
+    expect(plan.request.url).toContain('/v1/testhub/libraries');
+    expect(plan.request.body).toEqual({ name: 'CLI Bootstrap', identifier: 'CLIB' });
+    // This leaf resolves nothing, so a dry run really is zero requests.
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('requires --name and --identifier, refusing at exit 2 with no request', async () => {
+    for (const argv of [
+      ['testhub', 'libraries', 'create', '--identifier', 'CLIB'],
+      ['testhub', 'libraries', 'create', '--name', 'CLI Bootstrap'],
+      ['testhub', 'libraries', 'create'],
+    ]) {
+      const run = await runCli([...argv, '--json'], []);
+      expect(run.exit, argv.join(' ')).toBe(2);
+      expect(run.calls, argv.join(' ')).toHaveLength(0);
+    }
+  });
+
+  it('rejects a --visibility outside the documented enum before sending', async () => {
+    const run = await runCli(
+      [
+        'testhub',
+        'libraries',
+        'create',
+        '--name',
+        'n',
+        '--identifier',
+        'I',
+        '--visibility',
+        'secret',
+        '--json',
+      ],
+      [],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+    expect(run.stderr).toContain('public or private');
+  });
+
+  it('warns on stderr that the library can never be deleted, keeping stdout pure', async () => {
+    const human = await runCli(
+      ['testhub', 'libraries', 'create', '--name', 'CLI Bootstrap', '--identifier', 'CLIB'],
+      [created],
+    );
+    expect(human.stderr).toContain('no library delete endpoint');
+    expect(human.stdout).not.toContain('no library delete endpoint');
+
+    const json = await runCli(
+      ['testhub', 'libraries', 'create', '--name', 'CLI Bootstrap', '--identifier', 'CLIB', '--json'],
+      [created],
+    );
+    expect(() => parseStdout(json)).not.toThrow();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // the --x / --x-id matrix (design §6)
 // ---------------------------------------------------------------------------
@@ -344,10 +473,61 @@ describe('every --x / --x-id pair is mutually exclusive, before any request', ()
     ['plan', ['testhub', 'runs', 'list', '--plan', 'a', '--plan-id', 'b']],
     ['status', ['testhub', 'runs', 'list', '--status', 'a', '--status-id', 'b']],
     ['executor', ['testhub', 'runs', 'list', '--executor', 'a', '--executor-id', 'b']],
+    // the pairs S4 added
+    [
+      'library',
+      ['testhub', 'meta', 'plan-types', '--library', 'a', '--library-id', 'b'],
+    ],
+    ['library', ['testhub', 'meta', 'suites', '--library', 'a', '--library-id', 'b']],
+    [
+      'type',
+      [
+        'testhub',
+        'plans',
+        'create',
+        '--library',
+        'LIB',
+        '--name',
+        'p',
+        '--start',
+        '2026-08-10',
+        '--end',
+        '2026-08-31',
+        '--assignee',
+        'zhangsan',
+        '--type',
+        'a',
+        '--type-id',
+        'b',
+      ],
+    ],
+    [
+      'assignee',
+      [
+        'testhub',
+        'plans',
+        'create',
+        '--library',
+        'LIB',
+        '--name',
+        'p',
+        '--start',
+        '2026-08-10',
+        '--end',
+        '2026-08-31',
+        '--type',
+        '普通测试',
+        '--assignee',
+        'a',
+        '--assignee-id',
+        'b',
+      ],
+    ],
   ];
 
   for (const [flag, argv] of pairs) {
-    it(`--${flag} and --${flag}-id cannot be combined`, async () => {
+    const leaf = argv.slice(0, 3).join(' ');
+    it(`${leaf}: --${flag} and --${flag}-id cannot be combined`, async () => {
       const run = await runCli([...argv, '--json'], []);
       expect(run.exit).toBe(2);
       expect(run.calls).toHaveLength(0);
@@ -612,6 +792,248 @@ describe('testhub plans', () => {
     const run = await runCli(['testhub', 'plans', 'list', '--json'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
+  });
+});
+
+describe('testhub plans create', () => {
+  const planTypesPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 2,
+      values: [
+        { id: 'pt-plain', name: '普通测试' },
+        { id: 'pt-sprint', name: '迭代测试' },
+      ],
+    });
+
+  const usersPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 1,
+      values: [{ id: 'user-7', display_name: '张三', username: 'zhangsan' }],
+    });
+
+  const created = () =>
+    jsonResponse({
+      id: 'plan-new',
+      short_id: 'ab12',
+      name: 'Bootstrap Plan',
+      type: { id: 'pt-plain', name: '普通测试' },
+      assignee: { id: 'user-7', name: '张三' },
+      start_at: 1_786_291_200,
+      end_at: 1_788_191_999,
+    });
+
+  const argvFor = (extra: string[] = []): string[] => [
+    'testhub',
+    'plans',
+    'create',
+    '--library',
+    'LIB',
+    '--name',
+    'Bootstrap Plan',
+    '--type',
+    '普通测试',
+    '--start',
+    '2026-08-10',
+    '--end',
+    '2026-08-31',
+    '--assignee',
+    'zhangsan',
+    ...extra,
+  ];
+
+  it('resolves library, type and assignee then POSTs all five fields', async () => {
+    const run = await runCli(argvFor(['--json']), [
+      librariesPage,
+      planTypesPage,
+      usersPage,
+      created,
+    ]);
+    expect(run.exit).toBe(0);
+    expect(pathOf(run.calls[1])).toBe('/v1/testhub/libraries/lib-1/plan_types');
+    expect(pathOf(run.calls[2])).toBe('/v1/directory/users');
+    expect(mutations(run)).toHaveLength(1);
+    expect(pathOf(mutations(run)[0])).toBe('/v1/testhub/libraries/lib-1/plans');
+    const body = mutations(run)[0]?.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual([
+      'assignee_id',
+      'end_at',
+      'name',
+      'start_at',
+      'type_id',
+    ]);
+    expect(body).toMatchObject({
+      name: 'Bootstrap Plan',
+      type_id: 'pt-plain',
+      assignee_id: 'user-7',
+    });
+    // project_id / sprint_id / version_id are never sent.
+    expect('project_id' in body).toBe(false);
+    expect('sprint_id' in body).toBe(false);
+  });
+
+  it('maps --start to 00:00:00 and --end to 23:59:59 of the local day', async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'Asia/Shanghai';
+    try {
+      const run = await runCli(argvFor(['--dry-run', '--json']), [
+        librariesPage,
+        planTypesPage,
+        usersPage,
+      ]);
+      const plan = parseStdout(run) as { request: { body: { start_at: number; end_at: number } } };
+      // The literals the API must receive for "10 through 31 August" in UTC+8.
+      expect(plan.request.body.start_at).toBe(1_786_291_200);
+      expect(plan.request.body.end_at).toBe(1_788_191_999);
+      expect(plan.request.body.end_at - plan.request.body.start_at).toBe(21 * 86_400 + 86_399);
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
+  it('accepts a 10-digit unix seconds value verbatim on either date flag', async () => {
+    const run = await runCli(
+      [
+        'testhub',
+        'plans',
+        'create',
+        '--library',
+        'LIB',
+        '--name',
+        'p',
+        '--type',
+        '普通测试',
+        '--start',
+        '1786291200',
+        '--end',
+        '1788191999',
+        '--assignee',
+        'zhangsan',
+        '--dry-run',
+        '--json',
+      ],
+      [librariesPage, planTypesPage, usersPage],
+    );
+    const plan = parseStdout(run) as { request: { body: { start_at: number; end_at: number } } };
+    expect(plan.request.body.start_at).toBe(1_786_291_200);
+    expect(plan.request.body.end_at).toBe(1_788_191_999);
+  });
+
+  it('--dry-run resolves the references but writes nothing', async () => {
+    const run = await runCli(argvFor(['--dry-run', '--json']), [
+      librariesPage,
+      planTypesPage,
+      usersPage,
+    ]);
+    expect(run.exit).toBe(0);
+    const plan = parseStdout(run) as { dry_run: boolean; request: { method: string; url: string } };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.method).toBe('POST');
+    expect(plan.request.url).toContain('/v1/testhub/libraries/lib-1/plans');
+    expect(mutations(run)).toHaveLength(0);
+    // three reads happened: ids really are resolved under --dry-run
+    expect(run.calls).toHaveLength(3);
+  });
+
+  it('rejects a malformed date at exit 2 before any request', async () => {
+    for (const [flag, value] of [
+      ['--start', '2026-8-1'],
+      ['--end', '08/31/2026'],
+      ['--end', '1786291200000'],
+    ] as const) {
+      const argv = argvFor(['--json']);
+      argv[argv.indexOf(flag) + 1] = value;
+      const run = await runCli(argv, []);
+      expect(run.exit, `${flag} ${value}`).toBe(2);
+      expect(run.calls, `${flag} ${value}`).toHaveLength(0);
+    }
+  });
+
+  it('rejects an --end that precedes --start, before any request', async () => {
+    const argv = argvFor(['--json']);
+    argv[argv.indexOf('--end') + 1] = '2026-08-01';
+    const run = await runCli(argv, []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+    expect(run.stderr).toContain('before --start');
+  });
+
+  it('requires --assignee — it must never default to the bot user', async () => {
+    const argv = argvFor(['--json']).filter(
+      (token, index, all) => token !== '--assignee' && all[index - 1] !== '--assignee',
+    );
+    const run = await runCli(argv, []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+    const payload = JSON.parse(run.stderr) as { error: { message: string } };
+    expect(payload.error.message).toContain('--assignee');
+  });
+
+  it('requires --type, pointing at the lookup that lists them', async () => {
+    const argv = argvFor(['--json']).filter(
+      (token, index, all) => token !== '--type' && all[index - 1] !== '--type',
+    );
+    const run = await runCli(argv, []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+    expect(run.stderr).toContain('--type');
+  });
+
+  it('requires --name and a library', async () => {
+    const withoutName = argvFor(['--json']).filter(
+      (token, index, all) => token !== '--name' && all[index - 1] !== '--name',
+    );
+    expect((await runCli(withoutName, [])).exit).toBe(2);
+
+    const withoutLibrary = argvFor(['--json']).filter(
+      (token, index, all) => token !== '--library' && all[index - 1] !== '--library',
+    );
+    const run = await runCli(withoutLibrary, []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('keeps stdout JSON-only, with the created notice on stderr', async () => {
+    // Both runs share one temp config dir, so the metadata cache would be warm
+    // for the second and it would resolve nothing — `--no-cache` keeps the two
+    // invocations symmetrical instead of depending on that.
+    const human = await runCli(argvFor(['--no-cache']), [
+      librariesPage,
+      planTypesPage,
+      usersPage,
+      created,
+    ]);
+    expect(human.stderr).toContain('created ab12');
+    expect(human.stdout).not.toContain('created ab12');
+
+    const json = await runCli(argvFor(['--no-cache', '--json']), [
+      librariesPage,
+      planTypesPage,
+      usersPage,
+      created,
+    ]);
+    expect(parseStdout(json)).toMatchObject({ id: 'plan-new' });
+  });
+
+  it('surfaces the server refusal verbatim for a type it cannot satisfy', async () => {
+    // An iteration type needs sprint_id, which the CLI cannot know to send.
+    const run = await runCli(
+      argvFor(['--json']).map((token) => (token === '普通测试' ? '迭代测试' : token)),
+      [
+        librariesPage,
+        planTypesPage,
+        usersPage,
+        () => jsonResponse({ code: '100500', message: 'sprint_id 不能为空' }, { status: 400 }),
+      ],
+    );
+    expect(run.exit).toBe(7);
+    expect(run.stderr).toContain('sprint_id');
+    const payload = JSON.parse(run.stderr) as { error: { code: string } };
+    expect(payload.error.code).toBe('100500');
   });
 });
 
@@ -1017,6 +1439,117 @@ describe('testhub meta', () => {
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
   });
+
+  it('plan-types is nested under the library and sends no library_id', async () => {
+    const planTypesPage = () =>
+      jsonResponse({
+        page_index: 0,
+        page_size: 100,
+        total: 1,
+        values: [{ id: 'pt-plain', name: '普通测试' }],
+      });
+    const run = await runCli(
+      ['testhub', 'meta', 'plan-types', '--library', 'LIB', '--json'],
+      [librariesPage, planTypesPage],
+    );
+    expect(run.exit).toBe(0);
+    const url = new URL(run.calls[1]?.url ?? '');
+    // Path-scoped, unlike the singular-segment config views.
+    expect(url.pathname).toBe('/v1/testhub/libraries/lib-1/plan_types');
+    expect(url.searchParams.get('library_id')).toBeNull();
+    expect(parseStdout(run)).toEqual({ values: [{ id: 'pt-plain', name: '普通测试' }], count: 1 });
+  });
+
+  it('plan-types requires a library', async () => {
+    const run = await runCli(['testhub', 'meta', 'plan-types', '--json'], []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('suites lists the whole tree with the computed Parent / Child path', async () => {
+    const run = await runCli(
+      ['testhub', 'meta', 'suites', '--library', 'LIB', '--json'],
+      [librariesPage, suitesPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(pathOf(run.calls[1])).toBe('/v1/testhub/libraries/lib-1/suites');
+    // No parent_id when the flag is absent: that means the whole tree.
+    expect(new URL(run.calls[1]?.url ?? '').searchParams.get('parent_id')).toBeNull();
+
+    const payload = parseStdout(run) as { values: Array<{ id: string; computed_path: string }> };
+    const paths = Object.fromEntries(
+      payload.values.map((row) => [row.id, row.computed_path]),
+    );
+    // The child carries its own full path, not the parent chain the server sends.
+    expect(paths['su-login']).toBe('登录');
+    expect(paths['su-sms']).toBe('登录 / 短信验证码');
+  });
+
+  it('suites shows the spelling --suite accepts, not the server `paths` field', async () => {
+    const run = await runCli(
+      ['testhub', 'meta', 'suites', '--library', 'LIB', '--json'],
+      [librariesPage, suitesPage],
+    );
+    const payload = parseStdout(run) as {
+      values: Array<{ id: string; paths?: string; computed_path: string }>;
+    };
+    const child = payload.values.find((row) => row.id === 'su-sms');
+    // `paths` is the parent chain excluding self (f74ecd2) — it is preserved in
+    // the JSON but must not be what the PATH column reports.
+    expect(child?.paths).toBe('登录');
+    expect(child?.computed_path).not.toBe(child?.paths);
+    expect(child?.computed_path).toContain(' / ');
+  });
+
+  it('suites passes --parent-id root through as a server-side filter', async () => {
+    const rootOnly = () =>
+      jsonResponse({
+        page_index: 0,
+        page_size: 100,
+        total: 1,
+        values: [{ id: 'su-login', name: '登录', paths: '', parent: null }],
+      });
+    const run = await runCli(
+      ['testhub', 'meta', 'suites', '--library', 'LIB', '--parent-id', 'root', '--json'],
+      [librariesPage, rootOnly],
+    );
+    expect(run.exit).toBe(0);
+    expect(new URL(run.calls[1]?.url ?? '').searchParams.get('parent_id')).toBe('root');
+    const payload = parseStdout(run) as { values: Array<{ computed_path: string }>; count: number };
+    expect(payload.count).toBe(1);
+    expect(payload.values[0]?.computed_path).toBe('登录');
+  });
+
+  it('suites rebuilds the prefix when --parent-id hides the ancestors', async () => {
+    // A filtered view returns children whose parents are outside the result set,
+    // so the parent walk cannot reach them; the server chain fills the gap.
+    const childrenOnly = () =>
+      jsonResponse({
+        page_index: 0,
+        page_size: 100,
+        total: 1,
+        values: [
+          {
+            id: 'su-sms',
+            name: '短信验证码',
+            parent: { id: 'su-login', name: '登录' },
+            paths: '登录',
+          },
+        ],
+      });
+    const run = await runCli(
+      ['testhub', 'meta', 'suites', '--library', 'LIB', '--parent-id', 'su-login', '--json'],
+      [librariesPage, childrenOnly],
+    );
+    const payload = parseStdout(run) as { values: Array<{ computed_path: string }> };
+    expect(payload.values[0]?.computed_path).toBe('登录 / 短信验证码');
+  });
+
+  it('suites requires a library', async () => {
+    const run = await runCli(['testhub', 'meta', 'suites', '--json'], []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+  });
 });
 
 describe('the configuration-scope trap (design §9)', () => {
@@ -1059,5 +1592,51 @@ describe('the configuration-scope trap (design §9)', () => {
     );
     expect(run.exit).toBe(4);
     expect(run.stderr).not.toContain('reading case types requires');
+  });
+
+  it('never blames the configuration scope for a plan-types 403', async () => {
+    // Plan types are pcp:read:testhub:testplan. Borrowing the configuration hint
+    // would send the investigation after a scope that was never involved.
+    const run = await runCli(
+      ['testhub', 'meta', 'plan-types', '--library', 'LIB'],
+      [librariesPage, forbidden],
+    );
+    expect(run.exit).toBe(4);
+    expect(run.stderr).not.toContain('configuration');
+  });
+
+  it('never blames the configuration scope for a suites 403', async () => {
+    // Suites are pcp:read:testhub:library.
+    const run = await runCli(
+      ['testhub', 'meta', 'suites', '--library', 'LIB'],
+      [librariesPage, forbidden],
+    );
+    expect(run.exit).toBe(4);
+    expect(run.stderr).not.toContain('configuration');
+  });
+
+  it('never blames the configuration scope for a plan-type 403 during plans create', async () => {
+    const run = await runCli(
+      [
+        'testhub',
+        'plans',
+        'create',
+        '--library',
+        'LIB',
+        '--name',
+        'p',
+        '--type',
+        '普通测试',
+        '--start',
+        '2026-08-10',
+        '--end',
+        '2026-08-31',
+        '--assignee',
+        'zhangsan',
+      ],
+      [librariesPage, forbidden],
+    );
+    expect(run.exit).toBe(4);
+    expect(run.stderr).not.toContain('configuration');
   });
 });
