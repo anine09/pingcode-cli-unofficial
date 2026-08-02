@@ -1412,14 +1412,23 @@ export async function withCacheInvalidation<T>(
       if (resolution.cacheKey !== null) invalidateCacheKey(ctx, resolution.cacheKey);
     }
     ctx.logger.warn(
-      'the server rejected an id that came from the metadata cache; refreshing it and retrying once',
+      'the server rejected a write that used ids from the metadata cache; refreshing it and retrying once',
     );
 
     try {
       return await attempt(withoutCache(ctx));
     } catch (second) {
-      // Nothing was re-sent, so the original failure is the whole truth.
-      if (second instanceof RetryWouldBeIdentical) throw error;
+      // Nothing was re-sent, so the original failure is the whole truth — and
+      // re-resolution proving the ids unchanged is itself the evidence that the
+      // cache was never the cause. Say so, rather than leaving the warning above
+      // as the last word: on a caller-input rejection (a duplicate name, a bad
+      // id the user typed) it would otherwise read as a cache diagnosis.
+      if (second instanceof RetryWouldBeIdentical) {
+        ctx.logger.warn(
+          're-resolution produced the same ids, so the metadata cache was not the cause; nothing was re-sent',
+        );
+        throw error;
+      }
       throw annotateWithCacheCulprits(second, cached);
     }
   }

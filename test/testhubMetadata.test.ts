@@ -16,6 +16,7 @@ import {
   resolveTestPlan,
   resolveTestPlanType,
   resolveTestSuite,
+  RetryWouldBeIdentical,
   SUITE_PATH_SEPARATOR,
   withCacheInvalidation,
 } from '../src/core/metadata';
@@ -596,6 +597,44 @@ describe('plan types', () => {
     expect(attempts).toBe(2);
     expect(result).toBe('pt-new');
     expect(ids).toEqual(['pt-old', 'pt-new']);
+  });
+
+  it('says the cache was not the cause when re-resolution produces the same ids', async () => {
+    // The S7 case: a rejection that names no cached value — a duplicate plan
+    // name (100618 live), a run id the user mistyped (100619) — still reaches
+    // the retry, because nothing in a `{code, message}` body says which field
+    // was refused. The retry is harmless (RetryWouldBeIdentical blocks the
+    // second send), but the warning must not leave "your cache is stale" as the
+    // user's last word when the ids came back identical.
+    const seed = ctxFor([types]);
+    await resolveTestPlanType(seed.ctx, 'lib-1', '普通测试');
+
+    const { ctx, fake } = ctxFor([types]);
+    const first = await resolveTestPlanType(ctx, 'lib-1', '普通测试');
+    expect(first.fromCache).toBe(true);
+
+    const rejection = new ApiError('同名测试计划已存在', { code: '100618' });
+    let sends = 0;
+    const error = await withCacheInvalidation(ctx, [first], async (attemptCtx) => {
+      const again = await resolveTestPlanType(attemptCtx, 'lib-1', '普通测试');
+      if (again.id === first.id && sends > 0) throw new RetryWouldBeIdentical();
+      sends += 1;
+      throw rejection;
+    }).catch((caught: unknown) => caught);
+
+    // The original rejection survives untouched — no cache annotation on it.
+    expect(error).toBe(rejection);
+    expect((error as ApiError).code).toBe('100618');
+    expect((error as ApiError).message).toBe('同名测试计划已存在');
+
+    const logged = ctx.logLines.join('\n');
+    expect(logged).toContain('refreshing it and retrying once');
+    expect(logged).toContain('the metadata cache was not the cause');
+    // and it did not claim the server rejected a cached id
+    expect(logged).not.toContain('rejected an id that came from');
+    // one send only: the retry never re-issued the write
+    expect(sends).toBe(1);
+    expect(fake.calls.length).toBeGreaterThan(0);
   });
 
   it('exposes no kind discriminator to resolve on (testhub §10.7)', async () => {

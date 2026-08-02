@@ -177,36 +177,63 @@ A client-side existence probe would double the request count, race, and still be
 concurrent writes. The server's rejection is surfaced verbatim, and any not-found-style code
 observed live is a candidate for `ERROR_CODE_OVERRIDES` under the `ac22be4` evidence rule.
 
-## 8. Narrowing the `runWrite` retry
+## 8. The `runWrite` retry: resolved, no control-flow change (S7, 2026-08-02)
 
-Observed in S6: a bulk call rejected with code `100619` (one `run_id` in the request does not
-exist) triggered `runWrite`'s cache-invalidation retry, even though the offending id came straight
-from the user rather than from the metadata cache. It was harmless there only because the API
-rejects the batch atomically, so the retry could not double-write.
+**Outcome: the retry is left exactly as it is. The misleading *warning* is fixed instead.** The
+reasoning below is the record of why every narrowing option was rejected; it replaces the open
+question this section used to carry.
 
-`runWrite` (`src/cli/commands/common.ts:321`) already has the right guard in principle — the second
-resolution pass is compared against the first and `RetryWouldBeIdentical` is thrown when the ids
-match. The defect is that the retry is *attempted* at all for a rejection that names no cached
-value. Two candidate fixes, to be chosen after reading `withCacheInvalidation`:
+### 8.1 The defect, restated precisely
 
-1. Skip the retry when the resolution set is empty or when no resolved id appears in the error's
-   message/payload — precise, but message-shape-dependent, which the quality guidelines forbid.
-2. Skip the retry for error codes known to be caller-input rejections rather than stale-id
-   rejections — a small allow/deny list beside `ERROR_CODE_OVERRIDES`, driven by observed codes.
+`runWrite` → `withCacheInvalidation` retries whenever (a) at least one resolved id came from the
+metadata cache and (b) the error is an `api` or `not_found` kind. Neither condition asks whether the
+rejection has anything to do with a cached id, so a caller-input rejection reaches the retry.
+Observed live twice: `100619` (bulk, a `--remove-run` id the user mistyped) and `100618` (duplicate
+plan name, S8 §11.3).
 
-**Correction (S1–S3, 2026-08-02): (2) is not simply preferable, and may not be viable at all.** The
-docstring on `RetryWouldBeIdentical` in `src/core/metadata.ts` already argues against a code-driven
-list, with evidence: ship returns `100702` **both** for a genuinely unknown state id and for an
-existing state the flow forbids. One code, two causes — a stale cache and a refused input — so no
-allow/deny list keyed on the code can separate them. Whoever takes S7 must reconcile that argument
-**before** choosing an approach, not mid-slice. If neither (1) nor (2) survives it, the honest
-outcome is to leave the retry as it is and record why; the current behaviour is harmless because the
-API rejects these batches atomically.
+What it actually costs: **nothing is double-written** — `RetryWouldBeIdentical` blocks the second
+send, verified live with `--verbose` (one POST). The cost is one wasted re-resolution, one
+needlessly dropped cache entry, and — the only part a user sees — a warning that reads as a cache
+diagnosis for a failure the cache did not cause.
 
-**This helper is shared with pjm and ship**, so whichever is chosen,
-`test/shipCommands.test.ts` and `test/commands.test.ts` must pass unmodified, and the existing
-stale-id retry path must keep its coverage. If neither option can be made safe without changing
-shared behaviour, stop and report — a mis-scoped fix here is worse than the harmless extra request.
+### 8.2 Why each narrowing was rejected
+
+| Option | Verdict |
+|---|---|
+| (1a) Match the error **message** | **Forbidden.** `quality-guidelines.md` bans message-shape dependence, and the API is Chinese-only with no wording contract. |
+| (1b) Look for a resolved id in the error **payload** | **Not viable.** The vendor returns `{code, message}` and nothing else — every S8 error body confirms it. `wire.ts` extracts only those two fields and discards the rest, and `PingcodeError` has no slot for a body. Making it viable would mean changing `errors.ts`, which is forbidden. |
+| (2) Allow/deny list of error **codes** | **Unsound, and self-defeating here.** Ship returns `100702` both for a genuinely unknown state id and for an existing state the flow forbids — one code, two causes, which is the whole reason the `RetryWouldBeIdentical` docstring exists. Worse: `100702` is the code in the locked test at `shipCommands.test.ts:718`, where the retry *must still happen*. A deny-list entry for it would break the very case the retry exists for. |
+| (3) Warn only when re-resolution yields a **different** id | **Blocked by a locked test.** `shipCommands.test.ts:736` asserts the warning appears on the *identical-ids* path (line 737: "re-resolution produced the same id, so the second write was skipped"). Implemented as an experiment, it fails exactly that test — a file this slice may not edit. |
+| (4) Skip the retry when the write resolved **no** cached refs | **Already implemented.** `withCacheInvalidation` returns early on `cached.length === 0`. Verified live: `libraries create` (which resolves nothing) emits no warning on a duplicate-identifier rejection, while `plans create` does. It would not have caught `100618` anyway. |
+
+The common thread: separating "the server refused a cached id" from "the server refused something the
+user typed" requires knowing *which field* was rejected, and a `{code, message}` body never says.
+That is the same wall §8's Correction paragraph hit, reached from four directions.
+
+### 8.3 What changed instead
+
+Control flow is untouched. Two wording changes in `withCacheInvalidation`, both constrained by the
+two locked substrings (`shipCommands.test.ts` needs `refreshing it and retrying once`;
+`metadata.test.ts` needs `metadata cache`):
+
+1. The pre-retry warning no longer asserts a cause it cannot know. Was *"the server rejected **an id
+   that came from** the metadata cache"* — a claim that is false on a duplicate-name rejection. Now
+   *"the server rejected **a write that used ids from** the metadata cache"*, which is true in both
+   cases.
+2. The `RetryWouldBeIdentical` path, previously silent, now says so: *"re-resolution produced the
+   same ids, so the metadata cache was not the cause; nothing was re-sent."*
+
+So the user gets an accurate two-step narrative instead of a single misleading line, and the genuine
+stale-id path is unchanged — it still warns, still retries, still repairs, and keeps its coverage in
+`shipCommands.test.ts` (identical-ids) and `testhubMetadata.test.ts` (differing ids, retry succeeds).
+
+### 8.4 If this is revisited
+
+The only sound fix is a vendor change: an error body that names the rejected field or id. Until
+then, any narrowing is a guess about causality dressed up as logic. A future option worth more than
+the three above: have `runWrite` tell `withCacheInvalidation` *which* resolved ids the write actually
+sent in the failing request, so a rejection naming none of them could be skipped — but that still
+needs the server to name one, so it reduces to (1b).
 
 ## 9. Risks
 
