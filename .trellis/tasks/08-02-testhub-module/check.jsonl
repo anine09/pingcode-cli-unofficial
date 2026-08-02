@@ -1,0 +1,9 @@
+{"file": "test/helpers/fake.ts", "reason": "createFakeFetch / createTestContext harness — model for testhub.test.ts and testhubCommands.test.ts."}
+{"file": "test/shipCommands.test.ts", "reason": "Model for command-layer tests: temp PINGCODE_CONFIG_DIR, captureOutput, runCli harness."}
+{"file": "test/ship.test.ts", "reason": "Model for api-layer tests: injected fetch, assert method/path/query/body."}
+{"file": "test/shipMetadata.test.ts", "reason": "Model for metadata resolver tests: cache keys, TTL, name ambiguity, suite tree flattening."}
+{"file": "test/layering.test.ts", "reason": "Enforces cli→{api,core}, api→core, core→neither. Must stay green."}
+{"file": "test/help.test.ts", "reason": "Hard-coded command-group count and exhaustive leaf-path list. Must be updated with testhub commands."}
+{"file": "test/__snapshots__/help.test.ts.snap", "reason": "Per-group --help snapshots. Must be regenerated after adding testhub commands."}
+{"file": "skills/pingcode/SKILL.md", "reason": "Agent-facing docs. Cross-checked by help.test.ts; must be updated with testhub commands and caveats."}
+{"file": "README.md", "reason": "User-facing docs. Must document new testhub command groups and required scopes."}

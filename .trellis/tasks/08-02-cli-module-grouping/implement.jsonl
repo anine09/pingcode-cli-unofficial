@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Layer layout, enforced layering invariant, CLI group kebab-case / file camelCase naming conventions — the split of meta.ts must obey them."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Forbidden/required patterns. Relevant here: no behaviour change, no new deps, DI via Ctx untouched."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Splitting meta.ts must not duplicate Column constants or the productScoped factory — lift to common.ts instead."}
+{"file": ".trellis/spec/guides/commit-conventions.md", "reason": "Single Conventional Commit with a breaking-change marker; enforced by check:commits in CI."}
+{"file": ".trellis/tasks/08-02-testhub-module/prd.md", "reason": "Sister task. Its Notes section holds the same canonical command tree; testhub inserts its group between project and settings after this task lands."}

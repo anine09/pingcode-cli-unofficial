@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/archive/2026-08/08-01-ship-testhub-research/research/testhub-api.md", "reason": "Authoritative 65-endpoint Testhub API report with 30 GOTCHAs, MVP subset, and undetermined items. Librarian re-verified against official api_data.json on 2026-08-02 — no drift."}
+{"file": ".trellis/tasks/archive/2026-08/08-01-ship-cli/design.md", "reason": "Precedent for adding a whole new API area. Slice order, command surface shape, and metadata resolver patterns are directly reusable."}
+{"file": ".trellis/tasks/archive/2026-08/08-01-ship-cli/implement.md", "reason": "Precedent implementation plan. S1→S8 slice structure adopted for testhub."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Layer layout, enforced layering invariant, file/CLI naming conventions."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error hierarchy, exit-code table, status-first then code-override mapping."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Forbidden patterns (any, message-text matching, new deps), required patterns (DI via Ctx, parse quirks once, --dry-run in transport)."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "stdout/stderr contract, log levels, redaction."}
+{"file": ".trellis/spec/guides/commit-conventions.md", "reason": "Conventional Commits enforced by check:commits in CI."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Required reading when a feature spans 3+ layers (testhub spans endpoints/types/api/metadata/cli)."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Search before adding a helper (reuse productScoped, runWrite, refFilter)."}

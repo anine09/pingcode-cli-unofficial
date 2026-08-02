@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "test/help.test.ts", "reason": "Holds the hard-coded group list (seven -> four) and the ordered 36-leaf path array, plus the SKILL.md cross-check. Primary gate for this task."}
+{"file": "test/__snapshots__/help.test.ts.snap", "reason": "Per-group --help snapshots, 11.8K. Regenerate with vitest -u and read the diff: only nesting changes are expected."}
+{"file": "test/commands.test.ts", "reason": "pjm argv paths (work-item, meta types) must be rewritten to the new tree."}
+{"file": "test/shipCommands.test.ts", "reason": "ship argv paths (idea, ticket, meta idea-*) must be rewritten to the new tree."}
+{"file": "test/globals.test.ts", "reason": "Exercises global flags through argv; its command paths change too."}
+{"file": "skills/pingcode/SKILL.md", "reason": "77 lines mention command paths and are cross-checked by help.test.ts — a miss fails CI."}
+{"file": "README.md", "reason": "41 lines mention command paths; not test-enforced, needs proofreading."}
