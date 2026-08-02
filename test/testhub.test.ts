@@ -34,7 +34,6 @@ import {
   iterateSuites,
   listLibraries,
   listPlans,
-  listSuites,
   patchRun,
   planTypes,
   runStatuses,
@@ -338,12 +337,12 @@ describe('libraries api', () => {
 });
 
 describe('suites api', () => {
-  it('lists suites under the library and passes ?parent_id=root ([th#11])', async () => {
+  it('walks suites under the library and passes ?parent_id=root ([th#11])', async () => {
     const { ctx, fake } = ctxFor([
       () => envelope([{ id: 'su1', name: '登录', paths: '登录' }]),
     ]);
-    const page = await listSuites(ctx, 'lib-1', { parent_id: 'root' });
-    expect(page.values[0]?.paths).toBe('登录');
+    const suites = await collect(iterateSuites(ctx, 'lib-1', { parent_id: 'root' }));
+    expect(suites[0]?.paths).toBe('登录');
     const url = new URL(fake.urls()[0] ?? '');
     expect(url.pathname).toBe('/v1/testhub/libraries/lib-1/suites');
     expect(url.searchParams.get('parent_id')).toBe('root');
@@ -356,6 +355,19 @@ describe('suites api', () => {
     const url = new URL(fake.urls()[0] ?? '');
     expect(url.pathname).toBe('/v1/testhub/libraries/lib-1/suites');
     expect(url.searchParams.get('parent_id')).toBeNull();
+  });
+
+  it('walks every page — there is no single-page suite wrapper to get this wrong', async () => {
+    // A suite's path comes from walking `parent` refs, so a partial page yields
+    // partial paths. Both callers need the whole tree; none wants one page.
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ page_index: 0, page_size: 1, total: 2, values: [{ id: 'su1' }] }),
+      () => jsonResponse({ page_index: 1, page_size: 1, total: 2, values: [{ id: 'su2' }] }),
+      () => jsonResponse({ page_index: 2, page_size: 1, total: 2, values: [] }),
+    ]);
+    const suites = await collect(iterateSuites(ctx, 'lib-1', {}, { pageSize: 1 }));
+    expect(suites.map((suite) => suite.id)).toEqual(['su1', 'su2']);
+    expect(fake.calls.length).toBeGreaterThan(1);
   });
 });
 

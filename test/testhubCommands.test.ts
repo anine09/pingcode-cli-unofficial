@@ -22,14 +22,15 @@ import { createFakeFetch, jsonResponse, type FakeCall } from './helpers/fake';
  *  - `runs patch` reads the run first, re-emits its current `status_id` (which
  *    the API demands even on PATCH) and its current executor, and omits
  *    `executor_id` outright — with a warning — when the run has none;
- *  - `runs bulk` refuses more than 50 entries client-side;
+ *  - `runs bulk` refuses more than 50 entries client-side, on **all three** lists;
  *  - `meta important-levels` refuses `--library` (org-level, no per-library view);
- *  - `--json` keeps stdout JSON-only, and `--dry-run` writes nothing.
+ *  - `--json` keeps stdout JSON-only, and `--dry-run` writes nothing;
+ *  - a **search still executes** under `--dry-run`, unlike a write.
  *
- * The group is **not** registered in `buildProgram()` yet — `program.ts` and the
- * `help.test.ts` snapshot are S5 — so the harness builds a root program of its
- * own. It is the same construction `buildProgram` performs, minus the other four
- * groups.
+ * The harness builds a root program carrying only the `testhub` group. That keeps
+ * these tests independent of the other four groups' registration — the leaf-count
+ * and `--help` contract for the whole tree is `help.test.ts`'s job, not this
+ * file's.
  */
 
 let dir: string;
@@ -1293,22 +1294,74 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
 describe('testhub runs bulk', () => {
   const bulkResult = () => jsonResponse({ inserts: 2, updates: 0, deletes: 0 });
 
-  it('rejects 51 entries client-side, before any request is sent', async () => {
-    const argv = ['testhub', 'runs', 'bulk', '--library', 'LIB', '--plan', 'x'];
+  /**
+   * The `≤50` cap is one loop over all three lists, so asserting only
+   * `--remove-run` would let a refactor that special-cased a single list pass
+   * unnoticed. Each entry carries the extra lookups its flag triggers:
+   * `--set-status` resolves a run status (once — the rest hit the 24h cache),
+   * the other two resolve nothing beyond the library and the plan.
+   */
+  const capped: Array<[string, (index: number) => string, Array<() => Response>]> = [
+    ['--add-case', (index) => `case-${index}`, [librariesPage, plansPage, bulkResult]],
+    [
+      '--set-status',
+      (index) => `run-${index}=通过`,
+      [librariesPage, plansPage, runStatusesPage, bulkResult],
+    ],
+    ['--remove-run', (index) => `run-${index}`, [librariesPage, plansPage, bulkResult]],
+  ];
+
+  for (const [flag, entry, responses] of capped) {
+    it(`${flag} rejects 51 entries client-side, before any request is sent`, async () => {
+      const argv = ['testhub', 'runs', 'bulk', '--library', 'LIB', '--plan', 'x'];
+      for (let index = 0; index < 51; index += 1) argv.push(flag, entry(index));
+      const run = await runCli([...argv, '--json'], []);
+      expect(run.exit).toBe(2);
+      expect(run.calls).toHaveLength(0);
+      expect(run.stderr).toContain(flag);
+      expect(run.stderr).toContain('51');
+      expect(run.stderr).toContain('50');
+    });
+
+    it(`${flag} accepts exactly 50`, async () => {
+      const argv = ['testhub', 'runs', 'bulk', '--library', 'LIB', '--plan', '2026 S1 回归'];
+      for (let index = 0; index < 50; index += 1) argv.push(flag, entry(index));
+      const run = await runCli([...argv, '--json'], responses);
+      expect(run.exit).toBe(0);
+      expect(mutations(run)).toHaveLength(1);
+      const body = mutations(run)[0]?.body as Record<string, unknown[]>;
+      const list = body.inserts ?? body.updates ?? body.deletes;
+      expect(list).toHaveLength(50);
+    });
+  }
+
+  it('caps each list independently, so three lists of 50 are one legal call', async () => {
+    const argv = ['testhub', 'runs', 'bulk', '--library', 'LIB', '--plan', '2026 S1 回归'];
+    for (let index = 0; index < 50; index += 1) {
+      argv.push('--add-case', `case-${index}`);
+      argv.push('--set-status', `run-${index}=通过`);
+      argv.push('--remove-run', `old-${index}`);
+    }
+    const run = await runCli(
+      [...argv, '--json'],
+      [librariesPage, plansPage, runStatusesPage, bulkResult],
+    );
+    expect(run.exit).toBe(0);
+    const body = mutations(run)[0]?.body as Record<string, unknown[]>;
+    expect(body.inserts).toHaveLength(50);
+    expect(body.updates).toHaveLength(50);
+    expect(body.deletes).toHaveLength(50);
+  });
+
+  it('names only the list that overflowed when just one of the three does', async () => {
+    const argv = ['testhub', 'runs', 'bulk', '--library', 'LIB', '--plan', 'x', '--add-case', 'c1'];
     for (let index = 0; index < 51; index += 1) argv.push('--remove-run', `run-${index}`);
     const run = await runCli([...argv, '--json'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
-    expect(run.stderr).toContain('51');
-    expect(run.stderr).toContain('50');
-  });
-
-  it('accepts exactly 50', async () => {
-    const argv = ['testhub', 'runs', 'bulk', '--library', 'LIB', '--plan', '2026 S1 回归'];
-    for (let index = 0; index < 50; index += 1) argv.push('--remove-run', `run-${index}`);
-    const run = await runCli([...argv, '--json'], [librariesPage, plansPage, bulkResult]);
-    expect(run.exit).toBe(0);
-    expect((mutations(run)[0]?.body as { deletes: string[] }).deletes).toHaveLength(50);
+    const payload = JSON.parse(run.stderr) as { error: { message: string } };
+    expect(payload.error.message).toContain('--remove-run');
+    expect(payload.error.message).not.toContain('--add-case');
   });
 
   it('resolves the plan to a real id for the URL and sends counts back', async () => {
@@ -1379,6 +1432,88 @@ describe('testhub runs bulk', () => {
 // ---------------------------------------------------------------------------
 // meta
 // ---------------------------------------------------------------------------
+
+describe('a search still executes under --dry-run, unlike a write', () => {
+  // `--dry-run` gates on the HTTP **verb**, so `POST …/search` would halt like a
+  // write unless `asReadContext` exempted it. That exemption is unit-tested in
+  // `searchPaginate.test.ts`; what is proven here is that the two testhub read
+  // leaves actually inherit it end to end — a leaf that built its own context, or
+  // a future refactor that stopped routing through `searchPaginate`, would break
+  // this while the shared unit test stayed green.
+  const runsPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 30,
+      total: 1,
+      values: [{ id: 'run-1', short_id: 'r4m2', status: 'pass', steps: [], is_archived: 0 }],
+    });
+
+  it('cases list --dry-run issues its POST and prints the results', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'list', '--library', 'LIB', '--dry-run', '--json'],
+      [librariesPage, casesPage],
+    );
+    expect(run.exit).toBe(0);
+    // The search really went out.
+    expect(run.calls).toHaveLength(2);
+    expect(pathOf(run.calls[1])).toBe('/v1/testhub/cases/search');
+    expect(run.calls[1]?.method).toBe('POST');
+    // stdout carries results, not a request plan.
+    const payload = parseStdout(run) as { values: Array<{ id: string }>; dry_run?: boolean };
+    expect(payload.dry_run).toBeUndefined();
+    expect(payload.values[0]?.id).toBe('case-1');
+    expect(run.stdout).not.toContain('dry_run');
+  });
+
+  it('runs list --dry-run issues its POST and prints the results', async () => {
+    const run = await runCli(
+      ['testhub', 'runs', 'list', '--plan-id', 'plan-9', '--dry-run', '--json'],
+      [runsPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls).toHaveLength(1);
+    expect(pathOf(run.calls[0])).toBe('/v1/testhub/runs/search');
+    expect(run.calls[0]?.method).toBe('POST');
+    const payload = parseStdout(run) as { values: Array<{ id: string }>; dry_run?: boolean };
+    expect(payload.dry_run).toBeUndefined();
+    expect(payload.values[0]?.id).toBe('run-1');
+  });
+
+  it('--all keeps walking pages under --dry-run', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'list', '--library', 'LIB', '--all', '--dry-run', '--json'],
+      [librariesPage, casesPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls.some((call) => pathOf(call) === '/v1/testhub/cases/search')).toBe(true);
+    expect(parseStdout(run)).toMatchObject({ count: 1, all: true });
+  });
+
+  it('but a write on the same verb still halts — the contrast that makes this meaningful', async () => {
+    const search = await runCli(
+      ['testhub', 'cases', 'list', '--library', 'LIB', '--dry-run', '--json'],
+      [librariesPage, casesPage],
+    );
+    const write = await runCli(
+      [
+        'testhub',
+        'cases',
+        'create',
+        '--library-id',
+        'lib-1',
+        '--title',
+        'hello',
+        '--dry-run',
+        '--json',
+      ],
+      [],
+    );
+    // Same POST verb, opposite treatment.
+    expect(search.stdout).not.toContain('dry_run');
+    expect((parseStdout(write) as { dry_run: boolean }).dry_run).toBe(true);
+    expect(mutations(write)).toHaveLength(0);
+  });
+});
 
 describe('testhub meta', () => {
   const libraryScoped: Array<[string, string, () => Response]> = [

@@ -165,21 +165,15 @@ export type SuiteListQuery = {
   parent_id?: string | undefined;
 };
 
-export async function listSuites(
-  ctx: Ctx,
-  libraryId: string,
-  query: SuiteListQuery = {},
-  page: PageRequest = {},
-): Promise<Page<TestSuite>> {
-  return await fetchPageOf(
-    ctx,
-    ENDPOINTS.testhubLibrarySuites(libraryId),
-    { ...query },
-    page,
-    parseTestSuite,
-  );
-}
-
+/**
+ * The suite tree, walked whole.
+ *
+ * There is deliberately **no single-page `listSuites` companion**. Both callers
+ * — `testhub meta suites` and the `testhub-suite` resolver — need every node, and
+ * for the same reason: a suite's path is computed by walking `parent` refs, so a
+ * partial page yields partial paths and makes cross-branch ambiguity
+ * undetectable. A paged variant would only offer a way to get that wrong.
+ */
 export function iterateSuites(
   ctx: Ctx,
   libraryId: string,

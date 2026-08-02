@@ -31,12 +31,15 @@ and the api-layer suite wrappers, so three of the four new leaves are assembly r
 scope)", which this milestone makes obsolete and must be corrected), `TestLibrary`, `TestPlan`,
 `parseTestLibrary`, `parseTestPlan`, `listSuites` / `iterateSuites` (`src/api/testhub.ts:134,149`).
 
-> **Corrected in S4 — AC8 is not fully met by `meta suites`.** The leaf collects the whole tree via
-> `iterateSuites`, because a paged tree yields partial paths and a lookup wants all of it. So
-> `iterateSuites` now has a production caller and **`listSuites` still does not**. Adding
-> `--page` / `--page-size` to `meta suites` purely to satisfy AC8 would degrade the leaf, so it was
-> not done. **S6 must choose**: delete `listSuites` as dead code, or relax AC8's "no api-layer
-> wrapper remains without a production caller" wording. Deleting it is the recommendation on record.
+> **Raised in S4, resolved in S6 — `listSuites` is deleted.** `meta suites` collects the whole tree
+> via `iterateSuites`, because a suite's path is computed by walking `parent` refs and a paged tree
+> therefore yields partial paths. That left `iterateSuites` with a production caller and `listSuites`
+> with none. Rather than invent a caller to justify the wrapper, or add `--page` / `--page-size` to
+> `meta suites` and degrade the leaf, S6 **removed `listSuites`** along with its test; the
+> `?parent_id=root` pass-through it asserted moved onto `iterateSuites`. Both remaining callers — the
+> leaf and the `testhub-suite` resolver — need every node, so a single-page variant only offered a way
+> to get paths wrong. AC8's "no api-layer wrapper remains without a production caller" now holds
+> without a waiver.
 
 ## 2. Endpoints
 
