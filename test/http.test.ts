@@ -476,6 +476,7 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100711': 'not_found',
       '100601': 'not_found',
       '100603': 'not_found',
+      '100600': 'not_found',
     });
   });
 
@@ -508,9 +509,17 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
 
   // S6 / 08-02-testhub-module: testhub answers 400 for a missing record with one
   // code per resource, exactly as pjm and ship do.
+  // S8 / 08-02-testhub-bootstrap-leaves added the last one, observed live
+  // 2026-08-02: 100600 on five distinct library-scoped endpoints given a bogus
+  // library id — same 1006xx family and wording as the two above.
   it.each([
     ['100601', '/v1/testhub/cases/000000000000000000000000', '测试用例不存在或无权限访问'],
     ['100603', '/v1/testhub/runs/000000000000000000000000', '执行用例不存在或无权限访问'],
+    [
+      '100600',
+      '/v1/testhub/libraries/000000000000000000000000/plans',
+      '测试库不存在或无权限访问',
+    ],
   ])(
     'maps testhub code %s (HTTP 400) to NotFoundError, i.e. exit 5',
     async (code, path, message) => {

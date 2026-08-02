@@ -218,7 +218,7 @@ pingcode testhub cases update aB3dEf9h --state 已评审 --json
 pingcode testhub plans list --library LIB --json
 pingcode testhub plans get "2026 S1 回归" --library LIB --json
 pingcode testhub plans create --library LIB --name "2026 S2 回归" \
-  --type 普通测试 --start 2026-08-10 --end 2026-08-31 --assignee 张三 --dry-run --json
+  --type 普通 --start 2026-08-10 --end 2026-08-31 --assignee 张三 --dry-run --json
 
 pingcode testhub runs list --library LIB --plan "2026 S1 回归" --json
 pingcode testhub runs patch 7hK2mQ9x --status 通过 --remark "retested on iOS" --json

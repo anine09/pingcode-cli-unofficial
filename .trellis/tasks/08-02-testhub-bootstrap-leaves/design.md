@@ -225,3 +225,132 @@ Every slice is one commit and independently revertible. The two riskiest are sep
 the `runWrite` narrowing (§8) touches shared code and reverts alone; the date semantics (§4) are
 confined to one helper plus its call sites. Reverting the whole milestone leaves the module exactly
 as `c3af5cf` shipped it, since no existing behaviour is modified — only added.
+
+## 11. S8 live-smoke results (2026-08-02)
+
+Run against the live tenant with the built binary at `e76bdff` (`node dist/bin/pingcode.js`).
+**No raw HTTP was used at any point** — no `curl`, no `python urllib` — which is the whole claim of
+this milestone (PRD R6). Machine timezone **CST / UTC+8** (`date +%z` → `+0800`); every epoch value
+below was cross-checked with GNU `date -d`, an implementation independent of the Node `Date` the
+CLI uses.
+
+### 11.1 Gate G4: the bootstrap completed unaided
+
+| # | Step | Result |
+|---|---|---|
+| 1 | `libraries create` | ✅ `CLIB08021926` / `6a6f2980f8f6de4d46717c64` |
+| 2 | `meta plan-types` | ✅ 3 types, auto-provisioned on the fresh library |
+| 3 | `meta suites` | ✅ empty on a fresh library; exercised against `CLISMOKE` for a real tree |
+| 4 | `plans create` | ✅ `3gyKsegN` / `6a6f29f911c48dd2a0423781`, type and assignee resolved **by name** |
+| 5 | `plans get` read-back | ✅ dates exact — see 11.2 |
+| 6 | `--dry-run` on both creates | ✅ zero rows created, verified by re-listing |
+| 7 | `cases create` → `runs bulk --add-case` → `runs patch --status` | ✅ all three inside the new library |
+
+`pcp:write:testhub:library` **is granted** — confirmed by the create succeeding, not by inspection.
+
+### 11.2 The date decision, settled
+
+The one thing a smoke run can silently pass while being wrong. `--start 2026-08-10 --end 2026-08-31`
+in UTC+8:
+
+| | sent | read back by `plans get` | independent expectation (`date -d`) |
+|---|---|---|---|
+| `start_at` | 1786291200 | 1786291200 | `2026-08-10 00:00:00` → 1786291200 ✅ |
+| `end_at` | 1788191999 | 1788191999 | `2026-08-31 23:59:59` → 1788191999 ✅ |
+
+The off-by-one-day trap would have produced `end_at` = 1788105600 (`2026-08-31 00:00:00`). The
+observed value is **86 399 s later**, i.e. the end of that day, and the span is 22 days inclusive —
+exactly what "10 through 31 August" means. Human mode renders `2026-08-31 23:59`, so `plans get`
+agrees with the `plans create` that produced it. **§4's asymmetry is correct and survives the round
+trip; the server stores what it is sent, with no truncation or timezone shift.**
+
+### 11.3 Error paths observed
+
+| Trigger | Exit | Vendor code | Message |
+|---|---|---|---|
+| library `--name` longer than 32 chars | 7 | `100019` | `'name'字符串长度不在[1,32]范围内` |
+| duplicate library `--identifier` | 7 | `100639` | `'library'标识已经存在` |
+| duplicate plan `--name` in a library | 7 | `100618` | `同名测试计划已存在` |
+| bogus library id (5 endpoints) | **5** | `100600` | `测试库不存在或无权限访问` |
+| bogus run id in `runs bulk --remove-run` | 7 | `100619` | `执行用例不存在` |
+| bogus library id on `cases list` (search) | 7 | `100000`, **HTTP 500** | `内部服务错误` |
+| `--end` before `--start` | 2 | — | client-side, no request |
+| malformed dates (`2026-8-1`, `08/31/2026`, 13-digit ms) | 2 | — | client-side, no request |
+| unknown plan-type / library / plan **name** | 2 | — | client-side, resolver miss |
+
+**`ERROR_CODE_OVERRIDES` gained exactly one row: `100600` → `not_found`.** Evidence: observed on five
+distinct endpoints with a bogus 24-hex library id (`GET /libraries/{id}/plans`, `/plan_types`,
+`/suites`, `GET /case/states?library_id=`, `POST /cases`), same `1006xx` family and the same
+`不存在或无权限访问` wording as `100601` / `100603`, which were already mapped. It exited 7 before and
+exits 5 now.
+
+`100619` was **left on exit 7 deliberately**, against the first instinct. The S8 probe did narrow
+what it refers to — it fires with a *valid* library and plan id and only a bogus `deletes[]` entry,
+so it is about the run, not the plan — but the previous milestone's reason for leaving it unmapped
+is untouched by that: `runs/bulk` rejects the **whole batch**, so exit 5 would name one missing run
+while implying the other entries were applied, which they were not. The new evidence is recorded on
+the `ERROR_CODE_OVERRIDES` docstring beside the existing rationale rather than used to overturn it.
+The neighbouring codes (`100649`, `100039`, `100043`, `100044`, `100008`, `100000`) likewise stay
+unmapped — validation and batch rejections are not absence.
+
+### 11.4 Findings that falsified documentation (all fixed in this commit)
+
+1. **Library `name` is capped at 32 characters.** Undocumented anywhere — §3's `CreateLibraryInput`
+   said only `name: string`. The first create attempt failed with `100019`. Recorded in SKILL.md
+   beside the `--identifier` uniqueness rule. Not pre-checked client-side, consistent with §7's
+   stance on server-enforced constraints: the rejection is precise and names the range.
+2. **The tenant's plan types are `普通` / `迭代` / `发布` — not `普通测试` / `迭代测试` / `发布测试`.**
+   The `plans create` examples in SKILL.md and README used `--type 普通测试`, which does not resolve
+   on this tenant; both now use `普通`. Two source docstrings that contrasted "迭代测试 vs 发布测试"
+   now speak of iteration vs release *types*, since the literal names are tenant-specific — which is
+   exactly why §5 forbids inferring the kind from the name.
+3. **`runs bulk --add-case` silently ignores a nonexistent case id**: `{"inserts":0,…}` at exit 0, no
+   error. A bogus `--remove-run` id by contrast fails loudly (`100619`). Added as SKILL.md §4c rule
+   16 — the existing "the API returns counts only, re-list the plan" notice is what saves the user
+   here, and it is now load-bearing rather than decorative.
+
+### 11.5 Other observations (no action taken)
+
+- **Plan types are auto-provisioned.** A brand-new library already has all three; no configuration
+  write is needed before `plans create`. This is what makes the bootstrap single-pass.
+- **A fresh library has no modules**, so `meta suites` correctly returns `{"values":[],"count":0}`.
+  Suite creation is out of PRD scope and there is no CLI path to it — the tree can only be read.
+  Exercised against `CLISMOKE` instead, where `computed_path` renders `登录 / 短信验证码` while the
+  server's `paths` holds `登录`, confirming the `f74ecd2` finding *and* the S4 path computation.
+- **`POST /cases/search` answers HTTP 500** (`100000`) for a bogus `library.id` filter where a 400
+  would be right. Server-side defect; the CLI surfaces it faithfully as exit 7. Not an override
+  candidate.
+- **The full plan resource carries both `status` (flat string) and `state` (object).** The previous
+  milestone's design said the object form was exclusive to the full resource and the string form to
+  embedded refs; live, the full resource has both. Additive, and the parser reads `state`, so no
+  defect — recorded so the claim is not repeated as an exclusion.
+- **Run statuses are exactly the documented five** (未测 / 通过 / 失败 / 受阻 / 跳过) with `is_system`
+  absent, and `runs patch --status 通过` round-trips to `status: "pass"`. The localized-name ↔ slug
+  join holds on a fresh library.
+- **`created_by` on everything the CLI writes is the bot user `Ping`** (`0111…0000`). This is the
+  concrete justification for `--assignee` having no default (§6): "me" is the bot.
+- **`runWrite`'s retry fired on the duplicate-plan-name rejection** (`100618`) — a caller-input
+  error with no cached id involved, the same defect §8 records for `100619`. Verified with
+  `--verbose` that **only one POST was sent**: `RetryWouldBeIdentical` suppressed the second, so the
+  cost is one wasted re-resolution plus a misleading "the server rejected an id that came from the
+  metadata cache" warning. Second live instance; evidence for S7.
+
+### 11.6 Residue left in the tenant
+
+Testhub still exposes **no library DELETE and no library PATCH**, so everything below is permanent
+and unrenameable.
+
+| Kind | Identifier / id | Note |
+|---|---|---|
+| Library | `CLIB08021926` · `6a6f2980f8f6de4d46717c64` | name `[CLI] bootstrap 08021926`. **Undeletable.** |
+| Plan | `3gyKsegN` · `6a6f29f911c48dd2a0423781` | `bootstrap plan 08021926`, inside the above |
+| Case | `CLIB08021926-1` · `6a6f2ace11c48dd2a0423784` | `[CLI smoke] bootstrap case 08021926` |
+| Run | `buEcG-DG` · `6a6f2ae18359e0328fce7ecc` | patched to 通过, remark `[CLI smoke] bootstrap patch` |
+
+Carried over from the previous milestone and still present: library `CLI Smoke` / `CLISMOKE`
+(`6a6ef8d811c48dd2a042367d`) and the org-level property `CLIsmokeprop`. This run added **one**
+library rather than reusing `CLISMOKE`, because proving `libraries create` against a *fresh* library
+is the point of the slice — a fresh library is also what proved plan types are auto-provisioned.
+The identifier is timestamped (`CLIB<MMDDHHMM>`), so a repeat run will not collide.
+
+No credentials, tokens or tenant-identifying values are recorded here or in any committed file.

@@ -748,7 +748,7 @@ export function parseTestRunStatus(raw: unknown): TestRunStatus {
  * `createPlan()` requires.
  *
  * There is **no `kind` discriminator** — only `id` / `url` / `name` / `library`
- * — so nothing here can tell a 迭代测试 from a 发布测试, and the localized name
+ * — so nothing here can tell an iteration type from a release type, and the localized name
  * must not be used to guess: tenants rename them (testhub §10.7).
  */
 export function parseTestPlanType(raw: unknown): TestPlanType {

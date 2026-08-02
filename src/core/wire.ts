@@ -211,7 +211,11 @@ const SCOPE_HINT =
  *   ship's `100719`/`100702`, so it gets the same treatment.
  * - `100619` (`执行用例不存在` inside `runs/bulk`) — it rejects the *whole batch*,
  *   so exit 5 would name one missing run while silently implying the valid
- *   entries were applied. They were not.
+ *   entries were applied. They were not. The S8 smoke (2026-08-02) narrowed what
+ *   the code *refers* to — it still fires with a valid library and plan id and
+ *   only a bogus `deletes[]` entry, so it is about the run, not the plan — but
+ *   that does not weaken the argument above: the objection is to what exit 5 would
+ *   imply about the rest of the batch, not to which resource is missing.
  * - `100039` / `100043` / `100044` / `100008` (shape, unknown-property, bad
  *   option, missing-required-field) — these are input validation, not absence.
  * - `100000` (`内部服务错误`, HTTP 500) — returned for genuinely broken server
@@ -234,6 +238,12 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   // testhub's not-found codes: case, then run (08-02-testhub-module S6 smoke).
   '100601': 'not_found',
   '100603': 'not_found',
+  // 08-02-testhub-bootstrap-leaves S8 smoke, 2026-08-02, live tenant:
+  //   100600 "测试库不存在或无权限访问" — HTTP 400, observed on five endpoints with a
+  //   bogus 24-hex library id: GET /libraries/{id}/plans, /plan_types, /suites,
+  //   GET /case/states?library_id=, POST /cases. Same 1006xx family and the same
+  //   "不存在或无权限访问" wording as 100601/100603 above, which are already mapped.
+  '100600': 'not_found',
 };
 
 const NOT_FOUND_HINT =

@@ -696,7 +696,7 @@ export type TestRunStatus = {
  * the `type_id` that plan creation requires.
  *
  * The resource is `{id, url, library, name}`: there is **no kind discriminator**,
- * so telling a 迭代测试 from a 发布测试 is only possible by matching the
+ * so telling an iteration type from a release type is only possible by matching the
  * localized `name` (testhub §10.7) — which tenants rename, so the CLI does not
  * try. The consequence is that a type demanding `sprint_id` / `version_id`
  * cannot be identified before the server refuses it.

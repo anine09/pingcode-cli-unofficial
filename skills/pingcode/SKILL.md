@@ -323,7 +323,9 @@ pingcode testhub libraries create --name "Payments" --identifier PAY --json
 ```
 
 `--keywords` searches library **names** only — the identifier is not searchable server-side. The
-`--identifier` given to `create` must be unique across the organisation and the server enforces it.
+`--identifier` given to `create` must be unique across the organisation and the server enforces it,
+and `--name` is capped at **32 characters** (verified live 2026-08-02: a longer name is rejected with
+code `100019`, exit 7).
 There is no library update or delete: testhub publishes no library DELETE, so anything created here
 is permanent.
 
@@ -375,7 +377,7 @@ pingcode testhub plans list --library LIB --json
 pingcode testhub plans list --library LIB --name "2026 S1 回归" --json
 pingcode testhub plans get "2026 S1 回归" --library LIB --json    # name, id or short_id
 pingcode testhub plans create --library LIB --name "2026 S2 回归" \
-  --type 普通测试 --start 2026-08-10 --end 2026-08-31 --assignee 张三 --json
+  --type 普通 --start 2026-08-10 --end 2026-08-31 --assignee 张三 --json
 ```
 
 `create` takes all five: `--name` (unique within the library), `--type` (from
@@ -586,6 +588,12 @@ sharper write path.
     and unrenameable: get the name and identifier right the first time, and mark throwaway ones
     (for example `[CLI smoke] …`) *before* creating them. The CLI says so on stderr after each
     create.
+16. **`runs bulk --add-case` ignores a case id that does not exist — silently, at exit 0.** Verified
+    live 2026-08-02: a bogus `--add-case` id returns `{"inserts":0,"updates":0,"deletes":0}` and
+    succeeds. There is no error and no per-entry report, because the endpoint answers with counts
+    only. **Read the counts**, and if they do not match what you asked for, re-list the plan with
+    `pingcode testhub runs list --plan <plan> --json` to see what actually landed. A bogus id in
+    `--remove-run` does fail loudly (code `100619`, exit 7), so the leniency is specific to inserts.
 
 ## 5. Agent workflow
 
