@@ -32,11 +32,12 @@ function leafPaths(command: Command, prefix: string[] = []): string[][] {
 describe('command surface', () => {
   const program = buildProgram();
 
-  it('registers the four command groups', () => {
+  it('registers the five command groups', () => {
     expect(program.commands.map((command) => command.name()).filter((n) => n !== 'help')).toEqual([
       'auth',
       'product',
       'project',
+      'testhub',
       'settings',
     ]);
   });
@@ -82,6 +83,21 @@ describe('command surface', () => {
       'project meta states',
       'project meta priorities',
       'project meta sprints',
+      'testhub libraries list',
+      'testhub libraries get',
+      'testhub cases list',
+      'testhub cases get',
+      'testhub cases create',
+      'testhub cases update',
+      'testhub plans list',
+      'testhub plans get',
+      'testhub runs list',
+      'testhub runs patch',
+      'testhub runs bulk',
+      'testhub meta case-states',
+      'testhub meta case-types',
+      'testhub meta important-levels',
+      'testhub meta run-statuses',
       'settings users',
     ]);
   });
@@ -113,13 +129,13 @@ describe('--help snapshots', () => {
     expect(program.helpInformation()).toMatchSnapshot();
   });
 
-  for (const name of ['auth', 'product', 'project', 'settings']) {
+  for (const name of ['auth', 'product', 'project', 'testhub', 'settings']) {
     it(name, () => {
       expect(group(program, name).helpInformation()).toMatchSnapshot();
     });
   }
 
-  // The resource subgroups and the two `meta` subgroups are one level down now,
+  // The resource subgroups and the three `meta` subgroups are one level down now,
   // so they need their own snapshots — the parent group help only lists them.
   for (const [parent, child] of [
     ['product', 'idea'],
@@ -127,6 +143,11 @@ describe('--help snapshots', () => {
     ['product', 'meta'],
     ['project', 'work-item'],
     ['project', 'meta'],
+    ['testhub', 'libraries'],
+    ['testhub', 'cases'],
+    ['testhub', 'plans'],
+    ['testhub', 'runs'],
+    ['testhub', 'meta'],
   ] as const) {
     it(`${parent} ${child}`, () => {
       expect(group(group(program, parent), child).helpInformation()).toMatchSnapshot();
@@ -234,6 +255,37 @@ describe('SKILL.md agrees with the CLI (R4.5)', () => {
     expect(skill).toMatch(/nothing\s+in\s+ship\s+can\s+be\s+deleted/i);
     // `--type` means something different on each module
     expect(skill).toMatch(/no\s+`--type`\s+(on|anywhere\s+on)\s+`idea`/i);
+  });
+
+  it('names every testhub scope the commands need (Gate G3)', () => {
+    for (const scope of [
+      'pcp:read:testhub:library',
+      'pcp:read:testhub:testcase',
+      'pcp:write:testhub:testcase',
+      'pcp:read:testhub:testplan',
+      'pcp:write:testhub:testplan',
+      'pcp:read:testhub:configuration',
+    ]) {
+      expect(skill, scope).toContain(scope);
+    }
+  });
+
+  it('states the testhub rules that only prose can carry (Gate G3)', () => {
+    // Each of these is either invisible in `--help` or a silent data loss, so a
+    // snapshot of the help text is not enough documentation on its own. The
+    // patterns tolerate the markdown's line wrapping.
+    expect(skill).toMatch(/library-scoped/i);
+    expect(skill).toMatch(/never\s+share\s+a\s+state,\s+type\s+or\s+status\s+id/i);
+    expect(skill).toMatch(/all-or-nothing/i);
+    expect(skill).toMatch(/silently\s+reassigns\s+the\s+run\s+to\s+its\s+creator/i);
+    expect(skill).toMatch(/only\s+way\s+to\s+delete\s+a\s+run/i);
+    expect(skill).toMatch(/cannot\s+filter\s+by\s+library/i);
+    expect(skill).toMatch(/important-levels`?\s+takes\s+no\s+`?--library/i);
+    expect(skill).toMatch(/cannot\s+write\s+a\s+run\s+at\s+all/i);
+    expect(skill).toMatch(/test_library_id/);
+    expect(skill).toMatch(/`?short_id`?\s+is\s+read-only/i);
+    expect(skill).toMatch(/no\s+`?--maintenance`?\s+flag/i);
+    expect(skill).toMatch(/no\s+discovery\s+command|no\s+property-lookup\s+command/i);
   });
 
   it('no longer tells the agent that ship is out of scope', () => {

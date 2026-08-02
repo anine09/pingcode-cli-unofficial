@@ -4,6 +4,7 @@ import { registerAuthCommands } from './commands/auth';
 import { registerProductCommands } from './commands/product';
 import { registerProjectCommands } from './commands/project';
 import { registerSettingsCommands } from './commands/settings';
+import { registerTesthubCommands } from './commands/testhub';
 import { addGlobalOptions } from './globals';
 
 /**
@@ -50,6 +51,8 @@ export function buildProgram(): Command {
   registerAuthCommands(program);
   registerProductCommands(program);
   registerProjectCommands(program);
+  // 产品管理 / 项目管理 / 测试管理 / 后台设置 — the GUI's own module order.
+  registerTesthubCommands(program);
   registerSettingsCommands(program);
 
   return program;

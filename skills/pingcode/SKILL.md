@@ -3,22 +3,26 @@ name: pingcode
 description: >-
   Use the `pingcode` CLI to work with PingCode (研发管理): 敏捷项目管理 (pjm) projects and work items —
   list and search work items (工作项), read a story/task/bug (需求/任务/缺陷), create one, update fields,
-  move it to another state (状态流转) — and 产品管理 (ship) products, requirements (需求 / idea) and
-  tickets (工单): search, read, create, update and transition them. Also resolves project- and
-  product-scoped ids and organisation members (项目/产品/迭代/成员). Triggers: pingcode, PingCode 工作项,
-  创建任务, 更新状态, 迭代 sprint, 产品 需求 工单, SCR-5 or SLC-1 style identifiers, a work-item or idea URL
-  from a PingCode instance. Do NOT use for PingCode Testhub test cases, Wiki pages, customers or
-  external users, the org chart beyond a member lookup, Insight/Goals/Flow, or webhooks — none of
-  those are covered by this CLI, and webhooks cannot be managed through the PingCode API at all
-  (they live in PingCode Flow's UI).
+  move it to another state (状态流转) — 产品管理 (ship) products, requirements (需求 / idea) and
+  tickets (工单): search, read, create, update and transition them — and 测试管理 (testhub) test
+  libraries (测试库), test cases (用例), test plans (测试计划) and runs (执行用例): search cases, read
+  one, create and update a case, record a run result, and bulk add/update/delete the runs of a
+  plan. Also resolves project-, product- and library-scoped ids and organisation members
+  (项目/产品/测试库/迭代/成员). Triggers: pingcode, PingCode 工作项, 创建任务, 更新状态, 迭代 sprint,
+  产品 需求 工单, 测试用例 测试计划 执行用例 测试库, SCR-5 or SLC-1 style identifiers, a work-item or
+  idea URL from a PingCode instance. Do NOT use for Wiki pages, customers or external users, the
+  org chart beyond a member lookup, Insight/Goals/Flow, or webhooks — none of those are covered by
+  this CLI, and webhooks cannot be managed through the PingCode API at all (they live in PingCode
+  Flow's UI).
 ---
 
 # PingCode CLI
 
 `pingcode` is a command-line client for the PingCode Open API. Its top level mirrors PingCode's own
 GUI modules: **`product`** (产品管理 / ship — products, requirements/需求, tickets/工单),
-**`project`** (项目管理 / pjm — projects and work items), **`settings`** (后台设置 — the
-organisation directory) and **`auth`** (the CLI's own local credentials).
+**`project`** (项目管理 / pjm — projects and work items), **`testhub`** (测试管理 — test libraries,
+cases, plans and runs), **`settings`** (后台设置 — the organisation directory) and **`auth`** (the
+CLI's own local credentials).
 
 Each business module owns its resources *and* its id lookups, so a module's whole surface is one
 `--help` away:
@@ -27,6 +31,7 @@ Each business module owns its resources *and* its id lookups, so a module's whol
 auth      login status logout
 product   list get · idea … · ticket … · meta …
 project   list get · work-item … · meta …
+testhub   libraries … · cases … · plans … · runs … · meta …
 settings  users
 ```
 
@@ -63,6 +68,24 @@ Credentials come from a PingCode application, not from a user account:
    The product-scoped metadata endpoints (`/v1/ship/idea/*`, `/v1/ship/ticket/*`) sit under the
    ordinary read scopes above, **not** under `configuration` — only the ticket state plans and
    flows need `configuration`.
+
+   For the testhub (测试管理) commands, add:
+   - `pcp:read:testhub:library` — `pingcode testhub libraries list` / `get`, and the case-module
+     (模块) tree behind `--suite`. Every other testhub command starts by resolving a library, so
+     this one is not optional
+   - `pcp:read:testhub:testcase` — `testhub cases list` / `get`, and `testhub meta case-types`
+   - `pcp:write:testhub:testcase` — `testhub cases create` / `update`
+   - `pcp:read:testhub:testplan` — `testhub plans list` / `get`, and `testhub runs list`
+   - `pcp:write:testhub:testplan` — `testhub runs patch` / `bulk`
+   - `pcp:read:testhub:configuration` — **not optional, despite the name**: `testhub meta
+     case-states`, `testhub meta run-statuses` and `testhub meta important-levels` all sit behind
+     it, and they are the only source of a `state_id`, a `status_id` and an `important_level_id`.
+     Without it those three return a bare 403 while their sibling `case-types` keeps working, and
+     since `PATCH /runs/{id}` requires `status_id`, a token without this scope **cannot write a
+     run at all**. The CLI adds that explanation to the 403 for the two library-scoped lookups.
+
+   `--executor` on a run resolves through the organisation directory, so it also needs
+   `pcp:read:global:team`.
 4. Copy the `client_id` and `client_secret`.
 
 Then:
@@ -90,10 +113,12 @@ from every URL, log line, dry-run plan and error message it emits.
 - `--json` makes **stdout carry JSON only**. Logs, warnings, tables and notes go to stderr.
 - In `--json` mode, timestamps stay raw unix **seconds**. Human mode renders local time.
 - Three list shapes, by command family:
-  - `project list` / `project work-item list` (one page) → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
+  - `project list` / `project work-item list` (one page) → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`,
+    and the same for `product`/`testhub` one-page lists
   - any list with `--all` → `{"values":[…],"count":42,"all":true}`
-  - every `meta` lookup — `pingcode product meta …`, `pingcode project meta …`, and
-    `pingcode settings users` (which still accepts `--page`/`--page-size`) → `{"values":[…],"count":20}`
+  - every `meta` lookup — `pingcode product meta …`, `pingcode project meta …`,
+    `pingcode testhub meta …`, and `pingcode settings users` (which still accepts
+    `--page`/`--page-size`) → `{"values":[…],"count":20}`
 - Single-resource commands (`get`, `create`, `update`, `transition`) print the resource object.
 - **Read keys defensively: an absent key means null or empty.** The CLI normalises `null` and `""`
   to "not present", so a field the API returned as `null` (an unset `plan_at`, `score`, `solution`)
@@ -281,6 +306,92 @@ pingcode product ticket transition SLC-7 --state 处理中 --json
 place ship demands a lookup (`pingcode product meta ticket-types --product SLC`) before a write can even be
 attempted. `--channel` can only be set at create time; there is no way to change it afterwards.
 
+### Test libraries 测试库 — `testhub libraries`
+
+A **test library** is testhub's parent scope, the way a product is ship's. Resolve it first: case
+states, case types, run results, the module tree and the plan list are **all library-scoped**.
+
+```bash
+pingcode testhub libraries list --json
+pingcode testhub libraries list --keywords payment --json
+pingcode testhub libraries get LIB --json        # name, identifier such as LIB, or id
+```
+
+`--keywords` searches library **names** only — the identifier is not searchable server-side. There
+is no library create/update/delete: testhub publishes no library DELETE, so library governance stays
+in the console.
+
+### `testhub meta` — the ids a testhub write cannot be built without
+
+```bash
+pingcode testhub meta case-states       --library LIB --json   # --state / state_id
+pingcode testhub meta case-types        --library LIB --json   # --type / type_id
+pingcode testhub meta run-statuses      --library LIB --json   # --status / status_id
+pingcode testhub meta important-levels  --json                 # --important-level; org-wide
+```
+
+`important-levels` is the one lookup in the module with **no per-library variant**, so it *refuses*
+`--library` with exit 2 rather than ignoring it (the flag is hidden from `--help`, which is why it
+is spelled out here). The other three require `--library`.
+
+### Test cases 用例 — `testhub cases`
+
+```bash
+pingcode testhub cases list --library LIB --json
+pingcode testhub cases list --library LIB --state 已评审 --type 功能测试 --json
+pingcode testhub cases list --library LIB --suite "登录 / 双因素" --keywords sso --page-size 20 --page 0 --json
+pingcode testhub cases list --library LIB --all --limit 200 --json
+
+pingcode testhub cases get 5f0e1a2b3c4d5e6f70819200 --json    # an id or a short_id
+pingcode testhub cases get aB3dEf9h --json
+
+pingcode testhub cases create --library LIB --title "SSO login" --dry-run --json
+pingcode testhub cases create --library LIB --title "SSO login" \
+  --suite "登录 / 双因素" --type 功能测试 --important-level 高 --json
+
+pingcode testhub cases update aB3dEf9h --title "SSO login (v2)" --json
+pingcode testhub cases update aB3dEf9h --state 已评审 --json
+pingcode testhub cases update aB3dEf9h --set 自动化=5cb7e763fda1ce4ca0010002 --json
+```
+
+`testhub cases list` is `POST /v1/testhub/cases/search`; the plain list endpoint is never used
+(unfiltered it scans every visible library). `--state` is **PATCH-only**: a case is always created in
+the library's initial state, so `cases create` has no `--state`.
+
+### Test plans 测试计划 — `testhub plans`
+
+```bash
+pingcode testhub plans list --library LIB --json
+pingcode testhub plans list --library LIB --name "2026 S1 回归" --json
+pingcode testhub plans get "2026 S1 回归" --library LIB --json    # name, id or short_id
+```
+
+Read-only in this version: plans are created and edited in the GUI.
+
+### Runs 执行用例 — `testhub runs`
+
+A **run** is one case scheduled inside one plan; recording a result means patching the run.
+
+```bash
+pingcode testhub runs list --library LIB --plan "2026 S1 回归" --json
+pingcode testhub runs list --library LIB --plan "2026 S1 回归" --status 失败 --executor wangxiao --json
+pingcode testhub runs list --plan-id 5f0e1a2b3c4d5e6f70819200 --all --limit 200 --json
+
+pingcode testhub runs patch 7hK2mQ9x --status 通过 --remark "retested on iOS" --dry-run --json
+pingcode testhub runs patch 7hK2mQ9x --status 通过 --executor wangxiao --json
+pingcode testhub runs patch 7hK2mQ9x --status 失败 \
+  --step s1=通过 --step s2=失败 --step-actual s2="500 from /login" --json
+
+pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" \
+  --add-case 5f0e1a2b3c4d5e6f70819200 --executor wangxiao --dry-run --json
+pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" --set-status 7hK2mQ9x=通过 --json
+pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" --remove-run 7hK2mQ9x --json
+```
+
+`testhub runs bulk` is the **only** way to delete a run, and the only way to add one. Every
+name-resolvable flag has an `--x-id` twin (`--status-id`, `--executor-id`, `--plan-id`,
+`--library-id`, …) that is sent verbatim with no lookup; the two forms are mutually exclusive.
+
 ## 4. Rules that will bite you
 
 1. **Resolve ids per project.** Run `pingcode project meta types` / `project meta states` for the project you are
@@ -360,12 +471,73 @@ almost every difference is a trap.
     silently ignored under a client-credentials token — the ticket is attributed to the token owner
     with no error. The CLI exposes neither.
 
+## 4c. Testhub rules that will bite you
+
+These are on top of §4. Testhub is the same machinery again, with a different parent scope and a
+sharper write path.
+
+1. **Resolve the test library first, and never carry an id across libraries.** `state_id`,
+   `type_id`, `status_id`, `suite_id` and the plan list are all **library-scoped**: two libraries
+   never share a state, type or status id, even when the names are identical. `testhub cases list`,
+   `plans list`, `plans get`, `runs bulk` and the three library-scoped `meta` leaves all require
+   `--library <name|id>` and refuse to guess (exit 2). `cases get`, `cases update` and `runs patch`
+   do not: they read the resource first and inherit its library. `runs list` needs one only to
+   resolve a `--plan` or `--status` **by name** — `--plan-id` / `--status-id` work without it.
+2. **`--json` search is the read path.** `testhub cases list` is `POST /v1/testhub/cases/search` and
+   `testhub runs list` is `POST /v1/testhub/runs/search`; the plain `GET` lists are never called
+   (unfiltered, `GET /v1/testhub/cases` scans every library you can see). One operator per field, no
+   `$and`/`$or`, filters AND-ed, and no sorting anywhere.
+3. **`steps[]` replaces, it never merges — so `--step` is all-or-nothing.** A run's step array is
+   overwritten wholesale, and a step that arrives without its `step_id` is re-created with a fresh
+   id, orphaning its execution history. Re-emitting an untouched step is impossible: a run step
+   reports an English status **slug** while the write needs a status **id**, and nothing joins the
+   two except the localized name, which a tenant may have renamed. Rather than guess, the CLI
+   refuses a partial `--step` edit and lists every step id you must supply. Pass a status for
+   **every** step, or none at all. The same "replaces, never merges" applies to `--set`/`properties`
+   on a case.
+4. **`testhub runs patch` always sends `status_id` *and* `executor_id`.** `status_id` is required by
+   the API even on PATCH, and an omitted `executor_id` is **destructive**: the server silently
+   reassigns the run to its creator. The CLI reads the run first and re-sends both, inheriting each
+   from the run when you do not name it — so patching only a remark is safe here, and would not be
+   if you called the API directly. If the run has no recorded result or no executor to inherit, the
+   CLI asks for `--status` / `--executor` (exit 2) instead of sending a half-formed body.
+5. **`pingcode testhub runs bulk` is the only way to delete a run** — there is no `runs delete` and
+   no run DELETE endpoint. It is also the only way to add one. Each of `--add-case`, `--set-status`
+   and `--remove-run` is capped at **50** entries per call (checked locally, exit 2), and the
+   response carries **counts only**, never the ids of the runs it created: re-list the plan to see
+   them.
+6. **`testhub runs list` cannot filter by library.** `library.id` is on the API's exclusion list for
+   run search, so scope runs with `--plan` instead. Passing `--library` without `--plan` resolves
+   names but does not narrow the result, and the CLI warns on stderr when you do it.
+7. **`testhub meta important-levels` takes no `--library`.** Importance levels are organisation-wide
+   — the only testhub lookup with no per-library variant — so the flag is refused with exit 2 rather
+   than accepted and ignored. It is hidden from `--help`; this line is the documentation.
+8. **The `pcp:read:testhub:configuration` trap.** `testhub meta case-states` and `testhub meta
+   run-statuses` need that scope while their sibling `testhub meta case-types` does not. A token
+   granted only `testcase` + `testplan` can list cases, plans and runs but gets a bare 403 from
+   those two — and since they are the only source of a `state_id` and a `status_id`, that token
+   **cannot write a run at all**. The CLI rewrites the 403 to say so.
+9. **`cases create` takes the library as `test_library_id`, and `--state` is PATCH-only.** The
+   create body field is `test_library_id` (not `library_id`), which the CLI fills from `--library`;
+   a case is created in the library's initial state and can only be moved with
+   `pingcode testhub cases update <case> --state <s>`.
+10. **`short_id` is read-only.** `testhub cases get`, `plans get` and the run read accept an id or a
+    `short_id`, but every write documents `id` only. `testhub cases update` and `testhub runs patch`
+    therefore read the resource first and use the real id — which is also where they learn the
+    library, so a name lookup works without repeating `--library`.
+11. **Two gaps to know about.** There is no `--maintenance` flag (filtering cases by maintainer is
+    not exposed), and `--set` keys have **no discovery command** in this version: testhub's property
+    lookup is outside this endpoint set, so read the keys off an existing case with
+    `pingcode testhub cases get <case> --json`. Values for select-typed properties are option ids,
+    not labels — the same trap as ship.
+
 ## 5. Agent workflow
 
 1. `pingcode auth status` — if it reports no token, ask the user for credentials (§1) instead of
    guessing.
-2. Resolve the parent scope: `pingcode project list --json` for work items, or
-   `pingcode product list --json` for ideas and tickets.
+2. Resolve the parent scope: `pingcode project list --json` for work items,
+   `pingcode product list --json` for ideas and tickets, or `pingcode testhub libraries list --json`
+   for cases, plans and runs.
 3. Resolve ids:
    - pjm: `pingcode project meta types --project <p> --json`, then
      `project meta states --project <p> --type <t> --json`. Keep the type around: you need it again for
@@ -373,8 +545,12 @@ almost every difference is a trap.
    - ship: `pingcode product meta idea-states --product <p> --json` (or the `ticket-*` equivalents), plus
      `product meta members --product <p> --json` before setting an assignee, and
      `product meta ticket-types --product <p> --json` before creating a ticket — `--type` is required there.
-4. Read before writing: `pingcode project work-item get <ref> --json`, `pingcode product idea get <ref> --json` or
-   `pingcode product ticket get <ref> --json`.
+   - testhub: `pingcode testhub meta case-states --library <l> --json`, `case-types`,
+     `run-statuses` (the source of `--status`, needed by every run write) and the org-wide
+     `important-levels`. Find the plan with `pingcode testhub plans list --library <l> --json`.
+4. Read before writing: `pingcode project work-item get <ref> --json`, `pingcode product idea get <ref> --json`,
+   `pingcode product ticket get <ref> --json` or `pingcode testhub cases get <ref> --json` — and for a
+   step-level run edit, read the run's steps first, because `--step` must cover all of them.
 5. For any mutation, run it with `--dry-run --json` first, show the plan, get confirmation, then run
    it again without `--dry-run`. Remember that **nothing in ship can be deleted**, so say so before
    creating anything.
@@ -385,10 +561,15 @@ almost every difference is a trap.
 
 ## 6. Not covered
 
-Test cases (Testhub), Wiki spaces and pages, ship customers and external users, product tags,
-product/suite/member writes, `POST /v1/relations` (the ship↔pjm link), departments and groups,
-workloads, comments and attachments, Insight/Goals/Flow/Plan, and webhooks. PingCode has no REST API
-for webhooks at all — they are configured in PingCode Flow's UI.
+Wiki spaces and pages, ship customers and external users, product tags, product/suite/member writes,
+`POST /v1/relations` (the ship↔pjm link), departments and groups, workloads, comments and
+attachments, Insight/Goals/Flow/Plan, and webhooks. PingCode has no REST API for webhooks at all —
+they are configured in PingCode Flow's UI.
+
+Inside testhub, this version deliberately leaves out: case **deletion** (irreversible, with no
+undelete), library and case-module writes, plan create/update, `POST /v1/testhub/runs` and
+`PUT /runs/{id}` (the PUT blanks the executor instead of merely reassigning it), every configuration
+write, the case/run history reads, and the case-property lookup.
 
 ## 7. Installing this skill elsewhere
 

@@ -277,17 +277,18 @@ export type PropertyAssignment = { key: string; value: string };
  * The value is sent **verbatim**. For select-typed properties the API expects the
  * option's `_id`, not its display text (ship GOTCHA #5), and the docs' own
  * examples only ever show text-typed properties — which is precisely the trap.
- * `pingcode product meta {idea,ticket}-properties --product <p>` lists both the keys and
- * the option ids.
+ *
+ * `hint` is supplied by the caller because *where you look the keys up* is
+ * module-specific: ship has a property lookup (`product meta {idea,ticket}-properties`),
+ * testhub has none in this milestone, and a hint naming another module's command
+ * would send the user to a leaf that does not apply — or does not exist.
  */
-export function parseSetFlags(values: string[] | undefined): PropertyAssignment[] {
+export function parseSetFlags(values: string[] | undefined, hint: string): PropertyAssignment[] {
   const assignments: PropertyAssignment[] = [];
   for (const raw of values ?? []) {
     const separator = raw.indexOf('=');
     if (separator <= 0) {
-      throw new UsageError(`--set expects key=value, got "${raw}"`, {
-        hint: 'list valid keys with `pingcode product meta idea-properties --product <p>` (ticket-properties for tickets)',
-      });
+      throw new UsageError(`--set expects key=value, got "${raw}"`, { hint });
     }
     assignments.push({ key: raw.slice(0, separator).trim(), value: raw.slice(separator + 1) });
   }

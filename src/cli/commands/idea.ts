@@ -102,6 +102,9 @@ type UpdateFlags = StateFlags & {
 const SET_HELP =
   'custom property, repeatable: --set key=value. Values for select-type properties are option ids, not labels. Replaces, never merges';
 
+const SET_HINT =
+  'list valid keys with `pingcode product meta idea-properties --product <p>` (ticket-properties for tickets)';
+
 const SUITE_FILTER_CAVEAT =
   'filtering ideas by suite is undocumented: the API lists suite.id in neither the filterable ' +
   'nor the unfilterable set (ship §9.5), so verify the result rather than trusting an empty one';
@@ -253,7 +256,7 @@ async function runGet(target: string, command: Command): Promise<void> {
 async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
   const title = requireFlag(flags.title, '--title');
-  const assignments = parseSetFlags(flags.set);
+  const assignments = parseSetFlags(flags.set, SET_HINT);
 
   const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<CreateIdeaInput>> => {
     const product = await resolveProduct(attemptCtx, flags.product);
@@ -298,7 +301,7 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
 async function runUpdate(target: string, flags: UpdateFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
   const progress = parseNumberFlag(flags.progress, '--progress');
-  const assignments = parseSetFlags(flags.set);
+  const assignments = parseSetFlags(flags.set, SET_HINT);
 
   const scalarPatch: UpdateIdeaInput = {
     ...(flags.title === undefined ? {} : { title: flags.title }),

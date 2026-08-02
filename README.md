@@ -5,8 +5,9 @@
 A command-line client for the [PingCode Open API](https://open.pingcode.com/), plus a single
 `pingcode` skill that teaches AI agents how to drive it.
 
-Scope: **projects, work items, and the project-scoped metadata you need to write one.** Testhub,
-Wiki, Ship, Flow, Insight and the org chart (beyond a member lookup) are deliberately not covered.
+Scope: **projects and work items, ship products/ideas/tickets, testhub libraries/cases/plans/runs,
+and the scoped metadata you need to write one.** Wiki, Flow, Insight and the org chart (beyond a
+member lookup) are deliberately not covered.
 
 ---
 
@@ -62,10 +63,23 @@ The CLI authenticates as an **application**, not as a user, using the OAuth
    | `pcp:read:ship:ticket` | `product ticket list` / `get`, `product meta ticket-states` / `ticket-priorities` / `ticket-types` / `ticket-channels` / `ticket-properties` |
    | `pcp:write:ship:ticket` | `product ticket create` / `update` / `transition` |
    | `pcp:read:ship:configuration` | optional — only the state-plan pre-check in `product ticket transition`; without it the CLI warns and lets the server judge |
+   | `pcp:read:testhub:library` | `testhub libraries list` / `get`, and the case-module (模块) tree behind `--suite` |
+   | `pcp:read:testhub:testcase` | `testhub cases list` / `get`, `testhub meta case-types` |
+   | `pcp:write:testhub:testcase` | `testhub cases create` / `update` |
+   | `pcp:read:testhub:testplan` | `testhub plans list` / `get`, `testhub runs list` |
+   | `pcp:write:testhub:testplan` | `testhub runs patch` / `bulk` |
+   | `pcp:read:testhub:configuration` | **not optional** — `testhub meta case-states` / `run-statuses` / `important-levels`, i.e. every `state_id`, `status_id` and `important_level_id` |
 
    Every ship command begins by resolving a product name, so `pcp:read:ship:product` is required
    even for a pure `product idea list`. The product-scoped metadata endpoints (`/v1/ship/idea/*`,
    `/v1/ship/ticket/*`) sit under the ordinary read scopes above, **not** under `configuration`.
+
+   Testhub is the same story with a sharper edge: every testhub command begins by resolving a test
+   library, so `pcp:read:testhub:library` is required even for a pure `testhub cases list` — and
+   `pcp:read:testhub:configuration` is *not* optional despite the name, because `case/states` and
+   `run/statuses` live behind it while their sibling `case/types` does not. A token without it can
+   list cases, plans and runs but cannot resolve a `status_id`, and `PATCH /runs/{id}` requires one,
+   so it cannot write a run at all. `--executor` also needs `pcp:read:global:team`.
 
 4. Copy the `client_id` and `client_secret`.
 
@@ -122,6 +136,13 @@ pingcode project   list | get <project>
 pingcode project work-item  list | get <ref> | create | update <ref> | transition <ref>
 pingcode project meta       types | states | priorities | sprints
 
+# testhub (测试管理)
+pingcode testhub libraries  list | get <library>
+pingcode testhub cases      list | get <ref> | create | update <ref>
+pingcode testhub plans      list | get <ref>
+pingcode testhub runs       list | patch <run> | bulk
+pingcode testhub meta       case-states | case-types | important-levels | run-statuses
+
 # 后台设置
 pingcode settings  users
 ```
@@ -172,6 +193,29 @@ pingcode product ticket create --product SLC --type 故障 --title "Cannot log i
 pingcode product ticket transition SLC-7 --state 处理中 --json
 ```
 
+```bash
+# testhub: resolve the test library first — states, types, statuses, modules and plans hang off it
+pingcode testhub libraries list --json
+pingcode testhub libraries get LIB --json
+
+pingcode testhub meta case-states      --library LIB --json   # --state / state_id
+pingcode testhub meta case-types       --library LIB --json   # --type / type_id
+pingcode testhub meta run-statuses     --library LIB --json   # --status / status_id
+pingcode testhub meta important-levels --json                 # org-wide: takes no --library
+
+pingcode testhub cases list --library LIB --state 已评审 --json
+pingcode testhub cases get aB3dEf9h --json                    # an id or a short_id
+pingcode testhub cases create --library LIB --title "SSO login" --dry-run --json
+pingcode testhub cases update aB3dEf9h --state 已评审 --json
+
+pingcode testhub plans list --library LIB --json
+pingcode testhub plans get "2026 S1 回归" --library LIB --json
+
+pingcode testhub runs list --library LIB --plan "2026 S1 回归" --json
+pingcode testhub runs patch 7hK2mQ9x --status 通过 --remark "retested on iOS" --json
+pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" --remove-run 7hK2mQ9x --json
+```
+
 `--dry-run` on a mutating command prints the request it *would* have sent and exits 0 without
 sending it. Read requests still run, so ids are genuinely resolved first.
 
@@ -182,10 +226,11 @@ sending it. Read requests still run, so ids are genuinely resolved first.
 - **stdout carries JSON only.** Tables, logs, warnings, dry-run notes and errors go to stderr.
 - Timestamps stay raw **unix seconds** in `--json`; human mode renders local time.
 - Three list shapes, by command family:
-  - one page of `project list` / `project work-item list` / `product list` / `product idea list` / `product ticket list`
-    → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
+  - one page of `project list` / `project work-item list` / `product list` / `product idea list` /
+    `product ticket list` / `testhub libraries list` / `testhub cases list` / `testhub plans list` /
+    `testhub runs list` → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
   - any list with `--all` → `{"values":[…],"count":42,"all":true}`
-  - every `meta` lookup (`product meta …`, `project meta …`, `settings users`) → `{"values":[…],"count":20}`
+  - every `meta` lookup (`product meta …`, `project meta …`, `testhub meta …`, `settings users`) → `{"values":[…],"count":20}`
 - Single-resource commands (`get`, `create`, `update`, `transition`) print the resource object.
 - `--dry-run` prints `{"dry_run":true,"request":{"method":…,"url":…,"headers":…,"body":…}}` — with
   `Authorization` and any `client_secret` masked.
@@ -249,8 +294,9 @@ state plan, so mapping them to `not_found` would be a lie — they stay on exit 
 - **Timestamps are unix seconds everywhere.** `--start-at` / `--end-at` accept `1730000000` or
   `2026-01-31` (parsed as UTC midnight).
 - **Metadata is cached for 24 h** under `~/.pingcode/cache/` (mode `0600`, hashed filenames), keyed
-  by `(apiBase, clientId, parentId, kind)` — the parent being a project for pjm and a **product**
-  for ship. Pass `--no-cache` if a project or product was reconfigured and an id looks stale; a
+  by `(apiBase, clientId, parentId, kind)` — the parent being a project for pjm, a **product**
+  for ship and a **test library** for testhub. Pass `--no-cache` if a project, product or library
+  was reconfigured and an id looks stale; a
   write rejected on a cached id invalidates that entry and retries once. `auth login` and
   `auth logout` both clear the cache.
 
@@ -296,6 +342,54 @@ Everything above still applies. These are the differences that will cost you tim
 - **`ticket.channel` is an object or the bare string `"internal"`**, and `--channel` can only be set
   at create time. Tags cannot be written at all, and a ticket's `submitter_id` is silently ignored
   under a client-credentials token — neither is exposed.
+
+### Testhub-specific caveats
+
+Everything above still applies. Testhub's parent scope is a **test library**, and its write path is
+the sharpest in the CLI:
+
+- **A test library is testhub's project.** `state_id`, `type_id`, `status_id`, `suite_id` and the
+  plan list are all library-scoped — two libraries never share a state, type or status id, even when
+  the names match. `testhub cases list`, `plans list`, `plans get`, `runs bulk` and the three
+  library-scoped `meta` leaves require `--library <name|id>` (exit 2 without it). `cases get`,
+  `cases update` and `runs patch` read the resource first and inherit its library; `runs list` needs
+  one only to resolve `--plan` / `--status` by name.
+- **`cases list` and `runs list` are `POST …/search`.** The plain `GET` lists are never used —
+  unfiltered, `GET /v1/testhub/cases` scans every library the token can see. Same DSL limits as
+  ship: one operator per field, no `$and`/`$or`, no sorting.
+- **`--step` is all-or-nothing, because `steps[]` replaces.** A run's step array is overwritten
+  wholesale and a step sent without its `step_id` is re-created with a new id, orphaning its
+  history. Re-emitting an untouched step is impossible: a run step reports a status **slug** while
+  the write needs a status **id**, and only the localized (renameable) name joins them. So the CLI
+  refuses a partial step edit and prints the full list of step ids. `--set` / `properties` on a case
+  replace wholesale too.
+- **`runs patch` always sends `status_id` and `executor_id`.** `status_id` is required by the API
+  even on PATCH, and **omitting `executor_id` silently reassigns the run to its creator**. The CLI
+  pre-reads the run and re-sends both, inheriting each when you do not name it; if there is nothing
+  to inherit it asks for the flag (exit 2) rather than sending a half-formed body.
+- **`runs bulk` is the only way to delete a run** — and the only way to add one. `--add-case`,
+  `--set-status` and `--remove-run` are each capped at **50** entries per call (checked locally),
+  and the response is **counts only**: re-list the plan to see the new run ids.
+- **`runs list` cannot filter by `library.id`** — it is on the API's exclusion list for run search,
+  so scope runs with `--plan`. The CLI warns when `--library` is given without one.
+- **`meta important-levels` takes no `--library`.** Importance levels are organisation-wide, the one
+  testhub lookup with no per-library variant, so the flag is refused with exit 2 instead of being
+  ignored. The refusal is hidden from `--help`, which is why it is written down here.
+- **`pcp:read:testhub:configuration` is a trap, not an option.** `meta case-states` and
+  `meta run-statuses` need it; their sibling `meta case-types` does not. Without it a token gets a
+  bare 403 from exactly the two lookups that produce a `state_id` and a `status_id` — so it cannot
+  write a run at all. The CLI rewrites that 403 to say so.
+- **`cases create` sends the library as `test_library_id`** (not `library_id`), and `state_id` is
+  **PATCH-only**: a case is created in the library's initial state and moved with `cases update`.
+- **`short_id` is read-only.** Reads accept an id or a `short_id`; every write documents `id` only,
+  so `cases update` and `runs patch` resolve it through a pre-read.
+- **Two gaps.** There is no `--maintenance` flag (no filtering cases by maintainer), and `--set`
+  keys have no discovery command in this version — testhub's case-property lookup is outside the
+  implemented endpoint set, so read the keys off an existing case with `cases get <case> --json`.
+  Select-typed values are option ids, not labels.
+- **Not exposed on purpose:** case deletion (irreversible), library and module writes, plan
+  create/update, `POST /v1/testhub/runs` and `PUT /runs/{id}` (which blanks the executor rather than
+  reassigning it), configuration writes, and the history reads.
 
 
 ---

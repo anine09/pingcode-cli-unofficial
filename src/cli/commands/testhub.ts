@@ -124,6 +124,18 @@ const SET_HELP =
   'custom case property, repeatable: --set key=value. Keys are raw property keys and values for ' +
   'select-typed properties are option ids, not labels. Replaces, never merges';
 
+/**
+ * The hint `parseSetFlags` prints on a malformed `--set`.
+ *
+ * Ship points at `product meta {idea,ticket}-properties`; testhub has no property
+ * lookup leaf in this milestone (`GET /v1/testhub/case/properties` is outside the
+ * endpoint set), so pointing anywhere would name a command that does not exist.
+ * The honest answer is: read the keys off a case you already have.
+ */
+const SET_HINT =
+  'pass --set <key>=<value>. testhub has no property-lookup command in this milestone: read the ' +
+  'keys off an existing case with `pingcode testhub cases get <case> --json`';
+
 const SHORT_ID_WRITE_CAVEAT =
   'a short_id is accepted on reads but rejected by every write, so this is resolved to a real id first';
 
@@ -627,7 +639,7 @@ async function runCaseList(flags: CaseListFlags, command: Command): Promise<void
 async function runCaseCreate(flags: CaseCreateFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
   const title = requireFlag(flags.title, '--title');
-  const assignments = parseSetFlags(flags.set);
+  const assignments = parseSetFlags(flags.set, SET_HINT);
 
   const suitePair = readPair('suite', flags.suite, flags.suiteId);
   const typePair = readPair('type', flags.type, flags.typeId);
@@ -673,7 +685,7 @@ async function runCaseUpdate(
   command: Command,
 ): Promise<void> {
   const { ctx } = contextFor(command);
-  const assignments = parseSetFlags(flags.set);
+  const assignments = parseSetFlags(flags.set, SET_HINT);
 
   const suitePair = readPair('suite', flags.suite, flags.suiteId);
   const statePair = readPair('state', flags.state, flags.stateId);

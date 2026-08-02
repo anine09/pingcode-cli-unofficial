@@ -109,6 +109,9 @@ type UpdateFlags = StateFlags & {
 const SET_HELP =
   'custom property, repeatable: --set key=value. Values for select-type properties are option ids, not labels. Replaces, never merges';
 
+const SET_HINT =
+  'list valid keys with `pingcode product meta idea-properties --product <p>` (ticket-properties for tickets)';
+
 /** `channel` is an object for external tickets and the string `"internal"` otherwise. */
 export function channelName(channel: Ref | string | undefined): string {
   if (channel === undefined) return '';
@@ -288,7 +291,7 @@ async function runGet(target: string, command: Command): Promise<void> {
 async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
   const title = requireFlag(flags.title, '--title');
-  const assignments = parseSetFlags(flags.set);
+  const assignments = parseSetFlags(flags.set, SET_HINT);
 
   const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<CreateTicketInput>> => {
     const product = await resolveProduct(attemptCtx, flags.product);
@@ -337,7 +340,7 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
 
 async function runUpdate(target: string, flags: UpdateFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
-  const assignments = parseSetFlags(flags.set);
+  const assignments = parseSetFlags(flags.set, SET_HINT);
 
   const scalarPatch: UpdateTicketInput = {
     ...(flags.title === undefined ? {} : { title: flags.title }),
