@@ -158,17 +158,41 @@ Rules carried over unchanged from ship §5 / M§6:
   composes unchanged — no testhub-specific forking was needed.
 
 **Suite tree flattening**: suites are a tree served as a flat list, joined by a
-**`parent` reference object** and carrying a `/`-separated `paths` string ([th#9],
-[th#11]). The resolver flattens it and matches on name; if two nodes in different
-branches share a name, that is an ambiguity error listing both paths, not a silent pick.
-Testhub suites carry **no `type` discriminator** — that field belongs to *ship* suites.
+**`parent` reference object** ([th#9], [th#11]). The resolver flattens it and matches on
+name; if two nodes in different branches share a name, that is an ambiguity error listing
+both paths, not a silent pick. Testhub suites carry **no `type` discriminator** — that
+field belongs to *ship* suites.
 
 S3 generalised ship's `loadSuites` into a shared `loadSuiteTree(ctx, path, query)` rather
-than copying it: the two areas differ only in endpoint and query. It now also accepts the
-server's own `paths` spelling (`登录/短信验证码`) as a typeable alias beside the computed
-`Parent / Child` form, because `paths` is what the API echoes back in `case.suite.paths`
-and therefore the string a user is most likely to paste. Ship sends no `paths`, so that
-addition is inert there.
+than copying it: the two areas differ only in endpoint and query.
+
+> **Live-verified 2026-08-02 (S6 smoke) — `paths` is the parent chain, not the node's own
+> path.** `GET /v1/testhub/libraries/{id}/suites` on a two-node tree (root `登录`, child
+> `短信验证码`) returns:
+>
+> ```json
+> {"id":"6a6ef9018359e0328fce7c16","name":"登录","paths":"","parent":null}
+> {"id":"6a6ef90111c48dd2a042368f","name":"短信验证码","paths":"登录",
+>  "parent":{"id":"6a6ef9018359e0328fce7c16","name":"登录","paths":""}}
+> ```
+>
+> So `paths` holds the **ancestor chain excluding the node itself**, and it is **`""` at a
+> root**. It is *not* `Parent/Child` for the node.
+>
+> This falsifies the S3 addition that registered `paths` verbatim as a typeable alias
+> (rationale then: "it is what the API echoes in `case.suite.paths`, so it is what a user
+> pastes"). Registering it verbatim gives the child `短信验证码` the alias `登录`, which
+> collides with the sibling root actually named `登录` and turns an unambiguous name into a
+> spurious `ambiguous suite name` exit 2; at a root it registers the empty string. The
+> registration was **removed** — only the computed `Parent / Child`
+> (`SUITE_PATH_SEPARATOR = ' / '`) and the plain leaf name are aliases.
+>
+> No replacement alias was added. The separator-free spelling `登录/短信验证码` would have to
+> be *composed* as `paths + '/' + name`, which assumes the `paths` separator (unverified
+> beyond one single-level sample) and appears nowhere in the API surface a user copies from
+> — `case.suite.paths` yields only `登录`. Composing it would re-introduce exactly the class
+> of assumption this finding removed, so it is out. Do not reintroduce either form without
+> a live multi-level sample.
 
 **Resolver names** (S4 calls these): `resolveTestLibrary(ctx, input)`,
 `resolveTestSuite(ctx, libraryId, input)`, `resolveCaseState(ctx, libraryId, input)`,

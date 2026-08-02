@@ -808,14 +808,15 @@ export const SUITE_PATH_SEPARATOR = ' / ';
  * ambiguity silently stops being detectable.
  *
  * Names are unique among siblings but not across the tree, so each node carries
- * its full path as the label an ambiguity error prints **and** as a typeable
- * alias. Two spellings are accepted as aliases:
+ * its full path (`Parent / Child`, computed here from the parent chain) as the
+ * label an ambiguity error prints **and** as a typeable alias.
  *
- *  - the path this function computes from the parent chain, `Parent / Child`;
- *  - whatever the server itself put in `paths`, when it sends one. Testhub does
- *    (`登录/短信验证码`, no spaces) and it is the string the API echoes back in
- *    `case.suite.paths`, so it is the form a user is most likely to copy. Ship
- *    sends no `paths`, where this is simply inert.
+ * The server's own `paths` string is deliberately **not** registered as an
+ * alias. Verified live 2026-08-02 against testhub: `paths` is the *parent
+ * chain, excluding the node itself* (`""` at a root), not the node's own path.
+ * Registering it verbatim would alias a child to its parent's name — the child
+ * `短信验证码` under root `登录` would claim the alias `登录` and make that
+ * unambiguous root name an "ambiguous suite" exit 2.
  */
 async function loadSuiteTree(
   ctx: Ctx,
@@ -826,10 +827,7 @@ async function loadSuiteTree(
     paginate<unknown>(ctx, path_, query, { pageSize: 100, limit: 1000 }),
   );
 
-  const nodes = new Map<
-    string,
-    { name: string | undefined; parentId: string | undefined; serverPath: string | undefined }
-  >();
+  const nodes = new Map<string, { name: string | undefined; parentId: string | undefined }>();
   for (const row of rows) {
     if (typeof row !== 'object' || row === null) continue;
     const record = row as Record<string, unknown>;
@@ -838,7 +836,6 @@ async function loadSuiteTree(
     nodes.set(id, {
       name: str(record.name),
       parentId: str(refRecord(record.parent)?.id),
-      serverPath: str(record.paths),
     });
   }
 
@@ -846,14 +843,9 @@ async function loadSuiteTree(
   for (const [id, node] of nodes) {
     const path = suitePath(nodes, id);
     const candidate: Candidate = { id, name: node.name, path };
-    // Every spelling of the path that is not just the bare name is typeable —
-    // that is how a user resolves a collision without looking up an id.
-    const aliases: string[] = [];
-    for (const alias of [path, node.serverPath]) {
-      if (alias === undefined || alias === node.name) continue;
-      if (!aliases.includes(alias)) aliases.push(alias);
-    }
-    if (aliases.length > 0) candidate.aliases = aliases;
+    // The computed path is typeable — that is how a user resolves a collision
+    // without looking up an id. A path that is just the bare name adds nothing.
+    if (path !== undefined && path !== node.name) candidate.aliases = [path];
     candidates.push(candidate);
   }
   return candidates;
@@ -1284,12 +1276,13 @@ export async function resolveCaseImportantLevel(
 
 /**
  * Case modules (模块) — a tree served flat, joined by a **`parent` reference
- * object** and carrying a `/`-separated **`paths`** string ([th#9], [th#11]).
+ * object** ([th#9], [th#11]). The row's own `paths` string is not used: verified
+ * live 2026-08-02, it holds the *parent* chain excluding the node itself (`""`
+ * at a root), so it is not this node's path.
  *
  * Shares `loadSuiteTree` with ship, so a name that collides across branches is
- * an ambiguity error listing both full paths, never a silent pick. Either
- * spelling of the path is typeable: the computed `Parent / Child` or the
- * server's own `Parent/Child`.
+ * an ambiguity error listing both full paths, never a silent pick. The typeable
+ * spelling is the computed `Parent / Child`.
  *
  * The whole tree is loaded — no `?parent_id=` filter — because resolution has to
  * see every branch to detect a collision at all.

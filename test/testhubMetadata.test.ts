@@ -329,14 +329,16 @@ describe('important levels are org-level', () => {
 });
 
 describe('suite tree', () => {
-  // Joined by `parent` **reference objects** and carrying the server's own
-  // `/`-separated `paths` ([th#9]). A `parent_id` scalar would make every node a
-  // root and every path a bare name.
+  // Joined by `parent` **reference objects**. A `parent_id` scalar would make
+  // every node a root and every path a bare name.
+  //
+  // `paths` mirrors the live shape verified 2026-08-02: the *parent* chain,
+  // excluding the node itself, `''` at a root — never the node's own path.
   const tree = [
-    { id: 'su-login', name: '登录', paths: '登录' },
-    { id: 'su-login-sms', name: '短信验证码', parent: { id: 'su-login' }, paths: '登录/短信验证码' },
-    { id: 'su-pay', name: '支付', paths: '支付' },
-    { id: 'su-pay-sms', name: '短信验证码', parent: { id: 'su-pay' }, paths: '支付/短信验证码' },
+    { id: 'su-login', name: '登录', paths: '', parent: null },
+    { id: 'su-login-sms', name: '短信验证码', parent: { id: 'su-login' }, paths: '登录' },
+    { id: 'su-pay', name: '支付', paths: '', parent: null },
+    { id: 'su-pay-sms', name: '短信验证码', parent: { id: 'su-pay' }, paths: '支付' },
   ];
 
   it('lists suites under the library, not on a singular config segment', async () => {
@@ -360,11 +362,37 @@ describe('suite tree', () => {
     ).toBe('su-login-sms');
   });
 
-  it('also accepts the server-provided `paths` spelling verbatim', async () => {
-    // `登录/短信验证码` is what the API echoes in `case.suite.paths`, so it is the
-    // form a user is most likely to copy — no spaces around the separator.
-    const { ctx } = ctxFor([() => jsonResponse(page(tree))]);
-    expect((await resolveTestSuite(ctx, 'lib-1', '登录/短信验证码')).id).toBe('su-login-sms');
+  it('never registers the server `paths` as an alias — a child must not claim its parent name', async () => {
+    // The exact two-node tree observed live: root `登录` with `paths: ''`, child
+    // `短信验证码` with `paths: '登录'`. Registering `paths` verbatim aliased the
+    // child to `登录` and turned an unambiguous root name into an exit-2
+    // "ambiguous suite name".
+    const live = [
+      { id: '6a6ef9018359e0328fce7c16', name: '登录', paths: '', parent: null },
+      {
+        id: '6a6ef90111c48dd2a042368f',
+        name: '短信验证码',
+        paths: '登录',
+        parent: { id: '6a6ef9018359e0328fce7c16', name: '登录', paths: '' },
+      },
+    ];
+
+    const { ctx } = ctxFor([() => jsonResponse(page(live))]);
+    const resolved = await resolveTestSuite(ctx, 'lib-1', '登录');
+    expect(resolved.id).toBe('6a6ef9018359e0328fce7c16');
+
+    // …and the child is still reachable by its own computed full path.
+    const byPath = ctxFor([() => jsonResponse(page(live))]);
+    expect(
+      (await resolveTestSuite(byPath.ctx, 'lib-2', `登录${SUITE_PATH_SEPARATOR}短信验证码`)).id,
+    ).toBe('6a6ef90111c48dd2a042368f');
+  });
+
+  it('a root suite with an empty `paths` resolves by its bare name', async () => {
+    const { ctx } = ctxFor([
+      () => jsonResponse(page([{ id: 'su-login', name: '登录', paths: '', parent: null }])),
+    ]);
+    expect((await resolveTestSuite(ctx, 'lib-1', '登录')).id).toBe('su-login');
   });
 
   it('errors with both full paths when a name collides across branches', async () => {

@@ -102,18 +102,19 @@ describe('testhub normalisation', () => {
     expect(status.type).toBeUndefined();
   });
 
-  it('reads a suite parent as a ref and the path as `paths` ([th#9])', () => {
+  it('reads a suite parent as a ref and the ancestor chain as `paths` ([th#9])', () => {
     const suite = parseTestSuite({
       id: 'su2',
       name: '短信验证码',
       parent: { id: 'su1', name: '登录' },
-      paths: '登录/短信验证码',
+      // live shape: the ancestor chain, excluding this node
+      paths: '登录',
       library: { id: 'lib-1' },
     });
     // core/metadata.ts flattens the tree through `parent.id`; a `parent_id`
     // scalar would leave every node looking like a root.
     expect(suite.parent?.id).toBe('su1');
-    expect(suite.paths).toBe('登录/短信验证码');
+    expect(suite.paths).toBe('登录');
     expect(suite.library?.id).toBe('lib-1');
   });
 

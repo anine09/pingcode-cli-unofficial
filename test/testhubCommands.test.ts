@@ -211,8 +211,8 @@ const suitesPage = () =>
     page_size: 100,
     total: 2,
     values: [
-      { id: 'su-login', name: '登录', paths: '登录' },
-      { id: 'su-sms', name: '短信验证码', parent: { id: 'su-login', name: '登录' }, paths: '登录/短信验证码' },
+      { id: 'su-login', name: '登录', paths: '', parent: null },
+      { id: 'su-sms', name: '短信验证码', parent: { id: 'su-login', name: '登录' }, paths: '登录' },
     ],
   });
 
@@ -405,7 +405,7 @@ describe('testhub cases list', () => {
         '--library',
         'LIB',
         '--suite',
-        '登录/短信验证码',
+        '登录 / 短信验证码',
         '--state',
         '草稿',
         '--type',
@@ -419,7 +419,7 @@ describe('testhub cases list', () => {
       [librariesPage, suitesPage, caseStatesPage, caseTypesPage, importantLevelsPage, casesPage],
     );
     expect(run.exit).toBe(0);
-    // the server's own `paths` spelling resolved the nested module
+    // the computed `Parent / Child` path resolved the nested module
     expect(run.calls[run.calls.length - 1]?.body).toMatchObject({
       mode: 'query',
       payload: {

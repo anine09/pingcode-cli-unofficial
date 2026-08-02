@@ -447,7 +447,12 @@ export type TestSuite = {
   url?: string | undefined;
   library?: Ref | undefined;
   parent?: Ref | undefined;
-  /** `/`-separated ancestor path, e.g. `登录/短信验证码`. */
+  /**
+   * `/`-separated **ancestor** chain, *excluding this node* — `登录` for a child
+   * of root `登录`, and `''` for a root itself (verified live 2026-08-02). It is
+   * not this suite's own path, so it is never registered as a resolver alias;
+   * `core/metadata.ts` computes `Parent / Child` from the `parent` chain instead.
+   */
   paths?: string | undefined;
   [key: string]: unknown;
 };
