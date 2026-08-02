@@ -71,7 +71,8 @@ export type MetaKind =
   | 'testhub-case-type'
   | 'testhub-case-important-level'
   | 'testhub-run-status'
-  | 'testhub-plan';
+  | 'testhub-plan'
+  | 'testhub-plan-type';
 
 export const CACHE_TTL_MS = 24 * 3600 * 1000;
 
@@ -1326,6 +1327,36 @@ export async function resolveTestPlan(
     label: 'test plan',
     cacheKey: scopedKey(ctx, 'testhub-plan', libraryId),
     load: (c) => loadList(c, ENDPOINTS.testhubLibraryPlans(libraryId), {}, ['short_id']),
+  });
+}
+
+/**
+ * Plan types — the `type_id` that plan creation requires ([th#47], [th#60]).
+ *
+ * Addressed **under** the library like plans are, so the library id goes in the
+ * path and the query stays empty; the `?library_id=` shape belongs to the
+ * singular-segment config views, which these are not. That difference is also a
+ * **scope** difference: plan types are `pcp:read:testhub:testplan`, not
+ * `configuration`, so this resolver carries no configuration-scope hint — a
+ * misplaced one would send a 403 investigation down the wrong path.
+ *
+ * A plan type has **no `kind` discriminator** (testhub §10.7), so nothing here
+ * can tell the user that the type they named demands a `sprint_id` or a
+ * `version_id`. Inferring it from the localized name is not an option — tenants
+ * rename them — so the server's refusal is what surfaces instead.
+ */
+export async function resolveTestPlanType(
+  ctx: Ctx,
+  libraryId: string,
+  input: string,
+): Promise<ResolveResult> {
+  return await resolveWith(ctx, {
+    kind: 'testhub-plan-type',
+    input,
+    label: 'plan type',
+    cacheKey: scopedKey(ctx, 'testhub-plan-type', libraryId),
+    load: (c) => loadList(c, ENDPOINTS.testhubLibraryPlanTypes(libraryId), {}),
+    hint: 'list the types configured for this library with `pingcode testhub meta plan-types --library <library>`',
   });
 }
 

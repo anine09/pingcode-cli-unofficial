@@ -14,6 +14,7 @@ import {
   resolveRunStatus,
   resolveTestLibrary,
   resolveTestPlan,
+  resolveTestPlanType,
   resolveTestSuite,
   SUITE_PATH_SEPARATOR,
   withCacheInvalidation,
@@ -78,6 +79,7 @@ const LIBRARY_SCOPED = [
   'testhub-case-type',
   'testhub-run-status',
   'testhub-plan',
+  'testhub-plan-type',
 ] as const;
 
 describe('cache keys (Gate G1)', () => {
@@ -451,6 +453,158 @@ describe('plans', () => {
     const resolved = await resolveTestPlan(ctx, 'lib-1', 'zz99');
     expect(resolved.id).toBe('p1');
     expect(resolved.name).toBe('Sprint 3 回归');
+  });
+});
+
+describe('plan types', () => {
+  const types = () =>
+    jsonResponse(
+      page([
+        { id: 'pt-plain', name: '普通测试' },
+        { id: 'pt-sprint', name: '迭代测试' },
+        { id: 'pt-release', name: '发布测试' },
+      ]),
+    );
+
+  it('resolves a plan type by its exact name', async () => {
+    const { ctx } = ctxFor([types]);
+    const resolved = await resolveTestPlanType(ctx, 'lib-1', '普通测试');
+    expect(resolved.id).toBe('pt-plain');
+    expect(resolved.kind).toBe('testhub-plan-type');
+  });
+
+  it('is addressed under the library, with the id in the path not the query ([th#60])', async () => {
+    const { ctx, fake } = ctxFor([types]);
+    await resolveTestPlanType(ctx, 'lib-1', '普通测试');
+    const url = new URL(fake.urls()[0] ?? '');
+    expect(url.pathname).toBe('/v1/testhub/libraries/lib-1/plan_types');
+    // The `?library_id=` shape belongs to the singular-segment config views.
+    expect(url.searchParams.get('library_id')).toBeNull();
+  });
+
+  it('is case-insensitive and passes an id through untouched', async () => {
+    const upper = ctxFor([() => jsonResponse(page([{ id: 'pt-plain', name: 'Plain Test' }]))]);
+    expect((await resolveTestPlanType(upper.ctx, 'lib-1', 'plain test')).id).toBe('pt-plain');
+
+    const byId = ctxFor([types]);
+    const resolved = await resolveTestPlanType(byId.ctx, 'lib-1', 'pt-release');
+    expect(resolved.id).toBe('pt-release');
+    expect(resolved.name).toBe('发布测试');
+  });
+
+  it('names `testhub meta plan-types` when nothing matches, and lists the candidates', async () => {
+    const { ctx } = ctxFor([types]);
+    const error = await resolveTestPlanType(ctx, 'lib-1', 'Nope').catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(UsageError);
+    expect((error as UsageError).exitCode).toBe(2);
+    expect((error as UsageError).hint).toContain('testhub meta plan-types');
+    expect((error as UsageError).hint).toContain('普通测试');
+  });
+
+  it('carries no configuration-scope hint — plan types are testplan scope', async () => {
+    // `case/states` and `run/statuses` need pcp:read:testhub:configuration; this
+    // endpoint does not, and a borrowed hint would misdirect a 403 investigation.
+    const { ctx } = ctxFor([types]);
+    const error = await resolveTestPlanType(ctx, 'lib-1', 'Nope').catch(
+      (caught: unknown) => caught,
+    );
+    expect((error as UsageError).hint).not.toContain('configuration');
+  });
+
+  it('refuses to guess between two types with the same name', async () => {
+    const { ctx } = ctxFor([
+      () =>
+        jsonResponse(
+          page([
+            { id: 'pt-a', name: '回归测试' },
+            { id: 'pt-b', name: '回归测试' },
+          ]),
+        ),
+    ]);
+    const error = await resolveTestPlanType(ctx, 'lib-1', '回归测试').catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(UsageError);
+    expect((error as UsageError).message).toContain('2 plan types');
+    expect((error as UsageError).hint).toContain('pass the id');
+  });
+
+  it('rejects an empty input before any request goes out', async () => {
+    const { ctx, fake } = ctxFor([types]);
+    const error = await resolveTestPlanType(ctx, 'lib-1', '  ').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UsageError);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('caches per library, so two libraries never share a candidate list', async () => {
+    const first = ctxFor([types]);
+    expect((await resolveTestPlanType(first.ctx, 'lib-a', '普通测试')).id).toBe('pt-plain');
+
+    const second = ctxFor([() => jsonResponse(page([{ id: 'pt-other', name: '普通测试' }]))]);
+    const resolved = await resolveTestPlanType(second.ctx, 'lib-b', '普通测试');
+    expect(resolved.id).toBe('pt-other');
+    expect(resolved.fromCache).toBe(false);
+
+    const third = ctxFor([types]);
+    expect((await resolveTestPlanType(third.ctx, 'lib-a', '普通测试')).fromCache).toBe(true);
+    expect(third.fake.calls).toHaveLength(0);
+  });
+
+  it('re-fetches once the 24h TTL has passed', async () => {
+    const seed = ctxFor([types]);
+    await resolveTestPlanType(seed.ctx, 'lib-a', '普通测试');
+
+    const inside = ctxFor([types], { now: NOW + CACHE_TTL_MS });
+    expect((await resolveTestPlanType(inside.ctx, 'lib-a', '普通测试')).fromCache).toBe(true);
+    expect(inside.fake.calls).toHaveLength(0);
+
+    const outside = ctxFor([types], { now: NOW + CACHE_TTL_MS + 1 });
+    expect((await resolveTestPlanType(outside.ctx, 'lib-a', '普通测试')).fromCache).toBe(false);
+    expect(outside.fake.calls).toHaveLength(1);
+  });
+
+  it('--no-cache bypasses both the read and the write', async () => {
+    const { ctx, fake } = ctxFor([types, types], { useCache: false });
+    await resolveTestPlanType(ctx, 'lib-a', '普通测试');
+    await resolveTestPlanType(ctx, 'lib-a', '普通测试');
+    expect(fake.calls).toHaveLength(2);
+    expect(() => readdirSync(cacheDirPath(env))).toThrow();
+  });
+
+  it('drops the key and re-resolves once when the server rejects a cached type id', async () => {
+    const seed = ctxFor([() => jsonResponse(page([{ id: 'pt-old', name: '普通测试' }]))]);
+    await resolveTestPlanType(seed.ctx, 'lib-1', '普通测试');
+
+    const { ctx, fake } = ctxFor([() => jsonResponse(page([{ id: 'pt-new', name: '普通测试' }]))]);
+    const first = await resolveTestPlanType(ctx, 'lib-1', '普通测试');
+    expect(first.fromCache).toBe(true);
+    expect(first.id).toBe('pt-old');
+    expect(fake.calls).toHaveLength(0);
+
+    let attempts = 0;
+    const ids: string[] = [];
+    const result = await withCacheInvalidation(ctx, [first], async (attemptCtx) => {
+      attempts += 1;
+      const again = await resolveTestPlanType(attemptCtx, 'lib-1', '普通测试');
+      ids.push(again.id);
+      if (again.id === 'pt-old') throw new ApiError('plan type does not exist', { code: '100000' });
+      return again.id;
+    });
+
+    expect(attempts).toBe(2);
+    expect(result).toBe('pt-new');
+    expect(ids).toEqual(['pt-old', 'pt-new']);
+  });
+
+  it('exposes no kind discriminator to resolve on (testhub §10.7)', async () => {
+    // Only id/url/name/library exist, so "which type needs a sprint_id?" is
+    // unanswerable here by design — the server refusal is the answer.
+    const { ctx } = ctxFor([types]);
+    const resolved = await resolveTestPlanType(ctx, 'lib-1', '迭代测试');
+    expect(resolved.id).toBe('pt-sprint');
+    expect(resolved.name).toBe('迭代测试');
   });
 });
 
