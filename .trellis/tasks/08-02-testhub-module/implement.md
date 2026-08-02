@@ -143,7 +143,7 @@ DELETE, so smoke libraries can only be marked, not removed.
 
 ### S7 — close out
 Full-scope check: typecheck, tests, build, every `--help`, `scan:secrets`, `check:commits`.
-Walk AC1–AC12 with evidence and state honestly what is only partially proven. Update
+Walk AC1–AC13 with evidence and state honestly what is only partially proven. Update
 `.trellis/spec/` only if this slice established a *new* convention (it probably did not —
 prefer no edit over a redundant one). Push, then verify CI with `gh run view` (AC2).
 

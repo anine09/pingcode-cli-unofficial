@@ -1,6 +1,6 @@
 # Design — Testhub (测试管理) command surface
 
-Reads: `prd.md` (R1–R8, AC1–AC12). API facts cited as `[th#N]` refer to
+Reads: `prd.md` (R1–R8, AC1–AC13). API facts cited as `[th#N]` refer to
 `.trellis/tasks/archive/2026-08/08-01-ship-testhub-research/research/testhub-api.md`.
 Existing architecture cited as `M§x` refers to the pjm MVP design at
 `.trellis/tasks/archive/2026-08/07-31-pingcode-cli-mvp/design.md`.
