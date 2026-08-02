@@ -1601,6 +1601,30 @@ describe('testhub meta', () => {
     expect(run.calls).toHaveLength(0);
   });
 
+  // `DryRunHalt` is gated on the verb being mutating (`core/http.ts`), so a GET
+  // leaf cannot halt. That makes these two assertions cheap rather than
+  // redundant: they are what would fail if a `meta` leaf ever started issuing a
+  // write, which is the only way a lookup could begin refusing to answer under
+  // `--dry-run`.
+  it('plan-types still answers under --dry-run', async () => {
+    const planTypesPage = () =>
+      jsonResponse({
+        page_index: 0,
+        page_size: 100,
+        total: 1,
+        values: [{ id: 'pt-plain', name: '普通测试' }],
+      });
+    const run = await runCli(
+      ['testhub', 'meta', 'plan-types', '--library', 'LIB', '--dry-run', '--json'],
+      [librariesPage, planTypesPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[1]?.method).toBe('GET');
+    const payload = parseStdout(run) as { count: number; dry_run?: boolean };
+    expect(payload.dry_run).toBeUndefined();
+    expect(payload.count).toBe(1);
+  });
+
   it('suites lists the whole tree with the computed Parent / Child path', async () => {
     const run = await runCli(
       ['testhub', 'meta', 'suites', '--library', 'LIB', '--json'],
@@ -1684,6 +1708,18 @@ describe('testhub meta', () => {
     const run = await runCli(['testhub', 'meta', 'suites', '--json'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
+  });
+
+  it('suites still answers under --dry-run', async () => {
+    const run = await runCli(
+      ['testhub', 'meta', 'suites', '--library', 'LIB', '--dry-run', '--json'],
+      [librariesPage, suitesPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[1]?.method).toBe('GET');
+    const payload = parseStdout(run) as { count: number; dry_run?: boolean };
+    expect(payload.dry_run).toBeUndefined();
+    expect(payload.count).toBe(2);
   });
 });
 
