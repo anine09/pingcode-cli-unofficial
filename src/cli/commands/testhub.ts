@@ -95,10 +95,11 @@ import {
  *  - **Writes take `*_id`, reads return objects.** Every name-resolvable field
  *    is a `--x` / `--x-id` pair: `--x` resolves, `--x-id` is sent verbatim, and
  *    the two are mutually exclusive (design §6).
- *  - **`PATCH /runs/{id}` is destructive by omission.** `status_id` is required
- *    even on PATCH, and an omitted `executor_id` silently reassigns the executor
- *    to the run's creator (GOTCHA #7/#8). `runs patch` therefore always reads the
- *    run first and always sends both fields (design §7).
+ *  - **`PATCH /runs/{id}` is a read-modify-write.** `status_id` is required even
+ *    on PATCH, and the executor has to be carried over by hand (GOTCHA #7/#8).
+ *    `runs patch` therefore always reads the run first, always sends
+ *    `status_id`, and re-sends the run's executor unless the run has none
+ *    (design §7).
  *  - **Arrays replace, they never merge.** `steps[]` and `properties` overwrite
  *    wholesale, and a step that arrives without its `step_id` is re-created with
  *    a new one, orphaning its history (GOTCHA #9). Nothing here synthesises a
@@ -108,8 +109,8 @@ import {
  * Deliberately not exposed in this slice: case deletion (irreversible, no
  * undelete), plan create/update, run create (`runs bulk --add-case` covers it
  * and is the only way to *delete* a run), every configuration write, the history
- * reads, and `PUT /runs/{id}` — which blanks the executor instead of merely
- * reassigning it.
+ * reads, and `PUT /runs/{id}` — documented to blank the executor when the field
+ * is omitted, a claim never disproved and never worth testing in anger.
  */
 
 // ---------------------------------------------------------------------------
@@ -966,8 +967,8 @@ function registerRunCommands(parent: Command): void {
   const patch = group
     .command('patch')
     .description(
-      'record a result on a run — always sends status_id and executor_id, inheriting both ' +
-        'from the run when they are not given',
+      'record a result on a run — always sends status_id, and re-sends the run\'s own executor ' +
+        'unless you name another one',
     )
     .argument('<run>', `run id or short_id (${SHORT_ID_WRITE_CAVEAT})`)
     .option('--remark <text>', 'remark 备注 (replaces the old one)')
@@ -1081,8 +1082,12 @@ async function runRunList(flags: RunListFlags, command: Command): Promise<void> 
  *     which is the localized *object* carrying an id; the flat `status` slug
  *     cannot be turned into an id at all (there is no slug field on a run
  *     status).
- *  3. **An omitted `executor_id` reassigns the executor to the run's creator**
- *     (GOTCHA #8), so it is always sent, inherited from the run when not named.
+ *  3. **The executor must be carried over by hand** — a PATCH body describes the
+ *     whole result, so the run's own `executor_id` is re-sent when the user
+ *     names none. It is omitted (with a stderr warning) only when the run has
+ *     no executor at all: an omitted `executor_id` is a verified no-op on PATCH,
+ *     but `PUT` blanks the field, so nothing here relies on omission (GOTCHA #8,
+ *     design §7).
  *
  * If the pre-read fails the error is surfaced untouched — a 404/400 on the run
  * is reported as it arrives, and no PATCH is attempted.
@@ -1123,13 +1128,9 @@ async function runRunPatch(
 
   const inheritedExecutorId = refId(run.executor);
   if (executorPair === undefined && inheritedExecutorId === undefined) {
-    throw new UsageError(
-      `the run ${run.short_id ?? run.id} reports no executor to inherit, so --executor is required`,
-      {
-        hint:
-          'omitting executor_id is destructive: PATCH silently reassigns the run to its creator, ' +
-          'so this CLI always sends it',
-      },
+    ctx.logger.warn(
+      `the run ${run.short_id ?? run.id} has no executor, so executor_id is omitted from the ` +
+        'PATCH and the run stays unassigned — pass --executor <name|id> to assign one',
     );
   }
 
@@ -1174,10 +1175,13 @@ async function runRunPatch(
       });
     }
 
-    // Both ids are unconditional: this is the whole point of the pre-read.
+    // status_id is unconditional: this is the main point of the pre-read.
+    // executor_id is sent whenever there is one to send, and omitted only when
+    // the run is unassigned and the user named nobody (design §7).
+    const executorId = executor?.id ?? inheritedExecutorId;
     const patch: PatchRunInput = {
       status_id: status?.id ?? (inheritedStatusId as string),
-      executor_id: executor?.id ?? (inheritedExecutorId as string),
+      ...(executorId === undefined ? {} : { executor_id: executorId }),
       ...(flags.remark === undefined ? {} : { remark: flags.remark }),
       ...(stepInputs.length === 0 ? {} : { steps: stepInputs }),
     };

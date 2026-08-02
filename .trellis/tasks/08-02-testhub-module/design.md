@@ -233,14 +233,14 @@ does not pass `--status`, resolve the current status from the run resource and r
 alongside the new fields. This is a read-modify-write at the command layer, not a silent
 server-side default.
 
-**Always-explicit `executor_id`**: omitting `executor_id` is destructive and the behaviour
-differs between PUT (clears executor) and PATCH (sets to creator) ([th#45], [th#61]).
-The CLI always sends `executor_id` — resolved from `--executor`/`--executor-id` if given,
-otherwise inherited from the existing run resource on PATCH, or rejected with a clear
-message on PUT.
+**`executor_id`, in priority order**: explicit flag > inherited from the run > omitted with a
+warning. Omitting it was believed destructive in two contradictory ways — PUT clears the executor,
+PATCH sets it to the creator ([th#45], [th#61]) — and the PATCH half is now falsified (see below).
+The CLI resolves `--executor`/`--executor-id` when given, otherwise re-sends `run.executor.id`,
+otherwise omits the field and warns. `PUT` stays unimplemented.
 
-> **Live-verified 2026-08-02 (S6 smoke) — the PATCH half of that claim is false, and the
-> CLI is consequently stricter than it needs to be.**
+> **Live-verified 2026-08-02 (S6 smoke) — the PATCH half of that claim is false. The CLI was
+> consequently stricter than it needed to be; S7 relaxed it (see "Resolved" below).**
 >
 > Two raw controls against `PATCH /v1/testhub/runs/{run_id}` with `{"status_id": "…"}`
 > and **no** `executor_id`:
@@ -261,15 +261,19 @@ message on PUT.
 > `--status` nor `--executor` preserved executor `luoxiutao`, status `通过`/`pass` **and**
 > the full `steps[]` array (which is only replaced when actually sent).
 >
-> **What does not hold.** `runRunPatch` raises a hard `UsageError` when the run has no
-> executor *and* the user named none, with the hint "PATCH silently reassigns the run to
-> its creator". That hint asserts a behaviour that does not exist, and the refusal blocks
-> a legitimate operation — recording a result on an unassigned run — that the API accepts
-> and that provably leaves the executor `null`. Relaxing it means omitting `executor_id`
-> in exactly that one case, which contradicts PRD **R4**'s "CLI 永远显式传 `executor_id`".
-> That is a PRD-level decision, so S6 records it rather than taking it unilaterally.
-> **Recommended follow-up**: relax the refusal to a stderr warning and omit the field,
-> or keep the refusal and rewrite the hint to stop citing the falsified default.
+> **What does not hold.** `runRunPatch` used to raise a hard `UsageError` when the run had no
+> executor *and* the user named none, with the hint "PATCH silently reassigns the run to its
+> creator". That hint asserted a behaviour that does not exist, and the refusal blocked a
+> legitimate operation — recording a result on an unassigned run — that the API accepts and that
+> provably leaves the executor `null`.
+>
+> **Resolved (S7, implemented).** The user took the first of the two options: the refusal is now a
+> **stderr warning** and `executor_id` is **omitted from the body** in exactly that one case. The
+> other two branches are unchanged — an explicit `--executor`/`--executor-id` is resolved and sent,
+> and a run that already has an executor still has it re-sent (inheritance verified end to end).
+> PRD **R4** was rewritten to state the priority order — explicit flag > inherited value > omitted
+> with a warning — so the exception is part of the rule. `PUT`'s blanking remains unverified and
+> the endpoint remains unimplemented.
 
 
 **Read-modify-write for `steps[]`**: `steps` is a full replacement ([th#61]). A step

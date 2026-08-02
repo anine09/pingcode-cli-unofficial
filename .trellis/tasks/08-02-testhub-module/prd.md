@@ -69,7 +69,9 @@
 
 ### R4 写操作安全
 - `PATCH /runs/{run_id}` **强制携带 `status_id`**，无法只改 `remark`；CLI 必须要求或自动补齐当前状态。
-- `executor_id` 省略时行为具破坏性且 PUT/PATCH 互相矛盾（PUT 置空、PATCH 变创建人）→ **CLI 永远显式传 `executor_id`**。
+- `executor_id` 的取值优先级为 **显式 flag > 从 run 继承 > 省略并告警**：`--executor`/`--executor-id` 给了就发；没给但 run 自身有执行人，就把 `run.executor.id` 原样回传（read-modify-write，自解释）；run 本身没有执行人且用户也没指定时，**整条 `executor_id` 字段不出现在 PATCH body 里**，同时在 stderr 提示"该 run 没有执行人、字段已省略、执行人保持未分配"（退出码仍为 0，不再拒绝）。
+  - 依据：2026-08-02 S6 实测两组 raw PATCH 对照（design §7），body 仅含 `status_id`：执行人为 `luoxiutao` 的 run 保持 `luoxiutao`，`executor: null` 的 run 保持 `null`。即 **PATCH 省略 `executor_id` 对该字段是 no-op**，[th#61] 的"不传默认执行人为执行用例的创建人"未复现。
+  - `PUT /runs/{id}` 未复测（不在 endpoint 范围内），其"省略即置空"的文档行为仍属**未验证且危险**，因此该端点继续不实现；R4 最初的动机在 PUT 上依然成立。
 - `steps[]` 与 `properties` 的 option 均为**整体替换**，且缺 `step_id` 的 step 会被当新步骤重新生成 id（静默孤立历史结果）→ 所有涉及 steps 的修改走 read-modify-write。
 - bulk 上限：`inserts/updates/deletes` 各 ≤50；超出需分批或明确报错。
 - `short_id` 只在 GET 路径被文档化接受，**所有写路径只传 id**。

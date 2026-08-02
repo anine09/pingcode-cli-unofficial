@@ -495,12 +495,15 @@ sharper write path.
    refuses a partial `--step` edit and lists every step id you must supply. Pass a status for
    **every** step, or none at all. The same "replaces, never merges" applies to `--set`/`properties`
    on a case.
-4. **`testhub runs patch` always sends `status_id` *and* `executor_id`.** `status_id` is required by
-   the API even on PATCH, and an omitted `executor_id` is **destructive**: the server silently
-   reassigns the run to its creator. The CLI reads the run first and re-sends both, inheriting each
-   from the run when you do not name it — so patching only a remark is safe here, and would not be
-   if you called the API directly. If the run has no recorded result or no executor to inherit, the
-   CLI asks for `--status` / `--executor` (exit 2) instead of sending a half-formed body.
+4. **`testhub runs patch` always sends `status_id`, and carries the executor over for you.**
+   `status_id` is required by the API even on PATCH, so the CLI reads the run first and re-sends the
+   run's current result when you do not name one — patching only a remark is safe here, and would
+   not be if you called the API directly. The run's own executor is re-sent the same way. When the
+   run has **no** executor and you name none, `executor_id` is omitted from the body and the CLI
+   warns on stderr that the run **stays unassigned** — an omitted `executor_id` is a verified no-op
+   on PATCH (2026-08-02), it neither clears the field nor reassigns the run. If the run has no
+   recorded result at all, the CLI asks for `--status` (exit 2) instead of sending a half-formed
+   body.
 5. **`pingcode testhub runs bulk` is the only way to delete a run** — there is no `runs delete` and
    no run DELETE endpoint. It is also the only way to add one. Each of `--add-case`, `--set-status`
    and `--remove-run` is capped at **50** entries per call (checked locally, exit 2), and the
@@ -568,8 +571,8 @@ they are configured in PingCode Flow's UI.
 
 Inside testhub, this version deliberately leaves out: case **deletion** (irreversible, with no
 undelete), library and case-module writes, plan create/update, `POST /v1/testhub/runs` and
-`PUT /runs/{id}` (the PUT blanks the executor instead of merely reassigning it), every configuration
-write, the case/run history reads, and the case-property lookup.
+`PUT /runs/{id}` (documented to blank the executor when the field is omitted — untested and not
+worth testing), every configuration write, the case/run history reads, and the case-property lookup.
 
 ## 7. Installing this skill elsewhere
 

@@ -507,11 +507,12 @@ describe('runs api', () => {
     });
   });
 
-  it('keeps executor_id in the body even with nothing else to say (GOTCHA #8)', async () => {
+  it('keeps a given executor_id in the body even with nothing else to say', async () => {
     const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'r1' })]);
     await patchRun(ctx, 'r1', { status_id: 'rs1', executor_id: 'u1', remark: undefined });
-    // Omitting executor_id would reassign the run to its creator on PATCH and
-    // blank it on PUT, so `compact` must never be able to drop it.
+    // `compact` drops undefined keys; it must never drop a field the caller
+    // deliberately set, since the command layer's omission of executor_id is a
+    // decision it makes explicitly (design §7), not a side effect of encoding.
     expect(fake.calls[0]?.body).toEqual({ status_id: 'rs1', executor_id: 'u1' });
   });
 

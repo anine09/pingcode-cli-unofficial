@@ -363,10 +363,12 @@ the sharpest in the CLI:
   the write needs a status **id**, and only the localized (renameable) name joins them. So the CLI
   refuses a partial step edit and prints the full list of step ids. `--set` / `properties` on a case
   replace wholesale too.
-- **`runs patch` always sends `status_id` and `executor_id`.** `status_id` is required by the API
-  even on PATCH, and **omitting `executor_id` silently reassigns the run to its creator**. The CLI
-  pre-reads the run and re-sends both, inheriting each when you do not name it; if there is nothing
-  to inherit it asks for the flag (exit 2) rather than sending a half-formed body.
+- **`runs patch` always sends `status_id`, and carries the executor over.** `status_id` is required
+  by the API even on PATCH, so the CLI pre-reads the run and re-sends its current result — and its
+  current executor — when you do not name one. If the run has no executor and you name none,
+  `executor_id` is omitted and the CLI warns that the run stays unassigned (omitting it is a
+  verified no-op on PATCH: it neither clears the field nor reassigns the run). With no recorded
+  result at all it asks for `--status` (exit 2) rather than sending a half-formed body.
 - **`runs bulk` is the only way to delete a run** — and the only way to add one. `--add-case`,
   `--set-status` and `--remove-run` are each capped at **50** entries per call (checked locally),
   and the response is **counts only**: re-list the plan to see the new run ids.
@@ -388,8 +390,8 @@ the sharpest in the CLI:
   implemented endpoint set, so read the keys off an existing case with `cases get <case> --json`.
   Select-typed values are option ids, not labels.
 - **Not exposed on purpose:** case deletion (irreversible), library and module writes, plan
-  create/update, `POST /v1/testhub/runs` and `PUT /runs/{id}` (which blanks the executor rather than
-  reassigning it), configuration writes, and the history reads.
+  create/update, `POST /v1/testhub/runs` and `PUT /runs/{id}` (documented to blank the executor when
+  the field is omitted — unverified and untested), configuration writes, and the history reads.
 
 
 ---

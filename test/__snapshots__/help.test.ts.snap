@@ -416,8 +416,8 @@ Commands:
   list [options]         search runs (POST /v1/testhub/runs/search) — run search cannot filter by
                          library.id — it is on the API exclusion list, so scope runs with --plan
                          instead
-  patch [options] <run>  record a result on a run — always sends status_id and executor_id,
-                         inheriting both from the run when they are not given
+  patch [options] <run>  record a result on a run — always sends status_id, and re-sends the run's
+                         own executor unless you name another one
   bulk [options]         insert, update and delete the runs of one plan in a single call — the only
                          way to delete a run. Each list is capped at 50, checked before the request
   help [command]         display help for command

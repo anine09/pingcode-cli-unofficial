@@ -19,8 +19,9 @@ import { createFakeFetch, jsonResponse, type FakeCall } from './helpers/fake';
  * What is proven here and cannot be proven at the api or metadata layer:
  *  - every `--x` / `--x-id` pair is mutually exclusive **before** any request;
  *  - an empty `cases update` patch is exit 2 with nothing sent;
- *  - `runs patch` reads the run first and re-emits its current `status_id` and
- *    `executor_id` — the two fields whose omission is destructive;
+ *  - `runs patch` reads the run first, re-emits its current `status_id` (which
+ *    the API demands even on PATCH) and its current executor, and omits
+ *    `executor_id` outright — with a warning — when the run has none;
  *  - `runs bulk` refuses more than 50 entries client-side;
  *  - `meta important-levels` refuses `--library` (org-level, no per-library view);
  *  - `--json` keeps stdout JSON-only, and `--dry-run` writes nothing.
@@ -725,13 +726,41 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
     });
   });
 
-  it('inherits the existing executor rather than letting PATCH reassign it', async () => {
+  it('re-sends the executor the run already has, so a remark-only patch keeps it', async () => {
     const run = await runCli(
       ['testhub', 'runs', 'patch', 'run-1', '--status-id', 'rs-block', '--json'],
       [runDetail, patched],
     );
     expect(run.exit).toBe(0);
     expect(mutations(run)[0]?.body).toEqual({ status_id: 'rs-block', executor_id: 'user-7' });
+  });
+
+  it('omits executor_id entirely, with a warning, when the run has no executor', async () => {
+    // Verified live on 2026-08-02 (design §7): an omitted `executor_id` is a
+    // no-op on PATCH — it neither clears nor reassigns — so recording a result
+    // on an unassigned run is a legitimate operation, not a refusal.
+    const unassigned = () =>
+      jsonResponse({
+        id: 'run-3',
+        short_id: 'r7',
+        library: { id: 'lib-1' },
+        latest_executed_status: { id: 'rs-pass', name: '通过' },
+        executor: null,
+        steps: [],
+        is_archived: 0,
+      });
+    const run = await runCli(
+      ['testhub', 'runs', 'patch', 'run-3', '--remark', 'smoke', '--json'],
+      [unassigned, patched],
+    );
+    expect(run.exit).toBe(0);
+    const body = mutations(run)[0]?.body as Record<string, unknown>;
+    // absence of the key, not an `undefined` value: `toEqual` cannot tell them apart
+    expect(Object.keys(body)).not.toContain('executor_id');
+    expect(body).toEqual({ status_id: 'rs-pass', remark: 'smoke' });
+    expect(run.stderr).toContain('has no executor');
+    expect(run.stderr).toContain('stays unassigned');
+    expect(parseStdout(run)).toBeTruthy();
   });
 
   it('resolves --status against the library the run itself reports', async () => {

@@ -330,16 +330,19 @@ export async function getPlan(
  * `status_id` is **required even on PATCH** (GOTCHA #7): there is no
  * "only change the remark" mode, so every run update re-asserts a result.
  *
- * `executor_id` is typed as required here on purpose, even though the API marks
- * it optional. Omitting it is destructive in two mutually contradictory ways —
- * PATCH reassigns the executor to the run's *creator*, PUT blanks it entirely
- * (GOTCHA #8) — so PRD R4 makes it non-negotiable: the CLI always sends it,
- * inherited from the existing run when the user did not name one. Making the
- * type demand it means a caller cannot forget.
+ * `executor_id` is optional, and the command layer keeps it that way for
+ * exactly one case. [th#61] claims an omitted `executor_id` defaults the
+ * executor to the run's creator, but two raw PATCH controls on 2026-08-02
+ * (design §7) showed it is a **no-op for that field**: a run with an executor
+ * kept it, a run with `executor: null` stayed null. So the CLI sends the field
+ * whenever it has a value — named or inherited from the run — and omits it only
+ * when the run is unassigned and the user named nobody. `PUT /runs/{id}` was
+ * never re-tested and its documented blanking still stands unverified, which is
+ * why that endpoint stays unimplemented (GOTCHA #8).
  */
 export type PatchRunInput = {
   status_id: string;
-  executor_id: string;
+  executor_id?: string | undefined;
   remark?: string | undefined;
   /**
    * Whole-array replace ([th#61]). `step_id` and `status_id` are both required

@@ -277,7 +277,8 @@ describe('SKILL.md agrees with the CLI (R4.5)', () => {
     expect(skill).toMatch(/library-scoped/i);
     expect(skill).toMatch(/never\s+share\s+a\s+state,\s+type\s+or\s+status\s+id/i);
     expect(skill).toMatch(/all-or-nothing/i);
-    expect(skill).toMatch(/silently\s+reassigns\s+the\s+run\s+to\s+its\s+creator/i);
+    expect(skill).toMatch(/`?status_id`?\s+is\s+required\s+by\s+the\s+API\s+even\s+on\s+PATCH/i);
+    expect(skill).toMatch(/stays\s+unassigned/i);
     expect(skill).toMatch(/only\s+way\s+to\s+delete\s+a\s+run/i);
     expect(skill).toMatch(/cannot\s+filter\s+by\s+library/i);
     expect(skill).toMatch(/important-levels`?\s+takes\s+no\s+`?--library/i);
