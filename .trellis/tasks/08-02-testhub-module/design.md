@@ -52,7 +52,6 @@ Layering is unchanged and still enforced by `test/layering.test.ts`:
 |---|---|
 | library list / name→id | `GET /v1/testhub/libraries` (`keywords`, paging) |
 | library detail | `GET /v1/testhub/libraries/{library_id}` |
-| library members | `GET /v1/testhub/libraries/{library_id}/members` |
 | suite tree | `GET /v1/testhub/libraries/{library_id}/suites` (`?parent_id=root` for top-level) |
 | case read (primary) | `POST /v1/testhub/cases/search` |
 | case detail | `GET /v1/testhub/cases/{case_id}` (accepts `short_id`) |
@@ -67,6 +66,16 @@ Layering is unchanged and still enforced by `test/layering.test.ts`:
 | case types (library-scoped) | `GET /v1/testhub/case/types?library_id=` |
 | case important levels | `GET /v1/testhub/case_important_levels` — org-scoped, no library_id |
 | run statuses (library-scoped) | `GET /v1/testhub/run/statuses?library_id=` — scope `configuration` |
+
+That is **16** endpoints: the PRD's 15-endpoint MVP plus `GET /libraries/{library_id}`,
+which the MVP list omits but every `libraries get` invocation needs.
+
+> **Corrected in S1.** An earlier revision of this table also listed
+> `GET /v1/testhub/libraries/{library_id}/members`. That endpoint is **not** in the
+> PRD's in-scope list — `Out of scope` excludes the member endpoints — and no
+> command needs it, since testhub has no `--assignee`-style flag resolved against
+> library membership in this milestone (`maintenance_id` / `executor_id` resolve
+> against the org directory). No endpoint constant and no wrapper were added for it.
 
 `GET /v1/testhub/cases` and `GET /v1/testhub/runs` are deliberately unreachable from
 the CLI (PRD scope). The search endpoints are the single read path for both resources.
@@ -135,10 +144,13 @@ Rules carried over unchanged from ship §5 / M§6:
 - Writes that used a cached id are wrapped in `withCacheInvalidation`: on rejection, drop
   the key, resolve again, retry once, then report with the "try `--no-cache`" hint.
 
-**Suite tree flattening**: suites are a tree (`type` ∈ `library` | `suite`, [th#11]).
-The resolver flattens it and matches on name; if two nodes in different branches share a
-name, that is an ambiguity error listing both paths, not a silent pick. Reuse the existing
-suite-flattening logic from ship if present; otherwise implement it here.
+**Suite tree flattening**: suites are a tree served as a flat list, joined by a
+**`parent` reference object** and carrying a `/`-separated `paths` string ([th#9],
+[th#11]). The resolver flattens it and matches on name; if two nodes in different
+branches share a name, that is an ambiguity error listing both paths, not a silent pick.
+`core/metadata.ts` already has exactly this logic in `loadSuites` (written for ship);
+reuse it with the testhub endpoint rather than writing a second copy. Note that testhub
+suites carry **no `type` discriminator** — that field belongs to *ship* suites.
 
 **`--library` bootstraps everything else**: the library resolver is the first hop for every
 library-scoped kind. The CLI requires `--library <name|id>` on any command that needs
@@ -229,13 +241,26 @@ Rules:
 |---|---|---|
 | Bad flag combination / missing required flag | `UsageError` | 2 |
 | Name resolves to zero or multiple candidates | `UsageError` listing candidates | 2 |
-| 404 on GET | `NotFoundError` with resource name | 3 |
+| Resource does not exist on GET | `NotFoundError` with resource name | 5 |
 | 403 on metadata endpoint | `PermissionError` naming the missing scope | 4 |
 | 403 on write endpoint | `PermissionError` naming the missing scope | 4 |
-| 429 rate limit | `RateLimitError` with `retry-after` | 4 |
+| 429 rate limit | `RateLimitError` with `retry-after` | 6 |
 | Bulk count > 50 | `UsageError` with count | 2 |
 | `PATCH /runs/{id}` without `status_id` | `UsageError` (CLI-side, before request) | 2 |
 | Ambiguous suite name across branches | `UsageError` listing both paths | 2 |
+
+> **Corrected in S1.** The previous revision put not-found on exit 3 and rate-limit on
+> exit 4. The exit table is a **stable contract** owned by `src/core/errors.ts` and
+> documented in `.trellis/spec/backend/error-handling.md`: 3 is `auth`, 4 is
+> `permission`, 5 is `not_found`, 6 is `rate_limit`. Testhub introduces no new exit
+> codes and must not renumber existing ones.
+
+Note also that this API answers **HTTP 400** where REST convention would use 404, so
+`NotFoundError` on a missing testhub resource is only reachable once the vendor `code`
+is added to `ERROR_CODE_OVERRIDES` in `core/wire.ts` — and testhub documents **no**
+error codes at all (testhub §10.8, PRD open question 6). Until S6 observes real codes,
+a missing testhub resource surfaces as `ApiError` (exit 7) with the raw code preserved.
+That is the documented fall-through, not a defect; do not guess codes into the table.
 
 **Configuration-scope trap** ([th#25], [th#57]): `case/states` and `run/statuses`
 require `pcp:read:testhub:configuration`. A token with only `testcase` + `testplan`
@@ -259,45 +284,74 @@ Identical contracts to the pjm/ship surface (M§7.2, M§7.3):
 
 ## 11. Types
 
-Hand-written in `src/types/api.ts` for all 15 endpoints, snake_case with an index
+Hand-written in `src/types/api.ts` for all 16 endpoints, snake_case with an index
 signature so unknown fields — including custom `properties` — survive into `--json`
-untouched. All fields optional/nullable (PRD R6).
+untouched. All fields optional/nullable (PRD R6); array fields are the one exception,
+normalised to `[]` so call sites never branch, matching `ShipProduct.members` and
+`WorkItem.tags`.
+
+> **Corrected in S1 against `testhub-api.md` §3.** The list below is the shape the
+> API actually returns. The previous revision mixed **request** parameters into the
+> **response** types — it gave `TestCase` a `suite_id`/`type_id`/`state_id`/
+> `important_level_id`/`maintenance_id`/`test_library_id` and `TestRun` a
+> `status_id`/`executor_id`/`case_id`/`plan_id`/`library_id`. Reads return localized
+> *objects* and writes take *`*_id` scalars* (GOTCHA #5); the two never appear in the
+> same payload. The request shapes therefore live in `src/api/testhub.ts` as
+> `CreateCaseInput` / `UpdateCaseInput` / `PatchRunInput` / `BulkRunsInput`, exactly as
+> ship keeps `CreateIdeaInput` separate from `ShipIdea`.
 
 Key types:
-- `TestLibrary`: `id`, `identifier`, `name`, `description`, `visibility`, `scope_type`,
-  `scope_id`, `is_archived`, `is_deleted`, `created_at`, `updated_at`.
-- `TestSuite`: `id`, `name`, `parent_id`, `type` (`library` | `suite`), `library`,
-  `path`, `is_archived`, `is_deleted`.
-- `TestCase`: `id`, `short_id`, `title`, `test_library_id`, `suite`, `suite_id`, `type`,
-  `type_id`, `state`, `state_id`, `important_level`, `important_level_id`, `maintenance`,
-  `maintenance_id`, `participants`, `properties`, `description`, `precondition`,
-  `steps[]`, `is_archived`, `is_deleted`, `created_at`, `updated_at`.
-- `TestCaseStep`: `step_id`, `description`, `expected_value`, `is_group`, `group_id`,
-  `actual_value`, `executor`, `executed_at`, `status`.
-- `TestPlan`: `id`, `short_id`, `name`, `library`, `library_id`, `type`, `type_id`,
-  `state`, `state_id`, `project`, `project_id`, `sprint`, `sprint_id`, `version`,
-  `version_id`, `start_at`, `end_at`, `assignee`, `assignee_id`, `summary`,
-  `estimated_workload`, `remaining_workload`, `is_archived`, `is_deleted`,
-  `created_at`, `updated_at`.
-- `TestRun`: `id`, `short_id`, `case`, `case_id`, `plan`, `plan_id`, `library`, `library_id`,
-  `status`, `status_id`, `executor`, `executor_id`, `remark`, `steps[]`, `latest_executed_status`,
-  `is_archived`, `is_deleted`, `created_at`, `updated_at`.
-- `TestCaseState`: `id`, `name`, `type` (`pending` | `completed` | `closed`), `is_system`.
-- `TestCaseType`: `id`, `name`, `is_system`.
-- `TestCaseImportantLevel`: `id`, `name`, `is_system`.
+- `TestLibrary`: `id`, `identifier`, `name`, `url`, `description`, `visibility`,
+  `scope_type`, `scope_id`, `color`, `members[]`, `created_at`/`created_by`,
+  `updated_at`/`updated_by`, `is_archived`, `is_deleted` ([th#7]).
+- `TestSuite`: `id`, `name`, `url`, `library`, **`parent` (a ref object, not a
+  `parent_id` scalar)**, **`paths`** (plural). [th#9] documents no `type`
+  discriminator and no `is_archived`/`is_deleted` on a testhub suite — unlike a *ship*
+  suite, which is where the earlier `type ∈ library|suite` claim came from.
+- `TestCase`: `id`, `identifier`, `short_id`, `url`, `html_url`, `title`, `level`
+  (the importance level's *name*), `library`, `suite`, `state`, `type`,
+  `important_level`, `maintenance`, `test_type` (`automation|manual`, read-only),
+  `description`, `precondition`, `properties`, `estimated_workload`,
+  `remaining_workload`, `steps[]`, `participants[]`, `public_image_token`,
+  `created_at`/`created_by`, `updated_at`/`updated_by`, `is_archived`, `is_deleted`.
+  There is **no `tags` field** despite `?tag_id` being a filter (GOTCHA #6).
+- `TestCaseStep` (case side): `step_id`, `description`, `expected_value`, `is_group`,
+  `group_id`.
+- `TestRunStep` (run side, **a separate type**): `step_id`, `status` (slug),
+  `actual_value`. [th#52] gives run steps none of the case-side prose fields, so
+  merging the two — as the earlier revision did — would have invented fields on both.
+- `TestPlan`: `id`, `short_id`, `name`, `url`, `html_url`, `library`, `type`, `state`,
+  `project`, `sprint`, `version`, `assignee`, `start_at`, `end_at`, `summary`,
+  `created_at`/`created_by`, `updated_at`/`updated_by`. **No `is_archived` /
+  `is_deleted`** — testhub §3.2 calls this out explicitly as the plan's difference
+  from library/case/run — and no workload fields.
+- `TestPlanRef`: an *embedded* plan, with a flat **`status` string** where the plan
+  resource has a **`state` object** (GOTCHA #4). Separate type, separate parser.
+- `TestRun`: `id`, `short_id`, `url`, `html_url`, `library`, `plan` (`TestPlanRef`),
+  `case`, `suite`, `status` (slug), `latest_executed_status` (localized ref),
+  `executor`, `remark`, `steps[]` (`TestRunStep`), `created_at`/`created_by`,
+  `updated_at`/`updated_by`, `is_archived`, `is_deleted`.
+- `TestCaseState`: `id`, `name`, `type` (`pending|completed|closed`), `color`
+  ([th#34]; `color` is absent from the list view [th#25]).
+- `TestCaseType`: `id`, `name` ([th#35]).
+- `TestCaseImportantLevel`: `id`, `name`, `color` ([th#36]).
 - `TestRunStatus`: `id`, `name`, `is_system`. **No slug field** — the CLI must map by
   `name` (未测/通过/受阻/失败/跳过) and allow user overrides.
-- `TestPlanType`: `id`, `name`, `library`, `is_system`. **No kind field** — the CLI
-  infers "迭代测试" vs "发布测试" from the Chinese `name` (deferred to a follow-up if
-  plan creation is added).
+- `TestPlanType`: `id`, `name`, `library`. **No kind field** — the CLI infers
+  "迭代测试" vs "发布测试" from the Chinese `name` (deferred; plan creation is out of
+  scope, so S1 adds the type but **no** endpoint and **no** wrapper).
+- `TestRunBulkResult`: `{inserts, updates, deletes}` **counts only** — the bulk call
+  does not return the ids of the runs it created ([th#49]).
 
-**Two distinct history shapes** (do not share a deserializer):
-- `/runs/{id}/histories`: items have `executed_status` (object with `id`/`name`) + `remark`.
-- `/cases/{id}/histories`: items have flat `status` (string), no `remark`.
+`is_system` is declared by [th#0]/[th#63] on run statuses and plan states only. It is
+carried as an optional field on `TestCaseState` / `TestCaseType` /
+`TestCaseImportantLevel` too — tolerated if it appears, never defaulted to `false`,
+the same treatment `ShipTicketType` gets (ship GOTCHA #12).
 
-**Embedded `plan` reference vs plan resource**: a run's embedded `plan` uses `status`
-(string), while the full plan resource uses `state` (object). The parse layer normalises
-both to a consistent shape.
+**Two distinct history shapes** (do not share a deserializer) — types added in S1,
+wrappers deliberately **not**, since the history endpoints are out of PRD scope:
+- `TestRunHistoryItem` (`/runs/{id}/histories`): `executed_status` **object** + `remark`.
+- `TestCaseHistoryItem` (`/cases/{id}/histories`): flat `status` **string**, no `remark`.
 
 ## 12. Risks
 
