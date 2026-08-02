@@ -474,6 +474,8 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100303': 'not_found',
       '100725': 'not_found',
       '100711': 'not_found',
+      '100601': 'not_found',
+      '100603': 'not_found',
     });
   });
 
@@ -502,5 +504,59 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
     ).catch((caught: unknown) => caught);
     expect(error).not.toBeInstanceOf(NotFoundError);
     expect((error as ApiError).exitCode).toBe(7);
+  });
+
+  // S6 / 08-02-testhub-module: testhub answers 400 for a missing record with one
+  // code per resource, exactly as pjm and ship do.
+  it.each([
+    ['100601', '/v1/testhub/cases/000000000000000000000000', '测试用例不存在或无权限访问'],
+    ['100603', '/v1/testhub/runs/000000000000000000000000', '执行用例不存在或无权限访问'],
+  ])(
+    'maps testhub code %s (HTTP 400) to NotFoundError, i.e. exit 5',
+    async (code, path, message) => {
+      const error = await request(
+        ctxWith(() => jsonResponse({ code, message }, { status: 400 })),
+        { method: 'GET', path },
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundError);
+      expect((error as NotFoundError).exitCode).toBe(5);
+      expect((error as NotFoundError).code).toBe(code);
+    },
+  );
+
+  // A malformed id and an unknown short_id return the same code as a well-formed
+  // but absent one — that stability is what makes keying on the code safe.
+  it.each(['not-an-id', 'ZZZZZZZZ', '000000000000000000000000'])(
+    'maps testhub 100601 to exit 5 for the id shape %s',
+    async (id) => {
+      const error = await request(
+        ctxWith(() =>
+          jsonResponse({ code: '100601', message: '测试用例不存在或无权限访问' }, { status: 400 }),
+        ),
+        { method: 'GET', path: `/v1/testhub/cases/${id}` },
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundError);
+      expect((error as NotFoundError).exitCode).toBe(5);
+    },
+  );
+
+  // Codes the S6 smoke saw but deliberately left unmapped: batch rejection,
+  // input validation and a genuine 500 are not "this resource is missing".
+  it.each([
+    ['100649', 400, '测试用例状态不存在'],
+    ['100619', 400, '执行用例不存在'],
+    ['100039', 400, 'inserts[0].case_id 必须是一个 ObjectId'],
+    ['100043', 400, "'properties[smoke_a]'不存在"],
+    ['100044', 400, "'properties[test_type]'值不在options中"],
+    ['100008', 400, "'start_at'是必填字段"],
+    ['100000', 500, '内部服务错误'],
+  ])('leaves testhub code %s classified as an api error (exit 7)', async (code, status, message) => {
+    const error = await request(
+      ctxWith(() => jsonResponse({ code, message }, { status })),
+      { method: 'POST', path: '/v1/testhub/cases' },
+    ).catch((caught: unknown) => caught);
+    expect(error).not.toBeInstanceOf(NotFoundError);
+    expect((error as ApiError).exitCode).toBe(7);
+    expect((error as ApiError).code).toBe(code);
   });
 });

@@ -477,6 +477,23 @@ Optimised for "read my test assets, run a plan, record results" with the minimum
 6. **Complete value sets for `case_property_plans.category` and `.host`** — only the observed example values `library` / `case`.
 7. **`plan_types` semantics.** `plan.type` is a free-form named reference; the doc says types "包括项目、发布和迭代" (project / release / sprint) and gates `sprint_id`/`version_id` on "type_id 代表迭代测试 / 发布测试", but there is **no type-kind discriminator field** on the plan-type resource (`id`, `url`, `library`, `name` only). Deciding whether a given `type_id` is a sprint test or a release test is only possible by matching its localized `name`.
 8. **Error catalogue.** No testhub record documents any error response. Only the global overview gives the shape (`{code, message}`, HTTP 500 example) and the 429 rate-limit contract. Per-endpoint validation codes (duplicate plan name, identifier collision, bulk partial failure) are unknown.
+
+   > **CORRECTED 2026-08-02 — `08-02-testhub-module` S6 live smoke.** Undocumented in
+   > `api_data.json`, but readily observable live. Confirmed codes:
+   > `100601` `GET /v1/testhub/cases/{unknown}` → 400 `测试用例不存在或无权限访问` (identical for a
+   > malformed id and an unknown `short_id`); `100603` `GET /v1/testhub/runs/{unknown}` → 400
+   > `执行用例不存在或无权限访问`; `100649` unknown `state_id` on a case PATCH → 400
+   > `测试用例状态不存在`; `100619` unknown `run_id` inside `runs/bulk` → 400 `执行用例不存在`;
+   > `100039` non-ObjectId id in a bulk array → 400 `inserts[0].case_id 必须是一个 ObjectId`
+   > (the one place the API echoes the request index); `100043` unknown `properties` key → 400
+   > `'properties[smoke_a]'不存在`; `100044` bad select option → 400 `'properties[test_type]'值不在options中`;
+   > `100008` missing required field → 400 `'start_at'是必填字段` (reported **one field at a time**);
+   > `100646` library-scoped config read with localisation off → 400 `测试库未开启本地化配置`;
+   > `100000` → **HTTP 500** `内部服务错误`, returned both for `POST /cases/search` with a bogus
+   > `library_id` and for any `properties` write against a select- or member-typed key.
+   > An unknown *route* (e.g. `GET /v1/agile/sprints`) returns a bare non-JSON `404 Not Found`.
+   > `100601` and `100603` were added to `ERROR_CODE_OVERRIDES` in `src/core/wire.ts`.
+
 9. **Bulk failure semantics.** Whether `POST/PATCH /cases/bulk` and `/runs/bulk` are atomic or best-effort, and whether the response array is index-aligned with the request array, is not stated — and the case-bulk records don't even declare the `message` field their run-bulk counterparts have.
 10. **Webhook / Flow event names for testhub** — nothing in `api_data.json`; it documents only the REST surface (the 频率限制 record merely *mentions* PingCode Flow webhooks as a way to reduce polling).
 11. **Archive/unarchive and restore operations.** `is_archived` / `is_deleted` are readable and filterable (`include_archived`, `include_deleted`) on libraries and cases, but **no endpoint sets them** — no `/archive`, `/restore`, and no `is_archived` write param anywhere in the module.

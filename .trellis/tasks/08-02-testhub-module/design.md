@@ -306,10 +306,45 @@ Rules:
 
 Note also that this API answers **HTTP 400** where REST convention would use 404, so
 `NotFoundError` on a missing testhub resource is only reachable once the vendor `code`
-is added to `ERROR_CODE_OVERRIDES` in `core/wire.ts` — and testhub documents **no**
-error codes at all (testhub §10.8, PRD open question 6). Until S6 observes real codes,
-a missing testhub resource surfaces as `ApiError` (exit 7) with the raw code preserved.
-That is the documented fall-through, not a defect; do not guess codes into the table.
+is added to `ERROR_CODE_OVERRIDES` in `core/wire.ts`.
+
+> **Live-verified 2026-08-02 (S6 smoke) — the codes exist, and two of them are now
+> mapped.** The research file's §10.8 said testhub documents no error responses at all,
+> which is true of `api_data.json` but not of the running API. Observed
+> status/code pairs, all from `node dist/bin/pingcode.js` against the live tenant:
+>
+> | provoked by | HTTP | `code` | message | CLI result |
+> |---|---|---|---|---|
+> | `GET /cases/{unknown 24-hex}` | 400 | `100601` | `测试用例不存在或无权限访问` | **now exit 5** |
+> | `GET /cases/{malformed}` / `{unknown short_id}` | 400 | `100601` | same | **now exit 5** |
+> | `GET /runs/{unknown 24-hex}` / `{malformed}` | 400 | `100603` | `执行用例不存在或无权限访问` | **now exit 5** |
+> | `PATCH /cases/{id}` with an unknown `state_id` | 400 | `100649` | `测试用例状态不存在` | exit 7 |
+> | `runs/bulk` with an unknown `run_id` in `updates`/`deletes` | 400 | `100619` | `执行用例不存在` | exit 7 |
+> | `runs/bulk` with a non-ObjectId id | 400 | `100039` | `inserts[0].case_id 必须是一个 ObjectId` | exit 7 |
+> | `PATCH /cases/{id}` with an unknown `properties` key | 400 | `100043` | `'properties[smoke_a]'不存在` | exit 7 |
+> | `PATCH /cases/{id}` with a bad select option | 400 | `100044` | `'properties[test_type]'值不在options中` | exit 7 |
+> | `POST …/plans` missing a required field | 400 | `100008` | `'start_at'是必填字段` | exit 7 |
+> | `GET /case_property_plans?library_id=` with localisation off | 400 | `100646` | `测试库未开启本地化配置` | exit 7 |
+> | `POST /cases/search` with a bogus `library_id` | 500 | `100000` | `内部服务错误` | exit 7 |
+> | `PATCH /cases/{id}` writing a select/member `properties` key | 500 | `100000` | `内部服务错误` | exit 7 |
+> | unknown route, e.g. `GET /v1/agile/sprints` | 404 | — | bare `Not Found`, **not JSON** | exit 7 |
+>
+> **Verdict: two overrides are justified, the rest are not.** `100601` and `100603` are
+> stable per-resource "this record is absent" codes — identical across a nonexistent
+> 24-hex id, a malformed id and an unknown `short_id` — which is precisely the shape
+> that earned ship's `100725`/`100711` their rows. They were added to
+> `ERROR_CODE_OVERRIDES`, so a missing case or run now exits **5** on `cases get`,
+> `cases update` and `runs patch` (the latter two via their pre-read).
+>
+> Everything else stays on exit 7, each for a stated reason: `100649` is ship's
+> `100719` problem again (a state that exists but is unreachable reports as missing);
+> `100619` rejects the *whole batch*, so exit 5 would name one run while implying the
+> valid entries landed, which they did not; `100039`/`100043`/`100044`/`100008` are
+> input validation, not absence; and `100000` is a real server fault that must keep
+> its 500. The API is inconsistent — 400 for absence, 500 for a bad `library_id`, bare
+> text for an unknown route — but it is *not* too inconsistent to map, because the two
+> codes that matter are stable. That is the honest answer to PRD open question 6.
+
 
 **Configuration-scope trap** ([th#25], [th#57]): `case/states` and `run/statuses`
 require `pcp:read:testhub:configuration`. A token with only `testcase` + `testplan`

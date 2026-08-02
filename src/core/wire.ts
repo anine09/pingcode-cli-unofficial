@@ -187,11 +187,36 @@ const SCOPE_HINT =
  * | `100725` | `GET /v1/ship/ideas/{unknown id}` (`需求不存在或无权访问`) | 400 | `NotFoundError` (5) |
  * | `100711` | `GET /v1/ship/tickets/{unknown id}` (`工单不存在或无权访问`) | 400 | `NotFoundError` (5) |
  *
+ * **Evidence: `08-02-testhub-module` S6 live smoke (2026-08-02)** — testhub is the
+ * third module to repeat the pattern with its own per-resource codes:
+ *
+ * | code | observed on | HTTP | mapped to |
+ * |---|---|---|---|
+ * | `100601` | `GET /v1/testhub/cases/{unknown id}` (`测试用例不存在或无权限访问`) | 400 | `NotFoundError` (5) |
+ * | `100603` | `GET /v1/testhub/runs/{unknown id}` (`执行用例不存在或无权限访问`) | 400 | `NotFoundError` (5) |
+ *
+ * Both are stable across a nonexistent 24-hex id, a malformed id and an unknown
+ * `short_id`, which is what makes them safe to key on. They also cover the
+ * pre-read that `testhub cases update` and `testhub runs patch` perform, so a
+ * missing case or run exits 5 on the write paths too.
+ *
  * Deliberately **not** here: ship's `100719` / `100702` ("state does not exist"
  * on an idea/ticket PATCH). Live they are also returned for a state that plainly
  * exists but is unreachable under the state plan (`research/s7-smoke.md` F5), so
  * mapping them to `not_found` would tell an agent a state is missing when it is
  * merely forbidden. They stay on exit 7.
+ *
+ * Deliberately **not** here either, from the same testhub smoke:
+ * - `100649` (`测试用例状态不存在` on an unknown `state_id`) — the exact analogue of
+ *   ship's `100719`/`100702`, so it gets the same treatment.
+ * - `100619` (`执行用例不存在` inside `runs/bulk`) — it rejects the *whole batch*,
+ *   so exit 5 would name one missing run while silently implying the valid
+ *   entries were applied. They were not.
+ * - `100039` / `100043` / `100044` / `100008` (shape, unknown-property, bad
+ *   option, missing-required-field) — these are input validation, not absence.
+ * - `100000` (`内部服务错误`, HTTP 500) — returned for genuinely broken server
+ *   states such as a `properties` write against a select- or member-typed key.
+ *   It is not a not-found and must keep its 500.
  *
  * Matching is on the **`code` string only**: the API is Chinese-only and its
  * message wording is not a contract. Any code outside this table keeps the
@@ -206,6 +231,9 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   // ship's not-found codes: idea, then ticket (research/s7-smoke.md F1).
   '100725': 'not_found',
   '100711': 'not_found',
+  // testhub's not-found codes: case, then run (08-02-testhub-module S6 smoke).
+  '100601': 'not_found',
+  '100603': 'not_found',
 };
 
 const NOT_FOUND_HINT =
