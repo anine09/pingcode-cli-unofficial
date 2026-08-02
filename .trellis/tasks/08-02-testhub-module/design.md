@@ -28,8 +28,11 @@ Modified: `src/core/endpoints.ts`, `src/types/api.ts`, `src/core/metadata.ts`,
 `src/cli/program.ts`, `skills/pingcode/SKILL.md`, `README.md`, `test/help.test.ts`,
 `test/__snapshots__/help.test.ts.snap`.
 
-Explicitly **not** modified: `src/cli/commands/meta.ts`. The testhub lookups are
-`testhub meta …` inside the new file, not new leaves on the top-level `meta` group.
+`src/cli/commands/meta.ts` **no longer exists** — `08-02-cli-module-grouping` (commit
+`80f9c10`) split it into `product meta` / `project meta` / `settings users`. The testhub
+lookups follow that same shape: a `meta` subgroup **inside** the `testhub` group, living
+in the new file. Do not add testhub leaves to `product.ts`, `project.ts` or
+`settings.ts`.
 Canonical leaf inventory:
 
 ```

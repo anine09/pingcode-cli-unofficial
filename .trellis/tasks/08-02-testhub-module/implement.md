@@ -13,17 +13,16 @@ Read `prd.md` then `design.md` first. Slice order is a dependency order, not a s
   in the same commit as the code — never code around it silently (AC11).
 - Never commit credentials or tenant-identifiable values; `scan:secrets` runs in CI.
 - **Command-surface contract**: everything this task adds lives under the single
-  `testhub` top-level group (see S4 for the canonical leaf inventory). Do not add
-  leaves to the top-level `meta` group and do not modify `src/cli/commands/meta.ts`.
-- **Ordering vs `08-02-cli-module-grouping`**: that sibling task regroups the existing
-  commands and also rewrites `test/help.test.ts`, its snapshot, `SKILL.md` and
-  `README.md`. The two tasks must run serially, grouping first. Consequence for the
-  hardcoded group count in `help.test.ts`:
-  - grouping lands first (expected): it leaves `auth` / `product` / `project` /
-    `settings` = **4** groups; this task takes it to **5**.
-  - if this task somehow runs first: today's **7** groups become **8**.
-  Read the current assertion and increment it by one — do not paste a literal from
-  this document.
+  `testhub` top-level group (see S4 for the canonical leaf inventory). `meta.ts` was
+  deleted by `08-02-cli-module-grouping`; testhub lookups are a `meta` subgroup inside
+  `testhub`, mirroring `product meta` / `project meta`. Do not add testhub leaves to
+  `product.ts`, `project.ts` or `settings.ts`.
+- **`08-02-cli-module-grouping` has landed** (commit `80f9c10`, archived). The tree is
+  now `auth` / `product` / `project` / `settings` = **4** top-level groups, 36 leaves.
+  This task takes it to **5** groups. Register `testhub` between `project` and
+  `settings` in `buildProgram()`, matching the GUI module order. `help.test.ts` asserts
+  the group array and the ordered leaf-path list, so read the current assertion and
+  extend it — do not paste a literal from this document.
 
 ## Slices
 
@@ -62,8 +61,9 @@ write path.
 ### S4 — commands
 `src/cli/commands/testhub.ts` per design §1, registering **all five** noun groups
 under one `testhub` command: `libraries`, `cases`, `plans`, `runs`, `meta`.
-Every leaf lives in this one file; **`src/cli/commands/meta.ts` is not touched by this
-task** — the testhub lookups are `testhub meta …`, not top-level `meta …`.
+Every leaf lives in this one file. `src/cli/commands/meta.ts` was deleted by
+`08-02-cli-module-grouping`; testhub lookups are `testhub meta …`, structurally the same
+as the `product meta` / `project meta` subgroups that task created.
 Reuse `cli/commands/common.ts` for paging flags, table rendering, `runWrite` and
 timestamp parsing — do not duplicate that plumbing.
 
