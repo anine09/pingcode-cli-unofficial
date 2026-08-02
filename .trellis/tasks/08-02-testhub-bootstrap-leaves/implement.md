@@ -102,7 +102,7 @@ slice.
 
 ### S5 — help contract and docs · **Gate G3**
 
-Extend `test/help.test.ts` to **55** leaves (still 5 groups, still 15 subgroups) and regenerate the
+Extend `test/help.test.ts` to **55** leaves (still 5 groups, still 10 subgroups) and regenerate the
 snapshot. Add prose assertions for the two rules `--help` cannot carry: the `--start`/`--end` date
 forms with the end-of-day asymmetry, and that `--assignee` has no default because an enterprise
 token acts as a bot.
@@ -183,7 +183,7 @@ no library DELETE.
 ### S9 — close out
 
 Full gate: `typecheck`, `test`, `build`, `scan:secrets`, `check:commits`, plus a recursive `--help`
-walk of the built binary confirming 5 groups / 55 leaves / 15 subgroups. Walk AC1–AC14 and mark each
+walk of the built binary confirming 5 groups / 55 leaves / 10 subgroups. Walk AC1–AC14 and mark each
 Full or Partial with a reason — an honest Partial is worth more than an optimistic Full. Push, then
 `gh run list` to confirm CI. Then archive.
 

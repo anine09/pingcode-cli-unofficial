@@ -1,0 +1,12 @@
+{"file": "test/help.test.ts", "reason": "Hard-codes the group array, the exhaustive ordered leaf list, and the prose rules. Must go 51 -> 55 leaves with 5 groups and 10 subgroups unchanged; also cross-checks every command path in SKILL.md."}
+{"file": "test/__snapshots__/help.test.ts.snap", "reason": "Per-group and per-subgroup --help snapshots. Regenerate with vitest -u and inspect the diff: only the new leaves and their parent Commands: blocks should move."}
+{"file": "test/testhubCommands.test.ts", "reason": "Command-layer harness for the module. The --x/--x-id exclusion matrix, required-flag refusals, --dry-run and --json purity assertions for the four new leaves belong here."}
+{"file": "test/testhubMetadata.test.ts", "reason": "Resolver tests including cache-key shape, --no-cache bypass and the withCacheInvalidation loop. The testhub-plan-type kind is added here."}
+{"file": "test/testhub.test.ts", "reason": "Api-layer tests with createFakeFetch. Request shape for createLibrary/createPlan/planTypes."}
+{"file": "test/commands.test.ts", "reason": "pjm command tests. Must pass UNMODIFIED after any edit to common.ts — the runWrite retry narrowing in S7 is the risk."}
+{"file": "test/shipCommands.test.ts", "reason": "Ship command tests. Same unmodified-pass requirement as commands.test.ts for the shared runWrite/parseSetFlags plumbing."}
+{"file": "test/metadata.test.ts", "reason": "pjm resolver tests. Must pass unmodified after adding a MetaKind to the shared metadata.ts."}
+{"file": "test/shipMetadata.test.ts", "reason": "Ship resolver tests, including the shared loadSuiteTree that testhub's suite resolution rides on. Must pass unmodified."}
+{"file": "test/layering.test.ts", "reason": "Enforces cli->{api,core}, api->core, core->neither, and that api never imports output. Relevant because meta suites reaches the suite tree through core/metadata.ts rather than api/testhub.ts."}
+{"file": "skills/pingcode/SKILL.md", "reason": "Agent-facing docs, cross-checked by help.test.ts in both directions. Needs the four leaves, the date rule, and correction of any claim that testhub cannot create libraries or plans."}
+{"file": "README.md", "reason": "User docs: scope list, command-surface tree, examples and the testhub caveats section."}
