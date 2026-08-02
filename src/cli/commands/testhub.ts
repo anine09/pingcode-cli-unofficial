@@ -1475,7 +1475,10 @@ function registerTesthubMetaCommands(parent: Command): void {
         });
       }
       const { ctx } = contextFor(command);
-      printCollection(await importantLevels(ctx), IMPORTANT_LEVEL_COLUMNS, modeOf(ctx));
+      // Org-level, but still part of the 用例配置 family ([th#36]/[th#40]), so it
+      // sits behind the same configuration scope as case states and run statuses.
+      const values = await withConfigurationScope('importance levels', () => importantLevels(ctx));
+      printCollection(values, IMPORTANT_LEVEL_COLUMNS, modeOf(ctx));
     },
   );
 

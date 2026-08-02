@@ -82,7 +82,7 @@ Credentials come from a PingCode application, not from a user account:
      it, and they are the only source of a `state_id`, a `status_id` and an `important_level_id`.
      Without it those three return a bare 403 while their sibling `case-types` keeps working, and
      since `PATCH /runs/{id}` requires `status_id`, a token without this scope **cannot write a
-     run at all**. The CLI adds that explanation to the 403 for the two library-scoped lookups.
+      run at all**. The CLI adds that explanation to the 403 for all three of those lookups.
 
    `--executor` on a run resolves through the organisation directory, so it also needs
    `pcp:read:global:team`.

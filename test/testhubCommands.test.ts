@@ -1013,6 +1013,16 @@ describe('the configuration-scope trap (design §9)', () => {
     expect(run.stderr).toContain('pcp:read:testhub:configuration');
   });
 
+  it('names the missing scope when case_important_levels answers 403', async () => {
+    // Org-level, so no library lookup precedes it — one call, and the same
+    // enrichment as its two library-scoped siblings ([th#36]/[th#40]).
+    const run = await runCli(['testhub', 'meta', 'important-levels'], [forbidden]);
+    expect(run.exit).toBe(4);
+    expect(run.calls).toHaveLength(1);
+    expect(run.stderr).toContain('pcp:read:testhub:configuration');
+    expect(run.stderr).toContain('importance levels');
+  });
+
   it('leaves case/types alone — it needs no configuration scope', async () => {
     const run = await runCli(
       ['testhub', 'meta', 'case-types', '--library', 'LIB'],
