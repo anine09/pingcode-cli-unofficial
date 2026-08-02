@@ -239,6 +239,39 @@ The CLI always sends `executor_id` — resolved from `--executor`/`--executor-id
 otherwise inherited from the existing run resource on PATCH, or rejected with a clear
 message on PUT.
 
+> **Live-verified 2026-08-02 (S6 smoke) — the PATCH half of that claim is false, and the
+> CLI is consequently stricter than it needs to be.**
+>
+> Two raw controls against `PATCH /v1/testhub/runs/{run_id}` with `{"status_id": "…"}`
+> and **no** `executor_id`:
+> 1. run with executor `luoxiutao`, `created_by` the app bot `Ping` → 200, executor is
+>    **still `luoxiutao`**. Not reassigned to the creator.
+> 2. run with `executor: null`, same bot creator → 200, executor is **still `null`**.
+>    Not populated with the creator either.
+>
+> So on PATCH an omitted `executor_id` is a **no-op for that field**. [th#61]'s
+> "不传默认执行人为执行用例的创建人" did not reproduce in either direction. `PUT` was not
+> re-tested — it is outside the endpoint set — so its documented blanking stands
+> unverified.
+>
+> **What still holds.** Sending `executor_id` explicitly remains correct: it is
+> self-documenting, it is required for `--executor` to mean anything, and the PUT
+> behaviour is genuinely undocumented-but-destructive. The CLI's read-modify-write
+> inheritance was verified end to end — `runs patch <run> --remark "…"` with neither
+> `--status` nor `--executor` preserved executor `luoxiutao`, status `通过`/`pass` **and**
+> the full `steps[]` array (which is only replaced when actually sent).
+>
+> **What does not hold.** `runRunPatch` raises a hard `UsageError` when the run has no
+> executor *and* the user named none, with the hint "PATCH silently reassigns the run to
+> its creator". That hint asserts a behaviour that does not exist, and the refusal blocks
+> a legitimate operation — recording a result on an unassigned run — that the API accepts
+> and that provably leaves the executor `null`. Relaxing it means omitting `executor_id`
+> in exactly that one case, which contradicts PRD **R4**'s "CLI 永远显式传 `executor_id`".
+> That is a PRD-level decision, so S6 records it rather than taking it unilaterally.
+> **Recommended follow-up**: relax the refusal to a stderr warning and omit the field,
+> or keep the refusal and rewrite the hint to stop citing the falsified default.
+
+
 **Read-modify-write for `steps[]`**: `steps` is a full replacement ([th#61]). A step
 without `step_id` is treated as a new step and a new id is silently generated, orphaning
 the previous result. The CLI must `GET` the run first, present the existing steps, accept
@@ -457,3 +490,188 @@ One commit per slice (see `implement.md`); every commit leaves `typecheck` and `
 green. The only external side effect is any smoke data created during S7, which is marked
 with a `[CLI smoke]` prefix and noted in the wrap-up. Testhub exposes no library DELETE,
 so smoke libraries can only be marked, not removed.
+
+## 14. S6 live-smoke results (2026-08-02)
+
+Everything below was driven through the built CLI (`node dist/bin/pingcode.js …`) against
+the live tenant unless a row is explicitly marked **raw** — raw HTTP was used only to
+observe things the CLI deliberately does not expose (the suite list, the case-property
+scheme, control PATCHes with fields the CLI refuses to omit) and to bootstrap scratch
+assets whose create endpoints are outside the MVP.
+
+### 14.1 The six PRD open questions
+
+| # | Question | Verdict |
+|---|---|---|
+| 1 | Do GET lists honour paging? | **Settled — yes, everywhere.** §14.2 |
+| 2 | run-status name→slug mapping | **Settled — full table observed.** But it does **not** unblock `--step`; see §14.3 |
+| 3 | custom `properties` encoding per type | **Mostly undeterminable in this tenant.** §14.4 |
+| 4 | `properties` merge or replace on PATCH | **Unsettled — cannot be observed here.** §14.4 |
+| 5 | bulk atomicity | **Settled — neither atomic nor best-effort; it depends on the array.** §14.5 |
+| 6 | error-code catalogue | **Settled — and two overrides were justified and landed.** See §9 |
+
+### 14.2 Q1 — paging is real (settled: yes)
+
+No testhub GET declares `page_size`/`page_index`, but every list honours the
+platform-wide contract. All three of `page_index`/`page_size`/`total` echo the requested
+values, pages are disjoint, and an out-of-range index returns an empty `values` with the
+requested index echoed rather than clamping or looping:
+
+| endpoint | rows | observed |
+|---|---|---|
+| `GET /libraries` | 1 | `--page-size 2` → echoes 2; `--page 1` → echoes 1, 0 rows |
+| `GET /libraries/{id}/suites` **(raw)** | 2 | `page_size=1` → 1 row; `page_index=1` → the other row |
+| `GET /libraries/{id}/plans` | 3 | pages 0/1/2 at size 2 → 2, 1, 0 rows, no overlap |
+| `POST /cases/search` | 5 | pages 0–3 at size 2 → `CLISMOKE-1,2` / `3,4` / `5` / — |
+
+`--all --page-size 2` over 3 plans walked correctly and returned `{count: 3, all: true}`.
+Consequence for `core/paginate.ts`: **the echoed-index bail-out never fires** against
+testhub. It stays as a defence, not a live path. `?parent_id=root` on the suite list also
+works (raw): it returns only the root node, 1 of 2. Sorting was not tested.
+
+### 14.3 Q2 — the run-status table, and why `--step` stays restricted
+
+Five runs, each patched to a different status through `runs patch --status <name>`, slug
+read back off the returned `status`:
+
+| `id` | `name` | slug |
+|---|---|---|
+| `68ff7ad61c6e24a800149bd9` | 未测 | `not_start` |
+| `68ff7ad61c6e24a800149bda` | 通过 | `pass` |
+| `68ff7ad61c6e24a800149bdb` | 失败 | `failure` |
+| `68ff7ad61c6e24a800149bdc` | 受阻 | `block` |
+| `68ff7ad61c6e24a800149bdd` | 跳过 | `skip` |
+
+The same enum appears on `run.steps[].status` after a `--step` patch, so run and step
+share one slug vocabulary. The research's inferred mapping was right, but its *method*
+was not: it read the mapping off the example's list order, and this tenant returns a
+**different** order (未测, 通过, 失败, 受阻, 跳过 vs the example's 通过, 受阻, 失败, 跳过, 未测).
+
+**The `--step` all-or-nothing restriction stays.** S4 refused partial step edits because
+re-emitting an untouched step needs a `status_id` while a run step only reports a slug.
+Having the table does not fix that, because inverting it is what would be required, and:
+
+1. The only join between slug and id is the **localized `name`**.
+2. The org-level `GET /v1/testhub/run_statuses` (**raw**) reports `is_system` as an
+   integer and shows **受阻 and 跳过 at `is_system: 0`** — two of the five are
+   tenant-owned records, i.e. renamable. A rename breaks a name-keyed inversion while
+   the slug almost certainly stays.
+3. The **library-scoped** `GET /v1/testhub/run/statuses?library_id=` that the CLI actually
+   calls returns only `{id, url, name}` — **no `is_system` at all** — so the CLI cannot
+   even detect which names are safe to hardcode.
+
+Hardcoding slug→name would therefore be exactly the unverified assumption the restriction
+exists to avoid. The evidence is **insufficient to relax it**, so it was left alone. The
+restriction itself was verified working: a partial `--step` exits 2 listing the missing
+step ids, and a full `--step` (both steps, plus `--step-actual`) succeeded and returned
+`pass` / `failure` with the actual value stored.
+
+Side effect worth recording: the CLI's `SYSTEM` column in `testhub meta run-statuses`
+renders **empty for every row**, because the library-scoped endpoint omits the field.
+This is correct behaviour for a field the API does not send (the design never defaults
+`is_system` to `false`), but it means the column carries no information on this path.
+`design.md` §11's "`is_system` is declared by [th#0]/[th#63] on run statuses" is true only
+of the org-level variant.
+
+### 14.4 Q3/Q4 — `properties`, and what could not be tested
+
+**This tenant defines zero custom properties.** `GET /v1/testhub/case/properties?library_id=`
+(**raw** — the CLI has no property-lookup leaf) returns 8 rows, all built-ins:
+`maintenance_uid` (member), `state_id` (system), `type` (select), `important_level`
+(select), `precondition` (textarea), `steps` (system), `description` (textarea),
+`test_type` (select).
+
+Writing `--set key=value` through `PATCH /cases/{id}`:
+
+| property type | key tried | result |
+|---|---|---|
+| textarea | `precondition`, `description` | **200** — but the value lands on the **top-level field** and `properties` reads back `{}` |
+| select | `test_type` | **400 `100044`** for both integer `1` and string `"1"` (raw) — not a coercion issue |
+| select | `important_level` | **500 `100000`** with a 24-hex option id |
+| member | `maintenance_uid` | **500 `100000`** with a bare user id |
+| unknown | `smoke_a` | **400 `100043`** `'properties[smoke_a]'不存在` |
+
+The same values succeed as **top-level** fields, which the CLI already exposes
+(`--precondition`, `--description`, `--type`, `--important-level`). So `--set` is
+effectively unexercisable here beyond textarea aliases.
+
+**Not tested, and why:** `date`, `number`, `rate`, `progress`, `cascade_multi_select` and
+multi-`member` encodings — no such property exists in this tenant. Creating one was
+attempted and **deliberately abandoned**: `POST /v1/testhub/case_properties` succeeds
+(raw), but a property only reaches a library once bound to a case-property *plan*, and
+this tenant has exactly one plan with `library: null` — binding is **org-wide**, and
+`GET /v1/testhub/case_property_plans?library_id=` answers 400 `100646`
+`测试库未开启本地化配置`. Mutating the scheme every library in the tenant shares was judged an
+unacceptable blast radius. See §14.6 for the residue this left.
+
+**Q4 is therefore unsettled.** Merge-vs-replace cannot be observed when the container
+never retains a value. Setting `properties.precondition` + `properties.description` and
+then re-patching only `precondition` does leave `description` intact — but both had been
+re-routed to top-level columns, so that is ordinary PATCH field independence and is **not**
+evidence about `properties`. Replace-only stays an unverified conservative default, and
+§12's risk row stands as written.
+
+### 14.5 Q5 — bulk is neither atomic nor best-effort
+
+| batch | result |
+|---|---|
+| `inserts: [valid, well-formed nonexistent case]` | **200, `{"inserts": 1}`** — valid one landed, bad one **silently skipped** |
+| `deletes: [valid run, nonexistent run]` | **400 `100619`** — the valid delete did **not** happen |
+| `updates: [nonexistent run = 通过]` | **400 `100619`** |
+| `inserts: [valid]` + `deletes: [nonexistent]` | **400 `100619`** — the valid insert did **not** land |
+| `inserts: ["not-an-id"]` | **400 `100039`** `inserts[0].case_id 必须是一个 ObjectId` |
+
+A nonexistent **`case_id` in `inserts`** is dropped silently; a nonexistent **`run_id` in
+`updates`/`deletes`** aborts the whole call across all three arrays. **The counts are
+truthful** — the 2-insert batch reported `1` — and are the only way to notice a skipped
+insert, since the response carries counts and never ids.
+
+**Ordering cannot be relied on, and cannot even be inspected**: `{inserts, updates,
+deletes}` counts give nothing to correlate to a request position. The one place the API
+echoes an index is the shape error `100039` (`inserts[0].case_id`).
+
+Two CLI notes from this run. The client-side ≤50 cap fires correctly (51 `--add-case` →
+exit 2 before any request). And `runWrite`'s cache-invalidation retry **misfired** on the
+`100619` update case — it logged "the server rejected an id that came from the metadata
+cache; refreshing it and retrying once" and re-sent the bulk POST, when the rejected id
+was the user-supplied `run_id`, not the cached `status_id`. It was harmless here because
+the call is rejected atomically, but a retried bulk is a partial-double-apply risk if a
+future code is ever returned after a partial success. `runWrite` is shared with pjm/ship
+and out of this task's scope; recorded for a follow-up.
+
+### 14.6 Smoke data and residue left behind
+
+The scratch library `CLI Smoke` / `CLISMOKE` (`6a6ef8d811c48dd2a042367d`) is disposable
+and stays — testhub publishes no library DELETE. Left in place:
+
+- **6 cases**, all titled `[CLI smoke] …` with a UTC timestamp: `CLISMOKE-1` … `CLISMOKE-6`
+  (the last created raw, with two steps, because `cases create` exposes no step flag).
+- **3 plans**: `CLI Smoke Plan` (pre-existing) plus `CLI Smoke Plan 2` / `3`, created raw
+  purely to give the GET plan list more than one page. Plan creation is outside the MVP.
+- **8 runs** across those plans, with assorted statuses and `[CLI smoke]`-derived remarks.
+- **1 extra suite** `CLI smoke scope probe`, created raw while probing for a 403.
+- **One org-level residue that could not be cleaned up**: the case property
+  `CLIsmokeprop` (id `CLIsmokeprop`, type `text`), created while probing scopes.
+  `POST /v1/testhub/case_properties` has **no DELETE** (405). It is **unbound** — it
+  appears in no library's property scheme and on no case form — so it is inert, but it
+  is a permanent org-level definition and is reported here rather than hidden.
+
+### 14.7 Contract checks from `implement.md` S6
+
+| check | result |
+|---|---|
+| `--dry-run` halts before the write | **pass** — `{"dry_run":true,"request":{…}}` on stdout, and a follow-up list confirmed `total: 0` |
+| not-found reads as the documented exit code | **pass after the fix in §9** — was exit 7, now **exit 5** |
+| bad input → exit 2 | **pass** — page-size range, `--x`/`--x-id` exclusion, empty patch, `important-levels --library`, malformed `--set`, unknown state name |
+| bad credentials → exit 3 | **pass** — via `PINGCODE_CLIENT_ID/SECRET` into an isolated `PINGCODE_CONFIG_DIR`; nothing was written to disk and the secret was redacted in the error URL |
+| `short_id` works on GETs, resolved before writes | **pass** — `cases get UYyZ4kKi` works, and dry-run shows `PATCH …/cases/6a6efd3af8f6de4d467179aa` for `wehoWsMF`, `PATCH …/runs/6a6efe56…` for `g0jFYy2T`, and the bulk URL carrying the real plan id for `xk4x8Ck-` |
+| `runs patch` preserves the executor | **pass** — see §7's live-verified block |
+| configuration scope | **granted and working** — all four testhub read scopes resolve; the `withConfigurationScope` 403 path could **not** be exercised, see below |
+| `--json` purity | **pass** — the `--step` replacement warning went to stderr while stdout stayed pure JSON |
+
+**A permission failure could not be provoked.** The app holds broad scopes: suite writes,
+case-property writes, wiki and ship reads all succeed. So `withConfigurationScope`'s
+enriched 403 message is still only covered by unit tests, not live. Also observed: an
+unknown *route* (`GET /v1/agile/sprints`) returns a bare non-JSON `404 Not Found`, unlike
+the JSON 400 used for a missing resource.
+

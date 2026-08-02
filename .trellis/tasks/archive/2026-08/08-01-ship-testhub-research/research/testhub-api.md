@@ -217,6 +217,15 @@ From `[th#55] GET /v1/testhub/runs/{run_id}/histories/{history_id}` and `[th#58]
 - **Plan state**: `id`, `url`, `name`, `type` (`pending|in_progress|completed`), `is_system` (`0|1`) `[th#63]`.
 - **Run status**: `id`, `url`, `name`, `is_system` (`0|1`) `[th#0]`. The library-scoped list `[th#57]` omits `is_system` in its example.
 
+  > **CORRECTED 2026-08-02 (S6 smoke).** The omission is real behaviour, not an
+  > abbreviated example. `GET /v1/testhub/run/statuses?library_id=` returns exactly
+  > `{id, url, name}` for every row — no `is_system` key at all. The org-level
+  > `GET /v1/testhub/run_statuses` **does** return it, as an integer, and disagrees
+  > with the "five system statuses" reading: 未测/通过/失败 are `is_system: 1`,
+  > 受阻/跳过 are `is_system: 0`. A CLI rendering an `is_system` column off the
+  > library-scoped lookup therefore always renders it empty.
+
+
 ### 3.6 Bulk-operation response shapes
 
 - `POST /cases/bulk` `[th#18]` and `PATCH /cases/bulk` `[th#19]`: fields declared as `state` (`success|failure`) + `case` (object), but the **examples return a JSON array** of those objects, one per input element. Neither declares a `message` field even though failures are possible.
@@ -359,6 +368,28 @@ Consequences for a CLI: watchers can only be *set* at case creation (`participan
 6. **`GET /v1/testhub/cases` accepts `?tag_id` but no case response field exposes tags** `[th#22]` vs `[th#21]`. Filter-only, un-round-trippable; there is no testhub tag endpoint at all.
 7. **`PATCH /v1/testhub/runs/{run_id}` requires `status_id`** `[th#61]` — you cannot PATCH only the `remark` or only the `executor_id`. Effectively every run update re-asserts a result.
 8. **`executor_id` default is contradictory between PUT and PATCH.** PUT `[th#45]`: "不传默认执行人为空" (omitted ⇒ executor becomes **empty**). PATCH `[th#61]`: "不传默认执行人为执行用例的创建人" (omitted ⇒ executor becomes the run's **creator**). Both are destructive defaults: always send `executor_id` explicitly.
+
+   > **CORRECTED 2026-08-02 — `08-02-testhub-module` S6 live smoke. The PATCH half of
+   > this gotcha does not reproduce.** Two raw controls against
+   > `PATCH /v1/testhub/runs/{run_id}` with a body of `{"status_id": "…"}` and no
+   > `executor_id`:
+   > 1. on a run whose executor was `luoxiutao` and whose `created_by` was the app bot
+   >    `Ping` → HTTP 200, executor still `luoxiutao`. It was **not** reassigned to the creator.
+   > 2. on a run with `executor: null` and the same bot creator → HTTP 200, executor
+   >    still `null`. It was **not** populated with the creator either.
+   >
+   > So on PATCH an omitted `executor_id` is a **no-op for the executor field**: it
+   > preserves whatever was there, `null` included. The documented "默认执行人为执行用例的
+   > 创建人" was not observed in any form. `PUT` was **not** re-tested — it is outside the
+   > CLI's endpoint set — so the PUT half of this gotcha stands unverified either way.
+   >
+   > This does not make always sending `executor_id` wrong; it is still the explicit,
+   > self-documenting choice and it is what the CLI does. But the *rationale* is
+   > "PUT is documented as destructive and PATCH is unverified across versions", not
+   > "PATCH silently reassigns the run to its creator". See design §7 for the
+   > consequence: the CLI's hard refusal to patch an executor-less run is stricter
+   > than the API requires.
+
 9. **`steps[]` is replace-not-merge — and this generalises, but only where documented.** Explicit "整体更新" (whole-object update) notes appear on:
    - `POST /cases` `steps` `[th#16]`, `PATCH /cases/{case_id}` `steps` `[th#28]`, `PATCH /cases/bulk` `cases.steps` `[th#19]`
    - `PATCH /runs/{run_id}` `steps` `[th#61]`
@@ -423,6 +454,43 @@ Consequences for a CLI: watchers can only be *set* at case creation (`participan
 
 `api_data.json` never states this correspondence, and `run_statuses` items carry **no slug field** — only `id`, `url`, `name`, `is_system`. Tenants can also add custom statuses (`is_system: 0`), whose names will not be in this table. A CLI must therefore resolve `status_id` by fetching the library's status list and matching on `name`, and should let the user override the mapping.
 
+> **CONFIRMED 2026-08-02 — `08-02-testhub-module` S6 live smoke.** The inferred mapping
+> is correct. Five runs were created and each patched to a different status via
+> `pingcode testhub runs patch <run> --status <name>`; the slug was then read back off
+> the returned `status` field. Observed on the live tenant:
+>
+> | `id` | `name` | slug read back |
+> |---|---|---|
+> | `68ff7ad61c6e24a800149bd9` | 未测 | `not_start` |
+> | `68ff7ad61c6e24a800149bda` | 通过 | `pass` |
+> | `68ff7ad61c6e24a800149bdb` | 失败 | `failure` |
+> | `68ff7ad61c6e24a800149bdc` | 受阻 | `block` |
+> | `68ff7ad61c6e24a800149bdd` | 跳过 | `skip` |
+>
+> The same five slugs also appear on `run.steps[].status` after a `--step` patch, so
+> the step side and the run side share one enum.
+>
+> **Two corrections to the surrounding prose, both material.**
+>
+> 1. **The list order in `[th#57]`'s example is not this tenant's order.** The research
+>    inferred the mapping from the example's ordering (通过, 受阻, 失败, 跳过, 未测). Live,
+>    `GET /v1/testhub/run/statuses?library_id=` returns 未测, 通过, 失败, 受阻, 跳过 — a
+>    *different* order. The mapping happens to be right, but the method that produced it
+>    was unsound: **never key on list position.** Match on `name`.
+> 2. **The library-scoped list does not return `is_system` at all** — see §3's corrected
+>    run-status entry. So a CLI reading the library-scoped lookup cannot tell a system
+>    status from a tenant-defined one, and this tenant has 受阻 and 跳过 at
+>    `is_system: 0` *while still reporting the standard `block`/`skip` slugs*. The claim
+>    that custom statuses' "names will not be in this table" is therefore wrong in both
+>    directions: a non-system status can carry a standard slug, and the slug cannot be
+>    used to decide whether a status is system.
+>
+> The practical consequence is that the mapping still cannot be **inverted**. Going
+> slug → `status_id` requires joining through the localized `name`, and `is_system: 0`
+> on two of the five proves those names are tenant-owned and renamable. So a CLI can
+> read a slug but must not synthesise a `status_id` from one.
+
+
 ---
 
 ## 9. Recommended MVP subset (15 endpoints)
@@ -471,9 +539,73 @@ Optimised for "read my test assets, run a plan, record results" with the minimum
 
 1. **Slug↔id mapping for `run_statuses`, `case_states`, `plan_states`, `case_types`, `case_important_levels`.** Config items expose only `id` / `name` (localized) / sometimes `type`. The English slugs (`pass`, `not_start`, …) appear *only* as the value of the derived `status` field. There is no documented endpoint to look a config item up by slug, and no `key`/`slug`/`code` field. The §8 mapping is inference from example ordering.
 2. **Value encoding for custom `properties` by type.** Examples only ever show `"prop_a": "prop_a_value"` (a string). How to write a `date` (timestamp? ms?), `member` / `members` (bare id? `{id}`? array?), `select` (option `_id` or `text`?), `cascade_multi_select` (path array?), `rate`, `progress` is **undocumented**. Only the search-side addressing (`properties.{key}`) and operator sets are specified.
+
+   > **STILL LARGELY UNDETERMINED after the 2026-08-02 S6 smoke — and here is why.**
+   > The smoke tenant has **zero tenant-defined custom properties**. `GET
+   > /v1/testhub/case/properties?library_id=` returns 8 rows, all built-ins:
+   > `maintenance_uid` (member), `state_id` (system), `type` (select),
+   > `important_level` (select), `precondition` (textarea), `steps` (system),
+   > `description` (textarea), `test_type` (select). There is no `date`, `number`,
+   > `rate`, `progress`, `cascade_multi_select` or multi-`member` property to write to,
+   > so those encodings remain **untested**.
+   >
+   > What *was* observed, writing `properties.{key}` through `PATCH /cases/{id}`:
+   > - **textarea** (`precondition`, `description`): a plain string works, HTTP 200 —
+   >   but the value lands on the **top-level field**, and `properties` reads back `{}`.
+   >   The container never retains it.
+   > - **select** (`test_type`, `important_level`): rejected. `test_type` with its
+   >   option `_id` fails as 400 `100044` `'properties[test_type]'值不在options中`
+   >   for **both** the integer `1` and the string `"1"`, so this is not a
+   >   string/number coercion problem — the container simply does not accept the
+   >   documented option ids. `important_level` with a 24-hex option id gives 500
+   >   `100000`. The same values succeed when sent as **top-level** fields.
+   > - **member** (`maintenance_uid`): 500 `100000` with a bare user id.
+   > - **unknown key**: 400 `100043` `'properties[smoke_a]'不存在`.
+   >
+   > Creating a real custom property to test the remaining types was attempted and
+   > then **deliberately abandoned**: `POST /v1/testhub/case_properties` succeeds, but
+   > the property only reaches a library once bound to a case-property *plan*, and this
+   > tenant has exactly one plan with `library: null` (org default) — binding is
+   > org-wide, and `GET /v1/testhub/case_property_plans?library_id=` answers 400
+   > `100646` `测试库未开启本地化配置`. Mutating the scheme every library shares was
+   > judged an unacceptable blast radius for a smoke test. Note that
+   > `POST /v1/testhub/case_properties` has **no DELETE** (405), so the orphan
+   > definition `CLIsmokeprop` (type `text`, unbound, invisible to every library
+   > scheme) could not be removed.
+
 3. **Whether `properties` merges or replaces on PATCH.** `steps` and `options` are explicitly whole-object; `properties` says nothing. Unknown whether omitting a key clears it.
+
+   > **STILL UNDETERMINED after the 2026-08-02 S6 smoke.** This cannot be observed in a
+   > tenant with no custom properties. The only `properties` keys the API accepts are
+   > built-ins that it re-routes to top-level columns, leaving the container `{}` on
+   > every read — so there is nothing whose survival across a partial PATCH could be
+   > measured. Setting `properties.precondition` and `properties.description` together
+   > and then re-patching only `precondition` does leave `description` intact, but that
+   > is ordinary top-level PATCH field independence and says **nothing** about the
+   > `properties` container. Treat replace-only as an unverified conservative default.
+
 4. **Whether `participant_ids` replaces or appends**, and whether it is settable at all after creation (it is absent from both PATCH shapes) — see GOTCHA 9.
 5. **Actual paging support on testhub list endpoints.** No testhub record declares `page_size`/`page_index` as request params; only the platform overview does. Also unknown: whether `?page_size` is honoured on the `/case/*?library_id=` config views, and whether any list endpoint supports **sorting** (no `sort`/`order_by` param appears anywhere in the module).
+
+   > **RESOLVED 2026-08-02 (S6 smoke) — paging is fully honoured.** Undeclared, but
+   > real on every endpoint tested. `page_index`/`page_size` are accepted as query
+   > params on the GET lists and as `payload` members on the POST searches, and all
+   > three of `page_index`/`page_size`/`total` echo back the requested values:
+   >
+   > | endpoint | rows | evidence |
+   > |---|---|---|
+   > | `GET /v1/testhub/libraries` | 1 | `page_size=2` → echoes 2; `page_index=1` → echoes 1, `values: []` |
+   > | `GET /v1/testhub/libraries/{id}/suites` | 2 | `page_size=1` → 1 row; `page_index=1` → the *other* row |
+   > | `GET /v1/testhub/libraries/{id}/plans` | 3 | pages 0/1/2 at size 2 → 2, 1, 0 rows, no overlap |
+   > | `POST /v1/testhub/cases/search` | 5 | pages 0–3 at size 2 → CLISMOKE-1,2 / 3,4 / 5 / — |
+   >
+   > Pages are disjoint and an out-of-range `page_index` returns an empty `values` with
+   > the requested index echoed, rather than clamping to the last page or looping. The
+   > echoed-index bail-out in `core/paginate.ts` therefore never fires against testhub;
+   > it remains as a defence, not a live code path. **Sorting is still undetermined** —
+   > no `sort`/`order_by` param was tried, and the CLI documents list order as
+   > unguaranteed.
+
 6. **Complete value sets for `case_property_plans.category` and `.host`** — only the observed example values `library` / `case`.
 7. **`plan_types` semantics.** `plan.type` is a free-form named reference; the doc says types "包括项目、发布和迭代" (project / release / sprint) and gates `sprint_id`/`version_id` on "type_id 代表迭代测试 / 发布测试", but there is **no type-kind discriminator field** on the plan-type resource (`id`, `url`, `library`, `name` only). Deciding whether a given `type_id` is a sprint test or a release test is only possible by matching its localized `name`.
 8. **Error catalogue.** No testhub record documents any error response. Only the global overview gives the shape (`{code, message}`, HTTP 500 example) and the 429 rate-limit contract. Per-endpoint validation codes (duplicate plan name, identifier collision, bulk partial failure) are unknown.
@@ -495,6 +627,32 @@ Optimised for "read my test assets, run a plan, record results" with the minimum
    > `100601` and `100603` were added to `ERROR_CODE_OVERRIDES` in `src/core/wire.ts`.
 
 9. **Bulk failure semantics.** Whether `POST/PATCH /cases/bulk` and `/runs/bulk` are atomic or best-effort, and whether the response array is index-aligned with the request array, is not stated — and the case-bulk records don't even declare the `message` field their run-bulk counterparts have.
+
+   > **RESOLVED 2026-08-02 (S6 smoke) for `POST …/plans/{plan_id}/runs/bulk` — it is
+   > neither purely atomic nor purely best-effort. The behaviour depends on which array
+   > holds the bad entry.**
+   >
+   > | batch | result |
+   > |---|---|
+   > | `inserts: [valid case, well-formed but nonexistent case]` | HTTP 200, `{"inserts": 1}`. The valid run **landed**; the bad entry was **silently skipped** with no error and no warning. |
+   > | `deletes: [valid run, nonexistent run]` | HTTP 400 `100619`. The valid delete did **not** happen. |
+   > | `updates: [nonexistent run = 通过]` | HTTP 400 `100619`. |
+   > | `inserts: [valid case]` **+** `deletes: [nonexistent run]` | HTTP 400 `100619`. The valid insert did **not** land — rejection in one array aborts the whole call. |
+   > | `inserts: ["not-an-id"]` | HTTP 400 `100039` `inserts[0].case_id 必须是一个 ObjectId`. Nothing applied. |
+   >
+   > So: a nonexistent **`case_id` in `inserts`** is best-effort and silently dropped,
+   > while a nonexistent **`run_id` in `updates`/`deletes`** is a validation failure that
+   > rejects the entire batch across all three arrays. The returned counts are
+   > **truthful** in the success case — the 2-insert batch reported `1`, not `2` — so the
+   > count is the only way to detect a skipped insert.
+   >
+   > **Index alignment is unobservable by construction**: the response is
+   > `{inserts, updates, deletes}` counts only and never returns the ids of the runs it
+   > created, so nothing can be correlated back to a request position. The single
+   > exception is the shape-validation error `100039`, which *does* echo the offending
+   > index as `inserts[0].case_id`. `/cases/bulk` and the standalone `/runs/bulk` were
+   > **not** tested — they are outside the CLI's endpoint set.
+
 10. **Webhook / Flow event names for testhub** — nothing in `api_data.json`; it documents only the REST surface (the 频率限制 record merely *mentions* PingCode Flow webhooks as a way to reduce polling).
 11. **Archive/unarchive and restore operations.** `is_archived` / `is_deleted` are readable and filterable (`include_archived`, `include_deleted`) on libraries and cases, but **no endpoint sets them** — no `/archive`, `/restore`, and no `is_archived` write param anywhere in the module.
 12. **Whether `test_type` (`automation|manual`) is writable.** It is returned on every case but is not a parameter of `POST /cases`, `POST /cases/bulk`, `PATCH /cases/{case_id}` or `PATCH /cases/bulk`. Presumably derived or UI-only.
