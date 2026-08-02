@@ -704,7 +704,7 @@ export const resolveIdeaProperty = productScoped(
   'idea property',
   ENDPOINTS.shipIdeaProperties,
   'property ids are often slugs (backlog_type, identifier), never 24-hex — list them with ' +
-    '`pingcode meta idea-properties --product <p>`',
+    '`pingcode product meta idea-properties --product <p>`',
 );
 
 export const resolveTicketState = productScoped(
@@ -724,7 +724,7 @@ export const resolveTicketType = productScoped(
   'ticket type',
   ENDPOINTS.shipTicketTypes,
   'type_id is required to create a ticket — list the types with ' +
-    '`pingcode meta ticket-types --product <p>`',
+    '`pingcode product meta ticket-types --product <p>`',
 );
 
 export const resolveTicketChannel = productScoped(
@@ -739,7 +739,7 @@ export const resolveTicketProperty = productScoped(
   'ticket property',
   ENDPOINTS.shipTicketProperties,
   'property ids are often slugs (solution, identifier), never 24-hex — list them with ' +
-    '`pingcode meta ticket-properties --product <p>`',
+    '`pingcode product meta ticket-properties --product <p>`',
 );
 
 /**

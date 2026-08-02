@@ -256,10 +256,12 @@ describe('--type on update / transition (S8b, F1)', () => {
   const program = buildProgram();
 
   function leaf(name: string): Command {
-    const group = program.commands.find((command) => command.name() === 'work-item');
-    if (group === undefined) throw new Error('work-item group missing');
+    const parent = program.commands.find((command) => command.name() === 'project');
+    if (parent === undefined) throw new Error('project group missing');
+    const group = parent.commands.find((command) => command.name() === 'work-item');
+    if (group === undefined) throw new Error('project work-item group missing');
     const found = group.commands.find((command) => command.name() === name);
-    if (found === undefined) throw new Error(`work-item ${name} missing`);
+    if (found === undefined) throw new Error(`project work-item ${name} missing`);
     return found;
   }
 

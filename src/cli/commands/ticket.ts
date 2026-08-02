@@ -59,7 +59,7 @@ import {
 } from './common';
 
 /**
- * `pingcode ticket list|get|create|update|transition` — ship's 工单 (ship §K).
+ * `pingcode product ticket list|get|create|update|transition` — ship's 工单 (ship §K).
  *
  * Structurally identical to `idea`, with three differences that come straight
  * from the API:
@@ -125,8 +125,8 @@ export const TICKET_COLUMNS: Column<ShipTicket>[] = [
   { header: 'CHANNEL', value: (ticket) => channelName(ticket.channel) },
 ];
 
-export function registerTicketCommands(program: Command): void {
-  const group = program
+export function registerTicketCommands(parent: Command): void {
+  const group = parent
     .command('ticket')
     .description('ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)');
 
@@ -211,7 +211,7 @@ export function registerTicketCommands(program: Command): void {
       (flags.stateId === undefined || flags.stateId.trim() === '')
     ) {
       throw new UsageError('transition requires --state <name> or --state-id <id>', {
-        hint: 'list the states with `pingcode meta ticket-states --product <p>`',
+        hint: 'list the states with `pingcode product meta ticket-states --product <p>`',
       });
     }
     await runUpdate(target, flags, command);

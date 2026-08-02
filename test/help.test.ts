@@ -32,15 +32,12 @@ function leafPaths(command: Command, prefix: string[] = []): string[][] {
 describe('command surface', () => {
   const program = buildProgram();
 
-  it('registers the seven command groups', () => {
+  it('registers the four command groups', () => {
     expect(program.commands.map((command) => command.name()).filter((n) => n !== 'help')).toEqual([
       'auth',
-      'project',
-      'work-item',
       'product',
-      'idea',
-      'ticket',
-      'meta',
+      'project',
+      'settings',
     ]);
   });
 
@@ -53,39 +50,39 @@ describe('command surface', () => {
       'auth login',
       'auth status',
       'auth logout',
-      'project list',
-      'project get',
-      'work-item list',
-      'work-item get',
-      'work-item create',
-      'work-item update',
-      'work-item transition',
       'product list',
       'product get',
-      'idea list',
-      'idea get',
-      'idea create',
-      'idea update',
-      'ticket list',
-      'ticket get',
-      'ticket create',
-      'ticket update',
-      'ticket transition',
-      'meta types',
-      'meta states',
-      'meta priorities',
-      'meta sprints',
-      'meta users',
-      'meta idea-states',
-      'meta idea-priorities',
-      'meta idea-suites',
-      'meta idea-properties',
-      'meta product-members',
-      'meta ticket-states',
-      'meta ticket-priorities',
-      'meta ticket-types',
-      'meta ticket-channels',
-      'meta ticket-properties',
+      'product idea list',
+      'product idea get',
+      'product idea create',
+      'product idea update',
+      'product ticket list',
+      'product ticket get',
+      'product ticket create',
+      'product ticket update',
+      'product ticket transition',
+      'product meta idea-states',
+      'product meta idea-priorities',
+      'product meta idea-suites',
+      'product meta idea-properties',
+      'product meta members',
+      'product meta ticket-states',
+      'product meta ticket-priorities',
+      'product meta ticket-types',
+      'product meta ticket-channels',
+      'product meta ticket-properties',
+      'project list',
+      'project get',
+      'project work-item list',
+      'project work-item get',
+      'project work-item create',
+      'project work-item update',
+      'project work-item transition',
+      'project meta types',
+      'project meta states',
+      'project meta priorities',
+      'project meta sprints',
+      'settings users',
     ]);
   });
 
@@ -116,34 +113,60 @@ describe('--help snapshots', () => {
     expect(program.helpInformation()).toMatchSnapshot();
   });
 
-  for (const name of ['auth', 'project', 'work-item', 'product', 'idea', 'ticket', 'meta']) {
+  for (const name of ['auth', 'product', 'project', 'settings']) {
     it(name, () => {
       expect(group(program, name).helpInformation()).toMatchSnapshot();
     });
   }
 
-  it('work-item update (the widest flag set)', () => {
-    expect(group(group(program, 'work-item'), 'update').helpInformation()).toMatchSnapshot();
+  // The resource subgroups and the two `meta` subgroups are one level down now,
+  // so they need their own snapshots — the parent group help only lists them.
+  for (const [parent, child] of [
+    ['product', 'idea'],
+    ['product', 'ticket'],
+    ['product', 'meta'],
+    ['project', 'work-item'],
+    ['project', 'meta'],
+  ] as const) {
+    it(`${parent} ${child}`, () => {
+      expect(group(group(program, parent), child).helpInformation()).toMatchSnapshot();
+    });
+  }
+
+  it('project work-item update (the widest flag set)', () => {
+    expect(
+      group(group(group(program, 'project'), 'work-item'), 'update').helpInformation(),
+    ).toMatchSnapshot();
   });
 
-  it('work-item transition (--type is a lookup aid, not a patched field)', () => {
-    expect(group(group(program, 'work-item'), 'transition').helpInformation()).toMatchSnapshot();
+  it('project work-item transition (--type is a lookup aid, not a patched field)', () => {
+    expect(
+      group(group(group(program, 'project'), 'work-item'), 'transition').helpInformation(),
+    ).toMatchSnapshot();
   });
 
-  it('idea list (the search filter surface)', () => {
-    expect(group(group(program, 'idea'), 'list').helpInformation()).toMatchSnapshot();
+  it('product idea list (the search filter surface)', () => {
+    expect(
+      group(group(group(program, 'product'), 'idea'), 'list').helpInformation(),
+    ).toMatchSnapshot();
   });
 
-  it('idea update (no --type: ship states are product-scoped)', () => {
-    expect(group(group(program, 'idea'), 'update').helpInformation()).toMatchSnapshot();
+  it('product idea update (no --type: ship states are product-scoped)', () => {
+    expect(
+      group(group(group(program, 'product'), 'idea'), 'update').helpInformation(),
+    ).toMatchSnapshot();
   });
 
-  it('ticket create (--type is required by the API)', () => {
-    expect(group(group(program, 'ticket'), 'create').helpInformation()).toMatchSnapshot();
+  it('product ticket create (--type is required by the API)', () => {
+    expect(
+      group(group(group(program, 'product'), 'ticket'), 'create').helpInformation(),
+    ).toMatchSnapshot();
   });
 
-  it('ticket transition (advisory: the server decides)', () => {
-    expect(group(group(program, 'ticket'), 'transition').helpInformation()).toMatchSnapshot();
+  it('product ticket transition (advisory: the server decides)', () => {
+    expect(
+      group(group(group(program, 'product'), 'ticket'), 'transition').helpInformation(),
+    ).toMatchSnapshot();
   });
 });
 
@@ -206,7 +229,7 @@ describe('SKILL.md agrees with the CLI (R4.5)', () => {
 
   it('states the ship rules that have no pjm equivalent (Gate G4)', () => {
     expect(skill).toMatch(/product-scoped/i);
-    expect(skill).toMatch(/meta product-members/);
+    expect(skill).toMatch(/product meta members/);
     expect(skill).toMatch(/option.{0,20}_id|option ids/i);
     expect(skill).toMatch(/nothing\s+in\s+ship\s+can\s+be\s+deleted/i);
     // `--type` means something different on each module

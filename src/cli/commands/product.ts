@@ -1,8 +1,33 @@
 import type { Command } from 'commander';
-import { getProduct, iterateProducts, listProducts, type ProductListQuery } from '../../api/ship';
+import {
+  getProduct,
+  iterateProducts,
+  listIdeaPriorities,
+  listIdeaProperties,
+  listIdeaStates,
+  listIdeaSuites,
+  listProductMembers,
+  listProducts,
+  listTicketChannels,
+  listTicketPriorities,
+  listTicketProperties,
+  listTicketStates,
+  listTicketTypes,
+  type ProductListQuery,
+} from '../../api/ship';
+import type { Ctx } from '../../core/context';
 import { resolveProduct } from '../../core/metadata';
 import { collect } from '../../core/paginate';
-import type { ShipProduct } from '../../types/api';
+import type {
+  ShipChannel,
+  ShipPriority,
+  ShipProduct,
+  ShipProductMember,
+  ShipProperty,
+  ShipState,
+  ShipSuite,
+  ShipTicketType,
+} from '../../types/api';
 import { addGlobalOptions } from '../globals';
 import type { Column } from '../output';
 import {
@@ -18,14 +43,19 @@ import {
   timestampCell,
   type PagingFlags,
 } from './common';
+import { registerIdeaCommands } from './idea';
+import { registerTicketCommands } from './ticket';
 
 /**
- * `pingcode product list|get` — `GET /v1/ship/products[/{id}]` (ship §A).
+ * `pingcode product …` — the 产品管理 (ship) module, mirroring the GUI's own
+ * grouping: the product itself, then its 需求 / 工单 resources, then the id
+ * lookups every write inside the module needs.
  *
- * A product is the parent of everything else in ship: `state_id`, `priority_id`,
- * `suite_id`, `type_id`, `channel_id`, the `properties` keys and the assignee
- * candidate set are all resolved inside one product, so this group is the first
- * call of any ship workflow.
+ * `product list|get` is `GET /v1/ship/products[/{id}]` (ship §A). A product is
+ * the parent of everything else in ship: `state_id`, `priority_id`, `suite_id`,
+ * `type_id`, `channel_id`, the `properties` keys and the assignee candidate set
+ * are all resolved inside one product, so this group is the first call of any
+ * ship workflow — and the reason the whole module hangs off it.
  *
  * There is deliberately no `create`, `update` or `delete`: ship exposes no
  * product DELETE at all, and `PATCH` edits only three cosmetic fields
@@ -43,6 +73,8 @@ type GetFlags = {
   includeDeleted?: boolean | undefined;
 };
 
+type ProductFlag = { product: string };
+
 export const PRODUCT_COLUMNS: Column<ShipProduct>[] = [
   { header: 'IDENTIFIER', value: (p) => p.identifier ?? '' },
   { header: 'NAME', value: (p) => p.name ?? '', flex: true },
@@ -50,10 +82,64 @@ export const PRODUCT_COLUMNS: Column<ShipProduct>[] = [
   { header: 'ID', value: (p) => p.id },
 ];
 
+const SHIP_STATE_COLUMNS: Column<ShipState>[] = [
+  { header: 'ID', value: (s) => s.id },
+  { header: 'NAME', value: (s) => s.name ?? '', flex: true },
+  { header: 'GROUP', value: (s) => s.type ?? '' },
+];
+
+const SHIP_PRIORITY_COLUMNS: Column<ShipPriority>[] = [
+  { header: 'ID', value: (p) => p.id },
+  { header: 'NAME', value: (p) => p.name ?? '', flex: true },
+];
+
+const SHIP_SUITE_COLUMNS: Column<ShipSuite>[] = [
+  { header: 'ID', value: (s) => s.id },
+  { header: 'NAME', value: (s) => s.name ?? '', flex: true },
+  { header: 'TYPE', value: (s) => s.type ?? '' },
+  { header: 'PARENT', value: (s) => refName(s.parent) },
+];
+
+const SHIP_PROPERTY_COLUMNS: Column<ShipProperty>[] = [
+  { header: 'ID', value: (p) => p.id },
+  { header: 'NAME', value: (p) => p.name ?? '', flex: true },
+  { header: 'TYPE', value: (p) => p.type ?? '' },
+  {
+    header: 'OPTIONS',
+    value: (p) =>
+      p.options
+        .map((option) => `${option.text ?? '?'}=${option._id ?? '?'}`)
+        .join(' | '),
+    flex: true,
+  },
+];
+
+const SHIP_MEMBER_COLUMNS: Column<ShipProductMember>[] = [
+  { header: 'ID', value: (m) => m.id },
+  {
+    header: 'NAME',
+    value: (m) => refName(m.user) || refName(m.user_group),
+    flex: true,
+  },
+  { header: 'TYPE', value: (m) => m.type ?? '' },
+  { header: 'ROLE', value: (m) => refName(m.role) },
+];
+
+const SHIP_TICKET_TYPE_COLUMNS: Column<ShipTicketType>[] = [
+  { header: 'ID', value: (t) => t.id },
+  { header: 'NAME', value: (t) => t.name ?? '', flex: true },
+];
+
+const SHIP_CHANNEL_COLUMNS: Column<ShipChannel>[] = [
+  { header: 'ID', value: (c) => c.id },
+  { header: 'NAME', value: (c) => c.name ?? '', flex: true },
+  { header: 'DESCRIPTION', value: (c) => c.description ?? '', flex: true },
+];
+
 export function registerProductCommands(program: Command): void {
   const product = program
     .command('product')
-    .description('ship products 产品 (scope pcp:read:ship:product)');
+    .description('产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)');
 
   addGlobalOptions(
     addPagingOptions(
@@ -80,6 +166,112 @@ export function registerProductCommands(program: Command): void {
   ).action(async (target: string, flags: GetFlags, command: Command) => {
     await runGet(target, flags, command);
   });
+
+  // Registration order is asserted by `test/help.test.ts`: the group's own verbs
+  // first, then the resource subgroups, then the lookups.
+  registerIdeaCommands(product);
+  registerTicketCommands(product);
+  registerProductMetaCommands(product);
+}
+
+// ---------------------------------------------------------------------------
+// product meta: every ship lookup is scoped to one product
+// ---------------------------------------------------------------------------
+
+/**
+ * `pingcode product meta …` — the id lookups a ship write cannot be built
+ * without.
+ *
+ * This subgroup is load-bearing, not scope creep. In ship everything is
+ * **product-scoped** — states, priorities, suites, types, channels, the writable
+ * `properties` keys and the assignee candidate set (ship §5) — and ticket create
+ * additionally *requires* a `type_id`, so `product meta ticket-types` is
+ * mandatory rather than convenient.
+ */
+function registerProductMetaCommands(parent: Command): void {
+  const meta = parent
+    .command('meta')
+    .description('ids you need before writing: every ship lookup is scoped to one product');
+
+  function productScoped<T>(
+    name: string,
+    description: string,
+    load: (ctx: Ctx, productId: string) => Promise<T[]>,
+    columns: Column<T>[],
+  ): void {
+    addGlobalOptions(
+      meta
+        .command(name)
+        .description(description)
+        .requiredOption('--product <name|id>', 'product name, identifier such as SLC, or id'),
+      { hidden: true },
+    ).action(async (flags: ProductFlag, command: Command) => {
+      const { ctx } = contextFor(command);
+      const resolved = await resolveProduct(ctx, flags.product);
+      printCollection(await load(ctx, resolved.id), columns, modeOf(ctx));
+    });
+  }
+
+  productScoped(
+    'idea-states',
+    'idea states of a product (values for --state / state_id)',
+    listIdeaStates,
+    SHIP_STATE_COLUMNS,
+  );
+  productScoped(
+    'idea-priorities',
+    'idea priorities of a product',
+    listIdeaPriorities,
+    SHIP_PRIORITY_COLUMNS,
+  );
+  productScoped(
+    'idea-suites',
+    'requirement modules 需求模块 of a product (a tree, listed flat with parents)',
+    listIdeaSuites,
+    SHIP_SUITE_COLUMNS,
+  );
+  productScoped(
+    'idea-properties',
+    'writable idea property keys and their option ids — the only source for --set values',
+    listIdeaProperties,
+    SHIP_PROPERTY_COLUMNS,
+  );
+  productScoped(
+    'members',
+    'members of a product — the only valid --assignee candidates',
+    listProductMembers,
+    SHIP_MEMBER_COLUMNS,
+  );
+  productScoped(
+    'ticket-states',
+    'ticket states of a product (values for --state / state_id)',
+    listTicketStates,
+    SHIP_STATE_COLUMNS,
+  );
+  productScoped(
+    'ticket-priorities',
+    'ticket priorities of a product',
+    listTicketPriorities,
+    SHIP_PRIORITY_COLUMNS,
+  );
+  productScoped(
+    'ticket-types',
+    'ticket types of a product — required to create a ticket',
+    listTicketTypes,
+    SHIP_TICKET_TYPE_COLUMNS,
+  );
+  productScoped(
+    'ticket-channels',
+    'ticket channels of a product (set once, at create time)',
+    listTicketChannels,
+    SHIP_CHANNEL_COLUMNS,
+  );
+  productScoped(
+    'ticket-properties',
+    'writable ticket property keys and their option ids — the only source for --set values',
+    listTicketProperties,
+    SHIP_PROPERTY_COLUMNS,
+  );
 }
 
 async function runList(flags: ListFlags, command: Command): Promise<void> {

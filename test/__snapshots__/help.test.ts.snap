@@ -16,8 +16,26 @@ Commands:
 "
 `;
 
-exports[`--help snapshots > idea 1`] = `
-"Usage: pingcode idea [options] [command]
+exports[`--help snapshots > product 1`] = `
+"Usage: pingcode product [options] [command]
+
+产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           list products
+  get [options] <product>  show one product, including its members
+  idea                     ship requirements 需求 (scopes pcp:read:ship:idea / pcp:write:ship:idea)
+  ticket                   ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)
+  meta                     ids you need before writing: every ship lookup is scoped to one product
+  help [command]           display help for command
+"
+`;
+
+exports[`--help snapshots > product idea 1`] = `
+"Usage: pingcode product idea [options] [command]
 
 ship requirements 需求 (scopes pcp:read:ship:idea / pcp:write:ship:idea)
 
@@ -33,8 +51,8 @@ Commands:
 "
 `;
 
-exports[`--help snapshots > idea list (the search filter surface) 1`] = `
-"Usage: pingcode idea list [options]
+exports[`--help snapshots > product idea list (the search filter surface) 1`] = `
+"Usage: pingcode product idea list [options]
 
 search ideas in a product (POST /v1/ship/ideas/search)
 
@@ -56,8 +74,8 @@ Options:
 "
 `;
 
-exports[`--help snapshots > idea update (no --type: ship states are product-scoped) 1`] = `
-"Usage: pingcode idea update [options] <idea>
+exports[`--help snapshots > product idea update (no --type: ship states are product-scoped) 1`] = `
+"Usage: pingcode product idea update [options] <idea>
 
 patch an idea — only the fields you pass are sent, and they replace
 
@@ -81,27 +99,22 @@ Options:
 "
 `;
 
-exports[`--help snapshots > meta 1`] = `
-"Usage: pingcode meta [options] [command]
+exports[`--help snapshots > product meta 1`] = `
+"Usage: pingcode product meta [options] [command]
 
-ids you need before writing: project-scoped for work items, product-scoped for ship
+ids you need before writing: every ship lookup is scoped to one product
 
 Options:
   -h, --help                   display help for command
 
 Commands:
-  types [options]              work-item types of a project (values for --type / type_id)
-  states [options]             work-item states of one (project, type) pair — both are required
-  priorities [options]         work-item priorities of a project
-  sprints [options]            sprints of a project (scrum/hybrid only)
-  users [options]              organisation members (scope pcp:read:global:team)
   idea-states [options]        idea states of a product (values for --state / state_id)
   idea-priorities [options]    idea priorities of a product
   idea-suites [options]        requirement modules 需求模块 of a product (a tree, listed flat with
                                parents)
   idea-properties [options]    writable idea property keys and their option ids — the only source
                                for --set values
-  product-members [options]    members of a product — the only valid --assignee candidates
+  members [options]            members of a product — the only valid --assignee candidates
   ticket-states [options]      ticket states of a product (values for --state / state_id)
   ticket-priorities [options]  ticket priorities of a product
   ticket-types [options]       ticket types of a product — required to create a ticket
@@ -112,66 +125,8 @@ Commands:
 "
 `;
 
-exports[`--help snapshots > product 1`] = `
-"Usage: pingcode product [options] [command]
-
-ship products 产品 (scope pcp:read:ship:product)
-
-Options:
-  -h, --help               display help for command
-
-Commands:
-  list [options]           list products
-  get [options] <product>  show one product, including its members
-  help [command]           display help for command
-"
-`;
-
-exports[`--help snapshots > project 1`] = `
-"Usage: pingcode project [options] [command]
-
-projects (scope pcp:read:pjm:project)
-
-Options:
-  -h, --help               display help for command
-
-Commands:
-  list [options]           list projects
-  get [options] <project>  show one project
-  help [command]           display help for command
-"
-`;
-
-exports[`--help snapshots > root 1`] = `
-"Usage: pingcode [options] [command]
-
-Command-line client for the PingCode Open API
-
-Options:
-  --version       output the CLI version
-  --host <url>    PingCode host (default https://open.pingcode.com; self-hosted:
-                  https://pingcode.example.com)
-  --json          emit machine-readable JSON on stdout
-  --dry-run       preview mutating requests without sending them
-  --no-cache      bypass the on-disk metadata cache
-  --verbose       log requests to stderr (secrets redacted)
-  -h, --help      display help for command
-
-Commands:
-  auth            authenticate against PingCode (Client Credentials app)
-  project         projects (scope pcp:read:pjm:project)
-  work-item       work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
-  product         ship products 产品 (scope pcp:read:ship:product)
-  idea            ship requirements 需求 (scopes pcp:read:ship:idea / pcp:write:ship:idea)
-  ticket          ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)
-  meta            ids you need before writing: project-scoped for work items, product-scoped for
-                  ship
-  help [command]  display help for command
-"
-`;
-
-exports[`--help snapshots > ticket 1`] = `
-"Usage: pingcode ticket [options] [command]
+exports[`--help snapshots > product ticket 1`] = `
+"Usage: pingcode product ticket [options] [command]
 
 ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)
 
@@ -189,8 +144,8 @@ Commands:
 "
 `;
 
-exports[`--help snapshots > ticket create (--type is required by the API) 1`] = `
-"Usage: pingcode ticket create [options]
+exports[`--help snapshots > product ticket create (--type is required by the API) 1`] = `
+"Usage: pingcode product ticket create [options]
 
 create a ticket (--type is required by the API, unlike idea)
 
@@ -208,8 +163,8 @@ Options:
 "
 `;
 
-exports[`--help snapshots > ticket transition (advisory: the server decides) 1`] = `
-"Usage: pingcode ticket transition [options] <ticket>
+exports[`--help snapshots > product ticket transition (advisory: the server decides) 1`] = `
+"Usage: pingcode product ticket transition [options] <ticket>
 
 move a ticket to another state (--dry-run previews the legal ones)
 
@@ -223,8 +178,42 @@ Options:
 "
 `;
 
-exports[`--help snapshots > work-item 1`] = `
-"Usage: pingcode work-item [options] [command]
+exports[`--help snapshots > project 1`] = `
+"Usage: pingcode project [options] [command]
+
+项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           list projects
+  get [options] <project>  show one project
+  work-item                work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
+  meta                     ids you need before writing: every pjm lookup is scoped to one project
+  help [command]           display help for command
+"
+`;
+
+exports[`--help snapshots > project meta 1`] = `
+"Usage: pingcode project meta [options] [command]
+
+ids you need before writing: every pjm lookup is scoped to one project
+
+Options:
+  -h, --help            display help for command
+
+Commands:
+  types [options]       work-item types of a project (values for --type / type_id)
+  states [options]      work-item states of one (project, type) pair — both are required
+  priorities [options]  work-item priorities of a project
+  sprints [options]     sprints of a project (scrum/hybrid only)
+  help [command]        display help for command
+"
+`;
+
+exports[`--help snapshots > project work-item 1`] = `
+"Usage: pingcode project work-item [options] [command]
 
 work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
 
@@ -234,8 +223,8 @@ Options:
 Commands:
   list [options]                    list work items of a project
   get [options] <work-item>         show one work item
-  create [options]                  create a work item (ids are project-scoped: run \`pingcode meta\`
-                                    first)
+  create [options]                  create a work item (ids are project-scoped: run \`pingcode
+                                    project meta\` first)
   update [options] <work-item>      patch a work item — only the fields you pass are sent, and they
                                     replace
   transition [options] <work-item>  move a work item to another state (workflow-validated by the
@@ -244,8 +233,8 @@ Commands:
 "
 `;
 
-exports[`--help snapshots > work-item transition (--type is a lookup aid, not a patched field) 1`] = `
-"Usage: pingcode work-item transition [options] <work-item>
+exports[`--help snapshots > project work-item transition (--type is a lookup aid, not a patched field) 1`] = `
+"Usage: pingcode project work-item transition [options] <work-item>
 
 move a work item to another state (workflow-validated by the server)
 
@@ -261,8 +250,8 @@ Options:
 "
 `;
 
-exports[`--help snapshots > work-item update (the widest flag set) 1`] = `
-"Usage: pingcode work-item update [options] <work-item>
+exports[`--help snapshots > project work-item update (the widest flag set) 1`] = `
+"Usage: pingcode project work-item update [options] <work-item>
 
 patch a work item — only the fields you pass are sent, and they replace
 
@@ -285,5 +274,43 @@ Options:
   --state <name>            new state, resolved by name (requires --type)
   --state-id <id>           new state, given as an id (no lookup, no --type needed)
   -h, --help                display help for command
+"
+`;
+
+exports[`--help snapshots > root 1`] = `
+"Usage: pingcode [options] [command]
+
+Command-line client for the PingCode Open API
+
+Options:
+  --version       output the CLI version
+  --host <url>    PingCode host (default https://open.pingcode.com; self-hosted:
+                  https://pingcode.example.com)
+  --json          emit machine-readable JSON on stdout
+  --dry-run       preview mutating requests without sending them
+  --no-cache      bypass the on-disk metadata cache
+  --verbose       log requests to stderr (secrets redacted)
+  -h, --help      display help for command
+
+Commands:
+  auth            authenticate against PingCode (Client Credentials app)
+  product         产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)
+  project         项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
+  settings        后台设置: organisation-wide directory data
+  help [command]  display help for command
+"
+`;
+
+exports[`--help snapshots > settings 1`] = `
+"Usage: pingcode settings [options] [command]
+
+后台设置: organisation-wide directory data
+
+Options:
+  -h, --help       display help for command
+
+Commands:
+  users [options]  organisation members (scope pcp:read:global:team)
+  help [command]   display help for command
 "
 `;

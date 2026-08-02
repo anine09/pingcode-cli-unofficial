@@ -27,7 +27,7 @@ export type GlobalOptions = {
 
 /**
  * The global flags, defined once. commander binds an option to the command it
- * *follows*, so `pingcode work-item list --json` would otherwise be an unknown
+ * *follows*, so `pingcode project work-item list --json` would otherwise be an unknown
  * option. Every leaf command therefore repeats these (hidden from its own help,
  * which keeps the root as the single place they are documented) and
  * `readGlobalOptions` picks the innermost value that was actually typed.

@@ -52,7 +52,7 @@ import {
 } from './common';
 
 /**
- * `pingcode idea list|get|create|update` — ship's 需求 (ship §J).
+ * `pingcode product idea list|get|create|update` — ship's 需求 (ship §J).
  *
  * Four rules from the design shape this file:
  *
@@ -115,8 +115,8 @@ export const IDEA_COLUMNS: Column<ShipIdea>[] = [
   { header: 'SUITE', value: (idea) => refName(idea.suite) },
 ];
 
-export function registerIdeaCommands(program: Command): void {
-  const group = program
+export function registerIdeaCommands(parent: Command): void {
+  const group = parent
     .command('idea')
     .description('ship requirements 需求 (scopes pcp:read:ship:idea / pcp:write:ship:idea)');
 

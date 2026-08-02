@@ -15,9 +15,20 @@ description: >-
 
 # PingCode CLI
 
-`pingcode` is a command-line client for the PingCode Open API. It covers two modules: **pjm**
-(projects and work items) and **ship** (products, requirements/需求, tickets/工单), plus the
-project- and product-scoped metadata needed to create or update anything.
+`pingcode` is a command-line client for the PingCode Open API. Its top level mirrors PingCode's own
+GUI modules: **`product`** (产品管理 / ship — products, requirements/需求, tickets/工单),
+**`project`** (项目管理 / pjm — projects and work items), **`settings`** (后台设置 — the
+organisation directory) and **`auth`** (the CLI's own local credentials).
+
+Each business module owns its resources *and* its id lookups, so a module's whole surface is one
+`--help` away:
+
+```
+auth      login status logout
+product   list get · idea … · ticket … · meta …
+project   list get · work-item … · meta …
+settings  users
+```
 
 Everything below assumes `pingcode` is on `PATH` (`npm run build` produces `dist/bin/pingcode.js`).
 
@@ -35,17 +46,17 @@ Credentials come from a PingCode application, not from a user account:
    - `pcp:read:pjm:project` — projects
    - `pcp:read:pjm:workitem` — work items, types, states, priorities
    - `pcp:write:pjm:workitem` — create/update work items
-   - `pcp:read:global:team` — `pingcode meta users`
-   - `pcp:read:pjm:sprint` — only if you need `pingcode meta sprints`
+   - `pcp:read:global:team` — `pingcode settings users`
+   - `pcp:read:pjm:sprint` — only if you need `pingcode project meta sprints`
 
    For the ship (产品管理) commands, add:
-   - `pcp:read:ship:product` — `product list` / `product get` / `meta product-members`, and every
+   - `pcp:read:ship:product` — `product list` / `product get` / `product meta members`, and every
      product name lookup, which every other ship command starts with
-   - `pcp:read:ship:idea` — `idea list` / `get`, and `meta idea-states|idea-priorities|idea-suites|idea-properties`
-   - `pcp:write:ship:idea` — `idea create` / `update`
-   - `pcp:read:ship:ticket` — `ticket list` / `get`, and `meta ticket-states|ticket-priorities|ticket-types|ticket-channels|ticket-properties`
-   - `pcp:write:ship:ticket` — `ticket create` / `update` / `transition`
-   - `pcp:read:ship:configuration` — **optional**, and only for `ticket transition`: it is what
+   - `pcp:read:ship:idea` — `product idea list` / `get`, and `product meta idea-states|idea-priorities|idea-suites|idea-properties`
+   - `pcp:write:ship:idea` — `product idea create` / `update`
+   - `pcp:read:ship:ticket` — `product ticket list` / `get`, and `product meta ticket-states|ticket-priorities|ticket-types|ticket-channels|ticket-properties`
+   - `pcp:write:ship:ticket` — `product ticket create` / `update` / `transition`
+   - `pcp:read:ship:configuration` — **optional**, and only for `product ticket transition`: it is what
      makes the state-plan pre-check possible. Without it the CLI warns on stderr and lets the
      server judge the transition, so tickets stay movable either way.
 
@@ -79,10 +90,10 @@ from every URL, log line, dry-run plan and error message it emits.
 - `--json` makes **stdout carry JSON only**. Logs, warnings, tables and notes go to stderr.
 - In `--json` mode, timestamps stay raw unix **seconds**. Human mode renders local time.
 - Three list shapes, by command family:
-  - `project list` / `work-item list` (one page) → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
+  - `project list` / `project work-item list` (one page) → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
   - any list with `--all` → `{"values":[…],"count":42,"all":true}`
-  - every `pingcode meta …` lookup (including `meta users`, which still accepts `--page`/`--page-size`)
-    → `{"values":[…],"count":20}`
+  - every `meta` lookup — `pingcode product meta …`, `pingcode project meta …`, and
+    `pingcode settings users` (which still accepts `--page`/`--page-size`) → `{"values":[…],"count":20}`
 - Single-resource commands (`get`, `create`, `update`, `transition`) print the resource object.
 - **Read keys defensively: an absent key means null or empty.** The CLI normalises `null` and `""`
   to "not present", so a field the API returned as `null` (an unset `plan_at`, `score`, `solution`)
@@ -124,7 +135,7 @@ pingcode auth status --check      # adds one live API call: GET /v1/pjm/projects
 pingcode auth logout
 ```
 
-### Projects
+### Projects — 项目管理
 
 ```bash
 pingcode project list --json
@@ -132,56 +143,65 @@ pingcode project list --keywords mobile --type scrum
 pingcode project get "Mobile App" --json
 ```
 
-### Metadata — mandatory before creating or updating
+### `project meta` — mandatory before creating or updating a work item
 
 `type_id`, `state_id` and `priority_id` are **project-scoped**: the same state name has a different id
 in another project, and system work-item types use slugs (`task`, `story`, `bug`) while custom types
 use hex ids. Never reuse an id across projects, and never guess one.
 
 ```bash
-pingcode meta types --project "Mobile App" --json
-pingcode meta states --project "Mobile App" --type task --json
-pingcode meta priorities --project "Mobile App" --json
-pingcode meta sprints --project "Mobile App" --json
-pingcode meta users --keywords wang --json
+pingcode project meta types --project "Mobile App" --json
+pingcode project meta states --project "Mobile App" --type task --json
+pingcode project meta priorities --project "Mobile App" --json
+pingcode project meta sprints --project "Mobile App" --json
 ```
 
-`pingcode meta states` requires **both** a project and a type — that is an API constraint, not a CLI
+`pingcode project meta states` requires **both** a project and a type — that is an API constraint, not a CLI
 choice.
 
 Lookups are cached under `~/.pingcode/cache/` for 24 hours. Use `--no-cache` if a project was
 reconfigured and an id looks stale.
 
-### Work items
+### Settings — 后台设置
 
 ```bash
-pingcode work-item list --project "Mobile App" --json
-pingcode work-item list --project "Mobile App" --type task --state "In Progress" --json
-pingcode work-item list --project "Mobile App" --assignee wangxiao --page-size 20 --page 0
-pingcode work-item list --project "Mobile App" --all --limit 200 --json
-
-pingcode work-item get SCR-5 --json
-pingcode work-item get 1bAqLmTG --json
-pingcode work-item get https://example.pingcode.com/pjm/work_items/1bAqLmTG --json
-
-pingcode work-item create --project "Mobile App" --type task --title "Fix login retry" --dry-run --json
-pingcode work-item create --project "Mobile App" --type task --title "Fix login retry" \
-  --assignee wangxiao --priority High --end-at 2026-02-15 --json
-
-pingcode work-item update SCR-5 --title "Fix login retry (v2)" --json
-pingcode work-item update SCR-5 --type task --state "In Progress" --json
-pingcode work-item transition SCR-5 --type task --state Done --json
-pingcode work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
+pingcode settings users --keywords wang --json
 ```
 
-`work-item get` accepts an id, a `short_id`, an identifier such as `SCR-5`, or a pasted work-item URL.
+The organisation directory (`/v1/directory/users`, scope `pcp:read:global:team`) belongs to no
+business module, which is why it sits here rather than under `product` or `project`. It is the
+candidate set for pjm's `--assignee`; ship's `--assignee` uses `product meta members` instead.
+
+### Work items — `project work-item`
+
+```bash
+pingcode project work-item list --project "Mobile App" --json
+pingcode project work-item list --project "Mobile App" --type task --state "In Progress" --json
+pingcode project work-item list --project "Mobile App" --assignee wangxiao --page-size 20 --page 0
+pingcode project work-item list --project "Mobile App" --all --limit 200 --json
+
+pingcode project work-item get SCR-5 --json
+pingcode project work-item get 1bAqLmTG --json
+pingcode project work-item get https://example.pingcode.com/pjm/work_items/1bAqLmTG --json
+
+pingcode project work-item create --project "Mobile App" --type task --title "Fix login retry" --dry-run --json
+pingcode project work-item create --project "Mobile App" --type task --title "Fix login retry" \
+  --assignee wangxiao --priority High --end-at 2026-02-15 --json
+
+pingcode project work-item update SCR-5 --title "Fix login retry (v2)" --json
+pingcode project work-item update SCR-5 --type task --state "In Progress" --json
+pingcode project work-item transition SCR-5 --type task --state Done --json
+pingcode project work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
+```
+
+`project work-item get` accepts an id, a `short_id`, an identifier such as `SCR-5`, or a pasted work-item URL.
 `update` and `transition` accept the same forms and resolve them to a real id first.
 
 On `update` and `transition`, `--type` is **only** a lookup aid: it resolves `--state <name>` and lets
 the CLI list the candidate states if the server rejects the change. It is never written to the work
 item — there is no patchable type field.
 
-### Ship: products
+### Products — 产品管理
 
 A **product** (产品) is ship's parent scope, the way a project is pjm's. Resolve it first: every other
 ship id is scoped to it.
@@ -196,74 +216,74 @@ pingcode product get SLC --json          # name, identifier such as SLC, or id
 matches it client-side over the full list. There is no `product create`/`update`/`delete`: ship has no
 product DELETE at all, and `PATCH` only edits three cosmetic fields.
 
-### Ship: product-scoped metadata — mandatory before writing
+### `product meta` — mandatory before writing an idea or ticket
 
 ```bash
-pingcode meta idea-states       --product SLC --json
-pingcode meta idea-priorities   --product SLC --json
-pingcode meta idea-suites       --product SLC --json
-pingcode meta idea-properties   --product SLC --json
-pingcode meta product-members   --product SLC --json
-pingcode meta ticket-states     --product SLC --json
-pingcode meta ticket-priorities --product SLC --json
-pingcode meta ticket-types      --product SLC --json
-pingcode meta ticket-channels   --product SLC --json
-pingcode meta ticket-properties --product SLC --json
+pingcode product meta idea-states       --product SLC --json
+pingcode product meta idea-priorities   --product SLC --json
+pingcode product meta idea-suites       --product SLC --json
+pingcode product meta idea-properties   --product SLC --json
+pingcode product meta members          --product SLC --json
+pingcode product meta ticket-states     --product SLC --json
+pingcode product meta ticket-priorities --product SLC --json
+pingcode product meta ticket-types      --product SLC --json
+pingcode product meta ticket-channels   --product SLC --json
+pingcode product meta ticket-properties --product SLC --json
 ```
 
-`meta product-members` is the **only** valid source of `--assignee` values for ideas and tickets —
+`product meta members` is the **only** valid source of `--assignee` values for ideas and tickets —
 the organisation directory is not, because a user who is not a member of the product cannot be
-assigned. `meta idea-properties` / `meta ticket-properties` are the only source of `--set` keys and,
+assigned. `product meta idea-properties` / `product meta ticket-properties` are the only source of `--set` keys and,
 for select-typed properties, of the option ids you must send instead of the display label.
 
-### Ship: requirements (需求 / idea)
+### Requirements 需求 — `product idea`
 
 ```bash
-pingcode idea list --product SLC --json
-pingcode idea list --product SLC --state 待评审 --assignee zhangsan --json
-pingcode idea list --product SLC --keywords sso --page-size 20 --page 0 --json
-pingcode idea list --product SLC --all --limit 200 --json
+pingcode product idea list --product SLC --json
+pingcode product idea list --product SLC --state 待评审 --assignee zhangsan --json
+pingcode product idea list --product SLC --keywords sso --page-size 20 --page 0 --json
+pingcode product idea list --product SLC --all --limit 200 --json
 
-pingcode idea get SLC-1 --json                # identifier, id, or a pasted idea URL
+pingcode product idea get SLC-1 --json                # identifier, id, or a pasted idea URL
 
-pingcode idea create --product SLC --title "Single sign-on" --dry-run --json
-pingcode idea create --product SLC --title "Single sign-on" \
+pingcode product idea create --product SLC --title "Single sign-on" --dry-run --json
+pingcode product idea create --product SLC --title "Single sign-on" \
   --assignee zhangsan --priority P1 --suite "客户端 / 登录" --json
 
-pingcode idea update SLC-1 --title "Single sign-on (v2)" --json
-pingcode idea update SLC-1 --state 开发中 --json
-pingcode idea update SLC-1 --set 需求类型=5cb7e763fda1ce4ca0010002 --json
+pingcode product idea update SLC-1 --title "Single sign-on (v2)" --json
+pingcode product idea update SLC-1 --state 开发中 --json
+pingcode product idea update SLC-1 --set 需求类型=5cb7e763fda1ce4ca0010002 --json
 ```
 
-`idea list` is `POST /v1/ship/ideas/search` — the plain list endpoint cannot filter by assignee, date
+`product idea list` is `POST /v1/ship/ideas/search` — the plain list endpoint cannot filter by assignee, date
 or custom property, so the CLI never uses it. Note there is **no `--type`** anywhere on `idea`: ship
 states are scoped to the product alone, which `--product` (or, on `update`, the idea itself) already
 supplies.
 
-### Ship: tickets (工单)
+### Tickets 工单 — `product ticket`
 
 ```bash
-pingcode ticket list --product SLC --json
-pingcode ticket list --product SLC --type 故障 --state 待处理 --json
-pingcode ticket list --product SLC --channel 邮件 --all --limit 200 --json
+pingcode product ticket list --product SLC --json
+pingcode product ticket list --product SLC --type 故障 --state 待处理 --json
+pingcode product ticket list --product SLC --channel 邮件 --all --limit 200 --json
 
-pingcode ticket get SLC-7 --json
+pingcode product ticket get SLC-7 --json
 
-pingcode ticket create --product SLC --type 故障 --title "Cannot log in" --dry-run --json
-pingcode ticket create --product SLC --type 故障 --title "Cannot log in" \
+pingcode product ticket create --product SLC --type 故障 --title "Cannot log in" --dry-run --json
+pingcode product ticket create --product SLC --type 故障 --title "Cannot log in" \
   --assignee zhangsan --priority P1 --channel 邮件 --json
 
-pingcode ticket update SLC-7 --title "Cannot log in (iOS)" --json
-pingcode ticket transition SLC-7 --state 处理中 --json
+pingcode product ticket update SLC-7 --title "Cannot log in (iOS)" --json
+pingcode product ticket transition SLC-7 --state 处理中 --json
 ```
 
-`--type` is **required** on `ticket create` — `type_id` is a required body field, which is the one
-place ship demands a lookup (`pingcode meta ticket-types --product SLC`) before a write can even be
+`--type` is **required** on `product ticket create` — `type_id` is a required body field, which is the one
+place ship demands a lookup (`pingcode product meta ticket-types --product SLC`) before a write can even be
 attempted. `--channel` can only be set at create time; there is no way to change it afterwards.
 
 ## 4. Rules that will bite you
 
-1. **Resolve ids per project.** Run `pingcode meta types` / `meta states` for the project you are
+1. **Resolve ids per project.** Run `pingcode project meta types` / `project meta states` for the project you are
    writing to before `create`. An id from another project is rejected or, worse, silently wrong.
 2. **`--state <name>` always requires `--type`.** States live in a `(project, work item type)` pair,
    and the API does **not** report a work item's type, so the CLI cannot infer it — not on `list`, not
@@ -300,24 +320,24 @@ almost every difference is a trap.
    the assignable people are **all product-scoped**. They frequently *look* org-global — the same
    priority id `P0` appears under several products — but the API requires `product_id` on every
    lookup, so never carry an id from one product to another.
-2. **`--assignee` must be a product member.** `pingcode meta product-members --product <p>` is the
-   only valid candidate set; the organisation directory (`meta users`) is not, and a non-member is
+2. **`--assignee` must be a product member.** `pingcode product meta members --product <p>` is the
+   only valid candidate set; the organisation directory (`settings users`) is not, and a non-member is
    rejected.
 3. **`--state <name>` needs no companion flag here.** Unlike pjm, ship states hang off the product
    alone, so there is no `--type` on `idea` at all, and `--type` on `ticket` is a real field being
    written, not a lookup aid. `--state` and `--state-id` remain mutually exclusive.
-4. **Reads go through `search`.** `idea list` and `ticket list` are `POST …/search`. The plain list
+4. **Reads go through `search`.** `product idea list` and `product ticket list` are `POST …/search`. The plain list
    endpoints exist but cannot filter by assignee, date or custom property, so the CLI never uses
    them. Search takes **one operator per field and has no `$and`/`$or`**; multiple filters are
    AND-ed. There is still no sorting anywhere.
 5. **No state change is refused locally — the server decides, and a ticket refusal is explained.**
-   - `pingcode ticket transition` and `ticket update --state` send the PATCH. If the server refuses
+   - `pingcode product ticket transition` and `product ticket update --state` send the PATCH. If the server refuses
      it, the error `message` names the product's configured states, the current state and — when
      the state plan can be read — **the states reachable from the current one**. Read it from
      `message`: `--json` errors are `{kind,message,code,exit}` and carry no hint.
-   - Want to know before you write? `ticket transition <t> --state <s> --dry-run` prints the
+   - Want to know before you write? `product ticket transition <t> --state <s> --dry-run` prints the
      reachable set on stderr and sends nothing.
-   - `pingcode idea update --state` gets the configured states on rejection but never a reachable
+   - `pingcode product idea update --state` gets the configured states on rejection but never a reachable
      set: ship publishes no idea state-flow endpoint at all.
    - The CLI does **not** refuse a transition on its own (the one exception: moving a ticket to the
      state it is already in, which is exit 2). The server refuses atomically with no state change,
@@ -326,7 +346,7 @@ almost every difference is a trap.
 6. **`--set key=value` sends the value verbatim, and select properties want option ids.** For a
    `select`-typed property the API expects the option's `_id`, not the label you see in the UI —
    the docs' own examples only show text properties, which is the trap. Run
-   `pingcode meta idea-properties --product <p>` (or `ticket-properties`): it prints each key and
+   `pingcode product meta idea-properties --product <p>` (or `ticket-properties`): it prints each key and
    its `label=option_id` pairs. `properties` **replaces**, it never merges.
 7. **Nothing in ship can be deleted.** There is no DELETE for products, ideas or tickets, and
    `is_archived` / `is_deleted` are read-only. A test artifact you create is permanent — mark it in
@@ -334,7 +354,7 @@ almost every difference is a trap.
 8. **Ship identifiers are not lookup keys.** `SLC-1` cannot be fetched directly; the CLI resolves it
    through `search` and then filters to an exact identifier match. A pasted URL ends in a `short_id`,
    which no endpoint accepts either, so prefer an id or an identifier over a URL.
-9. **`--suite` filtering on `idea list` is undocumented.** The API lists `suite.id` as neither
+9. **`--suite` filtering on `product idea list` is undocumented.** The API lists `suite.id` as neither
    filterable nor unfilterable, so an empty result proves nothing. The CLI warns when you use it.
 10. **Tags cannot be set through the API** on ideas or tickets, and `submitter_id` on a ticket is
     silently ignored under a client-credentials token — the ticket is attributed to the token owner
@@ -347,14 +367,14 @@ almost every difference is a trap.
 2. Resolve the parent scope: `pingcode project list --json` for work items, or
    `pingcode product list --json` for ideas and tickets.
 3. Resolve ids:
-   - pjm: `pingcode meta types --project <p> --json`, then
-     `meta states --project <p> --type <t> --json`. Keep the type around: you need it again for
+   - pjm: `pingcode project meta types --project <p> --json`, then
+     `project meta states --project <p> --type <t> --json`. Keep the type around: you need it again for
      `--state <name>` on any write.
-   - ship: `pingcode meta idea-states --product <p> --json` (or the `ticket-*` equivalents), plus
-     `meta product-members --product <p> --json` before setting an assignee, and
-     `meta ticket-types --product <p> --json` before creating a ticket — `--type` is required there.
-4. Read before writing: `pingcode work-item get <ref> --json`, `pingcode idea get <ref> --json` or
-   `pingcode ticket get <ref> --json`.
+   - ship: `pingcode product meta idea-states --product <p> --json` (or the `ticket-*` equivalents), plus
+     `product meta members --product <p> --json` before setting an assignee, and
+     `product meta ticket-types --product <p> --json` before creating a ticket — `--type` is required there.
+4. Read before writing: `pingcode project work-item get <ref> --json`, `pingcode product idea get <ref> --json` or
+   `pingcode product ticket get <ref> --json`.
 5. For any mutation, run it with `--dry-run --json` first, show the plan, get confirmation, then run
    it again without `--dry-run`. Remember that **nothing in ship can be deleted**, so say so before
    creating anything.

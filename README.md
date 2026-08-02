@@ -52,19 +52,19 @@ The CLI authenticates as an **application**, not as a user, using the OAuth
    | Scope | Needed for |
    |---|---|
    | `pcp:read:pjm:project` | `project list` / `project get`, and every project-name lookup |
-   | `pcp:read:pjm:workitem` | `work-item list` / `get`, `meta types` / `states` / `priorities` |
-   | `pcp:write:pjm:workitem` | `work-item create` / `update` / `transition` |
-   | `pcp:read:global:team` | `meta users` |
-   | `pcp:read:pjm:sprint` | optional — only `meta sprints` |
-   | `pcp:read:ship:product` | `product list` / `get`, `meta product-members`, and every product-name lookup |
-   | `pcp:read:ship:idea` | `idea list` / `get`, `meta idea-states` / `idea-priorities` / `idea-suites` / `idea-properties` |
-   | `pcp:write:ship:idea` | `idea create` / `update` |
-   | `pcp:read:ship:ticket` | `ticket list` / `get`, `meta ticket-states` / `ticket-priorities` / `ticket-types` / `ticket-channels` / `ticket-properties` |
-   | `pcp:write:ship:ticket` | `ticket create` / `update` / `transition` |
-   | `pcp:read:ship:configuration` | optional — only the state-plan pre-check in `ticket transition`; without it the CLI warns and lets the server judge |
+   | `pcp:read:pjm:workitem` | `project work-item list` / `get`, `project meta types` / `states` / `priorities` |
+   | `pcp:write:pjm:workitem` | `project work-item create` / `update` / `transition` |
+   | `pcp:read:global:team` | `settings users` |
+   | `pcp:read:pjm:sprint` | optional — only `project meta sprints` |
+   | `pcp:read:ship:product` | `product list` / `get`, `product meta members`, and every product-name lookup |
+   | `pcp:read:ship:idea` | `product idea list` / `get`, `product meta idea-states` / `idea-priorities` / `idea-suites` / `idea-properties` |
+   | `pcp:write:ship:idea` | `product idea create` / `update` |
+   | `pcp:read:ship:ticket` | `product ticket list` / `get`, `product meta ticket-states` / `ticket-priorities` / `ticket-types` / `ticket-channels` / `ticket-properties` |
+   | `pcp:write:ship:ticket` | `product ticket create` / `update` / `transition` |
+   | `pcp:read:ship:configuration` | optional — only the state-plan pre-check in `product ticket transition`; without it the CLI warns and lets the server judge |
 
    Every ship command begins by resolving a product name, so `pcp:read:ship:product` is required
-   even for a pure `idea list`. The product-scoped metadata endpoints (`/v1/ship/idea/*`,
+   even for a pure `product idea list`. The product-scoped metadata endpoints (`/v1/ship/idea/*`,
    `/v1/ship/ticket/*`) sit under the ordinary read scopes above, **not** under `configuration`.
 
 4. Copy the `client_id` and `client_secret`.
@@ -103,49 +103,54 @@ With a TTY attached, `auth login` prompts for anything missing.
 
 ## Command surface
 
+The top level mirrors PingCode's own GUI modules: each business module owns its resources *and* its
+id lookups, so one `--help` shows a module's whole surface.
+
 ```
 pingcode auth      login | status | logout
 
-# pjm (敏捷项目管理)
-pingcode project   list | get <project>
-pingcode work-item list | get <ref> | create | update <ref> | transition <ref>
-
 # ship (产品管理)
 pingcode product   list | get <product>
-pingcode idea      list | get <ref> | create | update <ref>
-pingcode ticket    list | get <ref> | create | update <ref> | transition <ref>
+pingcode product idea    list | get <ref> | create | update <ref>
+pingcode product ticket  list | get <ref> | create | update <ref> | transition <ref>
+pingcode product meta    idea-states | idea-priorities | idea-suites | idea-properties | members
+                         ticket-states | ticket-priorities | ticket-types | ticket-channels
+                         ticket-properties
 
-pingcode meta      types | states | priorities | sprints | users
-                   idea-states | idea-priorities | idea-suites | idea-properties
-                   product-members
-                   ticket-states | ticket-priorities | ticket-types | ticket-channels | ticket-properties
+# pjm (敏捷项目管理)
+pingcode project   list | get <project>
+pingcode project work-item  list | get <ref> | create | update <ref> | transition <ref>
+pingcode project meta       types | states | priorities | sprints
+
+# 后台设置
+pingcode settings  users
 ```
 
 Global flags — valid **before or after** the subcommand: `--host <url>`, `--json`, `--dry-run`,
 `--no-cache`, `--verbose`, `--version`, `--help`. `--help` works at every level
-(`pingcode work-item update --help`).
+(`pingcode project work-item update --help`).
 
 ```bash
 pingcode project list --json
 pingcode project get "Mobile App" --json
 
 # metadata first — ids are project-scoped
-pingcode meta types      --project "Mobile App" --json
-pingcode meta states     --project "Mobile App" --type task --json
-pingcode meta priorities --project "Mobile App" --json
-pingcode meta users      --keywords wang --json
+pingcode project meta types      --project "Mobile App" --json
+pingcode project meta states     --project "Mobile App" --type task --json
+pingcode project meta priorities --project "Mobile App" --json
+pingcode settings users      --keywords wang --json
 
-pingcode work-item list --project "Mobile App" --type task --state "In Progress" --json
-pingcode work-item list --project "Mobile App" --all --limit 200 --json
-pingcode work-item get SCR-5 --json          # also: id, short_id, or a pasted work-item URL
+pingcode project work-item list --project "Mobile App" --type task --state "In Progress" --json
+pingcode project work-item list --project "Mobile App" --all --limit 200 --json
+pingcode project work-item get SCR-5 --json          # also: id, short_id, or a pasted work-item URL
 
-pingcode work-item create --project "Mobile App" --type task --title "Fix login retry" --dry-run --json
-pingcode work-item create --project "Mobile App" --type task --title "Fix login retry" \
+pingcode project work-item create --project "Mobile App" --type task --title "Fix login retry" --dry-run --json
+pingcode project work-item create --project "Mobile App" --type task --title "Fix login retry" \
   --assignee wangxiao --priority High --end-at 2026-02-15 --json
 
-pingcode work-item update SCR-5 --title "Fix login retry (v2)" --json
-pingcode work-item transition SCR-5 --type task --state Done --json
-pingcode work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
+pingcode project work-item update SCR-5 --title "Fix login retry (v2)" --json
+pingcode project work-item transition SCR-5 --type task --state Done --json
+pingcode project work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
 ```
 
 ```bash
@@ -153,18 +158,18 @@ pingcode work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
 pingcode product list --json
 pingcode product get SLC --json
 
-pingcode meta idea-states     --product SLC --json
-pingcode meta product-members --product SLC --json     # the only valid --assignee values
-pingcode meta ticket-types    --product SLC --json     # required to create a ticket
+pingcode product meta idea-states     --product SLC --json
+pingcode product meta members --product SLC --json     # the only valid --assignee values
+pingcode product meta ticket-types    --product SLC --json     # required to create a ticket
 
-pingcode idea list --product SLC --state 待评审 --assignee zhangsan --json
-pingcode idea get SLC-1 --json
-pingcode idea create --product SLC --title "Single sign-on" --dry-run --json
-pingcode idea update SLC-1 --state 开发中 --json
+pingcode product idea list --product SLC --state 待评审 --assignee zhangsan --json
+pingcode product idea get SLC-1 --json
+pingcode product idea create --product SLC --title "Single sign-on" --dry-run --json
+pingcode product idea update SLC-1 --state 开发中 --json
 
-pingcode ticket list --product SLC --type 故障 --json
-pingcode ticket create --product SLC --type 故障 --title "Cannot log in" --json
-pingcode ticket transition SLC-7 --state 处理中 --json
+pingcode product ticket list --product SLC --type 故障 --json
+pingcode product ticket create --product SLC --type 故障 --title "Cannot log in" --json
+pingcode product ticket transition SLC-7 --state 处理中 --json
 ```
 
 `--dry-run` on a mutating command prints the request it *would* have sent and exits 0 without
@@ -177,10 +182,10 @@ sending it. Read requests still run, so ids are genuinely resolved first.
 - **stdout carries JSON only.** Tables, logs, warnings, dry-run notes and errors go to stderr.
 - Timestamps stay raw **unix seconds** in `--json`; human mode renders local time.
 - Three list shapes, by command family:
-  - one page of `project list` / `work-item list` / `product list` / `idea list` / `ticket list`
+  - one page of `project list` / `project work-item list` / `product list` / `product idea list` / `product ticket list`
     → `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
   - any list with `--all` → `{"values":[…],"count":42,"all":true}`
-  - every `pingcode meta …` lookup → `{"values":[…],"count":20}`
+  - every `meta` lookup (`product meta …`, `project meta …`, `settings users`) → `{"values":[…],"count":20}`
 - Single-resource commands (`get`, `create`, `update`, `transition`) print the resource object.
 - `--dry-run` prints `{"dry_run":true,"request":{"method":…,"url":…,"headers":…,"body":…}}` — with
   `Authorization` and any `client_secret` masked.
@@ -221,7 +226,7 @@ state plan, so mapping them to `not_found` would be a lie — they stay on exit 
 
 ## Caveats that matter in practice
 
-- **Ids are project-scoped — run `pingcode meta …` first.** The same state name has a different id
+- **Ids are project-scoped — run the module`s `meta` lookups first.** The same state name has a different id
   in another project. System work-item types are bare slugs (`task`, `story`, `bug`); custom types,
   states and priorities are 24-hex ids; users are 32-hex. Never reuse an id across projects.
 - **`--state <name>` always needs `--type`.** States live in a `(project, work item type)` pair and
@@ -258,17 +263,17 @@ Everything above still applies. These are the differences that will cost you tim
   several of them look org-global (the same `P0` priority id appears under multiple products). The
   API demands `product_id` on every lookup; never reuse an id across products.
 - **`--assignee` resolves against product members**, not `/v1/directory/users`. A user who is not a
-  member of the product cannot be assigned, so `meta product-members` is the candidate set.
-- **`idea list` and `ticket list` are `POST …/search`.** The plain list endpoints cannot filter by
+  member of the product cannot be assigned, so `product meta members` is the candidate set.
+- **`product idea list` and `product ticket list` are `POST …/search`.** The plain list endpoints cannot filter by
   assignee, date or custom property. The DSL allows **one operator per field and no `$and`/`$or`**;
   several filters are AND-ed. Body pagination puts the cursor in `payload.page_index`, and the CLI
   applies the same `--page` / `--page-size` (≤100) / `--all` / `--limit` semantics as elsewhere.
 - **State changes are decided by the server; ticket refusals are explained.** Ship publishes the
   legal transitions of a ticket state plan, and the CLI reads them — but only to *explain* a
-  refusal, never to pre-empt one. `ticket transition` sends the PATCH; if the server refuses, the
+  refusal, never to pre-empt one. `product ticket transition` sends the PATCH; if the server refuses, the
   error `message` carries the configured states, the current state and the states reachable from
-  it. `ticket transition --dry-run` previews that reachable set on stderr without writing. Ideas
-  have **no state-flow endpoint at all**, so `idea update --state` gets the configured states on
+  it. `product ticket transition --dry-run` previews that reachable set on stderr without writing. Ideas
+  have **no state-flow endpoint at all**, so `product idea update --state` gets the configured states on
   rejection and nothing more. The only local refusal is moving a ticket to the state it is already
   in. Rationale: the server refuses atomically, so nothing is saved by checking first, while a
   mis-identified plan would block a legal move outright (`s7-smoke.md` F5).
@@ -278,7 +283,7 @@ Everything above still applies. These are the differences that will cost you tim
   there is exactly one — which live is the common case. Cached per product. Since the answer only
   feeds an explanation, a wrong guess costs a wrong suggestion, never a blocked write.
 - **`--set key=value` sends the value verbatim, and select-type properties want the option `_id`,
-  not its label.** `meta idea-properties` / `meta ticket-properties` print both, and are also the
+  not its label.** `product meta idea-properties` / `product meta ticket-properties` print both, and are also the
   authoritative list of writable keys. `properties` replaces wholesale.
 - **Nothing in ship can be deleted.** There is no DELETE for products, ideas or tickets, and
   `is_archived` / `is_deleted` are read-only. Anything you create during a test is permanent —
@@ -286,7 +291,7 @@ Everything above still applies. These are the differences that will cost you tim
 - **Identifiers and `short_id`s are not lookup keys.** `SLC-1` is resolved through `search` plus an
   exact client-side match; a pasted URL ends in a `short_id` that no endpoint accepts, so prefer an
   id or an identifier.
-- **`--suite` filtering on `idea list` is undocumented** — the API lists `suite.id` as neither
+- **`--suite` filtering on `product idea list` is undocumented** — the API lists `suite.id` as neither
   filterable nor unfilterable, so an empty result proves nothing. The CLI warns when you use it.
 - **`ticket.channel` is an object or the bare string `"internal"`**, and `--channel` can only be set
   at create time. Tags cannot be written at all, and a ticket's `submitter_id` is silently ignored

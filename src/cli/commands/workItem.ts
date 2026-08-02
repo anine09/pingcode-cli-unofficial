@@ -50,7 +50,7 @@ import {
 } from './common';
 
 /**
- * `pingcode work-item list|get|create|update|transition`.
+ * `pingcode project work-item list|get|create|update|transition`.
  *
  * Three rules from the design shape this file:
  *  - **replace, not merge**: only fields given on the command line are sent, and
@@ -116,8 +116,8 @@ export const WORK_ITEM_COLUMNS: Column<WorkItem>[] = [
   { header: 'END', value: (item) => timestampCell(item.end_at) },
 ];
 
-export function registerWorkItemCommands(program: Command): void {
-  const group = program
+export function registerWorkItemCommands(parent: Command): void {
+  const group = parent
     .command('work-item')
     .description('work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)');
 
@@ -155,7 +155,7 @@ export function registerWorkItemCommands(program: Command): void {
     addStateOptions(
       group
         .command('create')
-        .description('create a work item (ids are project-scoped: run `pingcode meta` first)')
+        .description('create a work item (ids are project-scoped: run `pingcode project meta` first)')
         .requiredOption('--project <name|id>', 'project name or id')
         .requiredOption('--type <name|id>', 'work-item type, e.g. task / story / bug')
         .requiredOption('--title <text>', 'title')
@@ -214,7 +214,7 @@ export function registerWorkItemCommands(program: Command): void {
       (flags.stateId === undefined || flags.stateId.trim() === '')
     ) {
       throw new UsageError('transition requires --state <name> or --state-id <id>', {
-        hint: 'list the states of the item\'s type with `pingcode meta states --project <p> --type <t>`',
+        hint: 'list the states of the item\'s type with `pingcode project meta states --project <p> --type <t>`',
       });
     }
     await runUpdate(target, flags, command);

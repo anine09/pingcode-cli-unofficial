@@ -198,7 +198,7 @@ describe('product commands', () => {
 describe('idea list', () => {
   it('reads through POST …/search and never touches GET /v1/ship/ideas', async () => {
     const run = await runCli(
-      ['idea', 'list', '--product', 'SLC', '--json'],
+      ['product', 'idea', 'list', '--product', 'SLC', '--json'],
       [productsPage, ideasPage],
     );
     expect(run.exit).toBe(0);
@@ -211,6 +211,7 @@ describe('idea list', () => {
   it('builds a product+state+assignee filter with the documented operator', async () => {
     const run = await runCli(
       [
+        'product',
         'idea',
         'list',
         '--product',
@@ -237,14 +238,14 @@ describe('idea list', () => {
   });
 
   it('keeps timestamps as raw unix seconds under --json', async () => {
-    const run = await runCli(['idea', 'list', '--product', 'SLC', '--json'], [productsPage, ideasPage]);
+    const run = await runCli(['product', 'idea', 'list', '--product', 'SLC', '--json'], [productsPage, ideasPage]);
     const payload = parseStdout(run) as { values: Array<{ created_at: number }> };
     expect(payload.values[0]?.created_at).toBe(1730000000);
   });
 
   it('--all switches the envelope to {values,count,all}', async () => {
     const run = await runCli(
-      ['idea', 'list', '--product', 'SLC', '--all', '--json'],
+      ['product', 'idea', 'list', '--product', 'SLC', '--all', '--json'],
       [productsPage, ideasPage],
     );
     expect(parseStdout(run)).toMatchObject({ count: 1, all: true });
@@ -259,7 +260,7 @@ describe('idea list', () => {
         values: [{ id: 'su1', name: '登录', type: 'module' }],
       });
     const run = await runCli(
-      ['idea', 'list', '--product', 'SLC', '--suite', '登录', '--json'],
+      ['product', 'idea', 'list', '--product', 'SLC', '--suite', '登录', '--json'],
       [productsPage, suitesPage, ideasPage],
     );
     expect(run.stderr).toContain('undocumented');
@@ -268,7 +269,7 @@ describe('idea list', () => {
 
   it('rejects --state together with --state-id before any request is sent', async () => {
     const run = await runCli(
-      ['idea', 'list', '--product', 'SLC', '--state', 'x', '--state-id', 'y', '--json'],
+      ['product', 'idea', 'list', '--product', 'SLC', '--state', 'x', '--state-id', 'y', '--json'],
       [productsPage],
     );
     expect(run.exit).toBe(2);
@@ -279,7 +280,7 @@ describe('idea list', () => {
   });
 
   it('rejects a page size above the API cap', async () => {
-    const run = await runCli(['idea', 'list', '--product', 'SLC', '--page-size', '101'], []);
+    const run = await runCli(['product', 'idea', 'list', '--product', 'SLC', '--page-size', '101'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
   });
@@ -291,7 +292,7 @@ describe('idea create', () => {
 
   it('sends product_id and title only, when nothing else was given', async () => {
     const run = await runCli(
-      ['idea', 'create', '--product', 'SLC', '--title', 'hello', '--json'],
+      ['product', 'idea', 'create', '--product', 'SLC', '--title', 'hello', '--json'],
       [productsPage, created],
     );
     expect(run.exit).toBe(0);
@@ -302,7 +303,7 @@ describe('idea create', () => {
 
   it('--dry-run prints the plan on stdout and sends zero writes (Gate G3)', async () => {
     const run = await runCli(
-      ['idea', 'create', '--product', 'SLC', '--title', 'hello', '--dry-run', '--json'],
+      ['product', 'idea', 'create', '--product', 'SLC', '--title', 'hello', '--dry-run', '--json'],
       [productsPage],
     );
     expect(run.exit).toBe(0);
@@ -318,7 +319,7 @@ describe('idea create', () => {
 
   it('resolves an assignee against the product members, not the directory', async () => {
     const run = await runCli(
-      ['idea', 'create', '--product', 'SLC', '--title', 'hello', '--assignee', 'zhangsan', '--dry-run', '--json'],
+      ['product', 'idea', 'create', '--product', 'SLC', '--title', 'hello', '--assignee', 'zhangsan', '--dry-run', '--json'],
       [productsPage, membersPage],
     );
     expect(run.calls.some((call) => call.url.includes('/v1/directory/users'))).toBe(false);
@@ -343,7 +344,7 @@ describe('idea create', () => {
         ],
       });
     const run = await runCli(
-      ['idea', 'create', '--product', 'SLC', '--title', 'hello', '--set', '需求类型=opt-1', '--dry-run', '--json'],
+      ['product', 'idea', 'create', '--product', 'SLC', '--title', 'hello', '--set', '需求类型=opt-1', '--dry-run', '--json'],
       [productsPage, propertiesPage],
     );
     const plan = parseStdout(run) as { request: { body: { properties: Record<string, unknown> } } };
@@ -352,7 +353,7 @@ describe('idea create', () => {
 
   it('rejects a malformed --set before sending anything', async () => {
     const run = await runCli(
-      ['idea', 'create', '--product', 'SLC', '--title', 'hello', '--set', 'oops', '--json'],
+      ['product', 'idea', 'create', '--product', 'SLC', '--title', 'hello', '--set', 'oops', '--json'],
       [],
     );
     expect(run.exit).toBe(2);
@@ -361,7 +362,7 @@ describe('idea create', () => {
   });
 
   it('requires --title', async () => {
-    const run = await runCli(['idea', 'create', '--product', 'SLC', '--json'], []);
+    const run = await runCli(['product', 'idea', 'create', '--product', 'SLC', '--json'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
   });
@@ -379,7 +380,7 @@ describe('idea update', () => {
     });
 
   it('is exit 2 with no request when no field was given', async () => {
-    const run = await runCli(['idea', 'update', 'i1', '--json'], []);
+    const run = await runCli(['product', 'idea', 'update', 'i1', '--json'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
     expect(run.stderr).toContain('nothing to update');
@@ -387,7 +388,7 @@ describe('idea update', () => {
 
   it('sends only the fields passed', async () => {
     const run = await runCli(
-      ['idea', 'update', 'i1', '--title', 'new title', '--json'],
+      ['product', 'idea', 'update', 'i1', '--title', 'new title', '--json'],
       [ideaDetail, () => jsonResponse({ id: 'i1', title: 'new title', is_archived: 0 })],
     );
     expect(run.exit).toBe(0);
@@ -398,7 +399,7 @@ describe('idea update', () => {
 
   it('resolves --state against the product of the idea itself, with no --type anywhere', async () => {
     const run = await runCli(
-      ['idea', 'update', 'SLC-1', '--state', '开发中', '--dry-run', '--json'],
+      ['product', 'idea', 'update', 'SLC-1', '--state', '开发中', '--dry-run', '--json'],
       [
         () =>
           jsonResponse({
@@ -419,7 +420,7 @@ describe('idea update', () => {
 
   it('--state-id skips the lookup entirely', async () => {
     const run = await runCli(
-      ['idea', 'update', 'i1', '--state-id', 'st-anything', '--dry-run', '--json'],
+      ['product', 'idea', 'update', 'i1', '--state-id', 'st-anything', '--dry-run', '--json'],
       [ideaDetail],
     );
     const plan = parseStdout(run) as { request: { body: unknown } };
@@ -430,7 +431,7 @@ describe('idea update', () => {
 
   it('prints the product states on stderr when the server rejects a state change', async () => {
     const run = await runCli(
-      ['idea', 'update', 'i1', '--state-id', 'bogus', '--json'],
+      ['product', 'idea', 'update', 'i1', '--state-id', 'bogus', '--json'],
       [
         ideaDetail,
         () => jsonResponse({ code: '100303', message: '状态不存在' }, { status: 400 }),
@@ -466,7 +467,7 @@ describe('ticket commands', () => {
 
   it('list reads through POST …/search with a product+type filter', async () => {
     const run = await runCli(
-      ['ticket', 'list', '--product', 'SLC', '--type', '故障', '--json'],
+      ['product', 'ticket', 'list', '--product', 'SLC', '--type', '故障', '--json'],
       [
         productsPage,
         typesPage,
@@ -484,7 +485,7 @@ describe('ticket commands', () => {
 
   it('renders an internal ticket without choking on the string channel', async () => {
     const run = await runCli(
-      ['ticket', 'list', '--product', 'SLC'],
+      ['product', 'ticket', 'list', '--product', 'SLC'],
       [
         productsPage,
         () =>
@@ -506,14 +507,14 @@ describe('ticket commands', () => {
 
   it('create requires --type and sends it (PRD D12)', async () => {
     const missing = await runCli(
-      ['ticket', 'create', '--product', 'SLC', '--title', 'x', '--json'],
+      ['product', 'ticket', 'create', '--product', 'SLC', '--title', 'x', '--json'],
       [],
     );
     expect(missing.exit).toBe(2);
     expect(missing.calls).toHaveLength(0);
 
     const run = await runCli(
-      ['ticket', 'create', '--product', 'SLC', '--type', '故障', '--title', 'cannot log in', '--dry-run', '--json'],
+      ['product', 'ticket', 'create', '--product', 'SLC', '--type', '故障', '--title', 'cannot log in', '--dry-run', '--json'],
       [productsPage, typesPage],
     );
     const plan = parseStdout(run) as { request: { method: string; url: string; body: unknown } };
@@ -532,6 +533,7 @@ describe('ticket commands', () => {
       jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'ch1', name: '邮件' }] });
     const run = await runCli(
       [
+        'product',
         'ticket',
         'create',
         '--product',
@@ -552,7 +554,7 @@ describe('ticket commands', () => {
   });
 
   it('update with no fields is exit 2 and sends nothing', async () => {
-    const run = await runCli(['ticket', 'update', 't1', '--json'], []);
+    const run = await runCli(['product', 'ticket', 'update', 't1', '--json'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
     expect(run.stderr).toContain('nothing to update');
@@ -560,7 +562,7 @@ describe('ticket commands', () => {
 
   it('update sends only the fields passed', async () => {
     const run = await runCli(
-      ['ticket', 'update', 't1', '--title', 'renamed', '--json'],
+      ['product', 'ticket', 'update', 't1', '--title', 'renamed', '--json'],
       [ticketDetail, () => jsonResponse({ id: 't1', title: 'renamed', is_archived: 0 })],
     );
     expect(run.exit).toBe(0);
@@ -570,7 +572,7 @@ describe('ticket commands', () => {
   });
 
   it('transition without a state flag is exit 2 before any request', async () => {
-    const run = await runCli(['ticket', 'transition', 't1', '--json'], []);
+    const run = await runCli(['product', 'ticket', 'transition', 't1', '--json'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
     expect(run.stderr).toContain('--state');
@@ -578,7 +580,7 @@ describe('ticket commands', () => {
 
   it('get resolves an identifier through ticket search', async () => {
     const run = await runCli(
-      ['ticket', 'get', 'SLC-7', '--json'],
+      ['product', 'ticket', 'get', 'SLC-7', '--json'],
       [
         () =>
           jsonResponse({
@@ -657,7 +659,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
   it('sends a legal transition with no plan or flow lookup on the happy path', async () => {
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state', '处理中', '--json'],
+      ['product', 'ticket', 'transition', 't1', '--state', '处理中', '--json'],
       [
         ticketDetail,
         ticketStatesPage,
@@ -677,7 +679,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
   it('sends an illegal transition and enriches the server refusal with the reachable set', async () => {
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
+      ['product', 'ticket', 'transition', 't1', '--state', '已关闭', '--json'],
       [ticketDetail, ticketStatesPage, rejectState, ticketStatesPage, plansPage, flowsPage],
     );
     // the server refuses atomically, so exit is its call, not ours
@@ -696,7 +698,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
   it('still reports the refusal when the plan cannot be read', async () => {
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
+      ['product', 'ticket', 'transition', 't1', '--state', '已关闭', '--json'],
       [
         ticketDetail,
         ticketStatesPage,
@@ -716,7 +718,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
   it('sends exactly one PATCH when a cached state id is refused (S7b id-diff gate)', async () => {
     // Warm the resolver cache with a successful transition first…
     const warm = await runCli(
-      ['ticket', 'transition', 't1', '--state', '处理中', '--json'],
+      ['product', 'ticket', 'transition', 't1', '--state', '处理中', '--json'],
       [
         ticketDetail,
         ticketStatesPage,
@@ -727,7 +729,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
     // …so this run resolves 已关闭 from the cache and hits the retry path.
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state', '已关闭', '--json'],
+      ['product', 'ticket', 'transition', 't1', '--state', '已关闭', '--json'],
       [ticketDetail, rejectState, ticketStatesPage, ticketStatesPage, plansPage, flowsPage],
     );
     expect(run.exit).toBe(7);
@@ -739,7 +741,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
   it('--state-id goes straight to the PATCH: nothing validates the plan any more', async () => {
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state-id', 'ts-closed', '--json'],
+      ['product', 'ticket', 'transition', 't1', '--state-id', 'ts-closed', '--json'],
       [ticketDetail, () => jsonResponse({ id: 't1', state: { id: 'ts-closed' }, is_archived: 0 })],
     );
     expect(run.exit).toBe(0);
@@ -749,7 +751,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
   it('refuses a no-op transition to the current state — the one local refusal left', async () => {
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state-id', 'ts-pending', '--json'],
+      ['product', 'ticket', 'transition', 't1', '--state-id', 'ts-pending', '--json'],
       [ticketDetail],
     );
     expect(run.exit).toBe(2);
@@ -759,7 +761,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
   it('--dry-run previews the reachable states on stderr and writes nothing', async () => {
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state', '已关闭', '--json', '--dry-run'],
+      ['product', 'ticket', 'transition', 't1', '--state', '已关闭', '--json', '--dry-run'],
       [ticketDetail, plansPage, flowsPage, ticketStatesPage],
     );
     expect(run.exit).toBe(0);
@@ -782,7 +784,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
         is_archived: 0,
       });
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state-id', 'ts-doing', '--json', '--dry-run'],
+      ['product', 'ticket', 'transition', 't1', '--state-id', 'ts-doing', '--json', '--dry-run'],
       [closedTicket, plansPage, flowsPage],
     );
     expect(run.exit).toBe(0);
@@ -793,7 +795,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
   it('--dry-run says so plainly when the plan is unreadable, and still shows the plan', async () => {
     const run = await runCli(
-      ['ticket', 'transition', 't1', '--state-id', 'ts-closed', '--json', '--dry-run'],
+      ['product', 'ticket', 'transition', 't1', '--state-id', 'ts-closed', '--json', '--dry-run'],
       [ticketDetail, () => jsonResponse({ code: '100001', message: '无权限' }, { status: 403 })],
     );
     expect(run.exit).toBe(0);
@@ -803,7 +805,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
 
   it('treats ticket update --state exactly like transition', async () => {
     const run = await runCli(
-      ['ticket', 'update', 't1', '--state', '已关闭', '--json'],
+      ['product', 'ticket', 'update', 't1', '--state', '已关闭', '--json'],
       [ticketDetail, ticketStatesPage, rejectState, ticketStatesPage, plansPage, flowsPage],
     );
     expect(run.exit).toBe(7);
@@ -814,7 +816,7 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
   it('leaves idea update --state unenriched by any flow read: ship has no idea flow endpoint', async () => {
     // The surviving asymmetry: ideas cannot even be explained from a plan.
     const run = await runCli(
-      ['idea', 'update', 'i1', '--state-id', 'st-anything', '--json'],
+      ['product', 'idea', 'update', 'i1', '--state-id', 'st-anything', '--json'],
       [
         () => jsonResponse({ id: 'i1', product: { id: 'prod-1' }, state: { id: 'st-old' }, is_archived: 0 }),
         () => jsonResponse({ id: 'i1', is_archived: 0 }),
@@ -829,13 +831,13 @@ describe('ticket transitions are advisory, never refusing (Gate G3b, S7b)', () =
   });
 });
 
-describe('meta lookups', () => {
+describe('product meta lookups', () => {
   const cases: Array<[string, string]> = [
     ['idea-states', '/v1/ship/idea/states'],
     ['idea-priorities', '/v1/ship/idea/priorities'],
     ['idea-suites', '/v1/ship/idea/suites'],
     ['idea-properties', '/v1/ship/idea/properties'],
-    ['product-members', '/v1/ship/products/prod-1/members'],
+    ['members', '/v1/ship/products/prod-1/members'],
     ['ticket-states', '/v1/ship/ticket/states'],
     ['ticket-priorities', '/v1/ship/ticket/priorities'],
     ['ticket-types', '/v1/ship/ticket/types'],
@@ -844,9 +846,9 @@ describe('meta lookups', () => {
   ];
 
   for (const [name, expectedPath] of cases) {
-    it(`meta ${name} is product-scoped and emits {values,count}`, async () => {
+    it(`product meta ${name} is product-scoped and emits {values,count}`, async () => {
       const run = await runCli(
-        ['meta', name, '--product', 'SLC', '--json'],
+        ['product', 'meta', name, '--product', 'SLC', '--json'],
         [productsPage, () => jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'x', name: 'X' }] })],
       );
       expect(run.exit).toBe(0);
@@ -863,7 +865,7 @@ describe('meta lookups', () => {
   }
 
   it('requires --product', async () => {
-    const run = await runCli(['meta', 'idea-states', '--json'], []);
+    const run = await runCli(['product', 'meta', 'idea-states', '--json'], []);
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
   });
