@@ -290,6 +290,63 @@ const TABLE = {
     parent: 'testhub-library',
     hint: 'list the types configured for this library with `pingcode testhub meta plan-types --library <library>`',
   },
+
+  // ---- scm (源码管理): the parent is a hosting platform ------------------------
+  //
+  // Same substitution again — a project for pjm, a product for ship, a library for
+  // testhub, a **托管平台** for scm — with one thing worth stating because the URL
+  // hides it: `/v1/scm/products` is a *hosting platform*, not a ship product, so
+  // `scm-platform` and `ship-product` are different kinds over an identically-shaped
+  // path and must never share a cache entry. They do not: the kind is part of the
+  // cache key.
+
+  /**
+   * The bootstrap hop of the whole module: a repository, a platform user and (in
+   * S1b/S1c) a branch, PR or review id are all addressed *under* a platform, so
+   * nothing in scm resolves without this one first. No parent, therefore no parent
+   * in its cache key.
+   *
+   * The list is loaded whole rather than filtered server-side on purpose: `?name=`
+   * is an **exact, case-insensitive** match (live 2026-08-03), so it cannot answer
+   * "which platforms are there" — and an org has a handful of platforms, not
+   * thousands. Loading the list also means a failed lookup can print the real
+   * candidates.
+   */
+  'scm-platform': {
+    label: 'hosting platform',
+    path: ENDPOINTS.scmPlatforms,
+    hint:
+      'a hosting platform is 托管平台 (a GitHub/GitLab/SVN server record), never a ship product; ' +
+      'its name is unique per organisation — list them with `pingcode scm platform list`',
+  },
+
+  /**
+   * The platform id rides in the **path** here, so there is no `parentQuery`.
+   *
+   * `full_name` (`owner/name`) is an alias because it is the unique key: repository
+   * *names* collide freely inside one platform (a fork and its upstream, `.github`
+   * in two orgs), and when they do, this resolver reports the ambiguity and the
+   * `full_name` is what disambiguates it without looking up an id. Verified live
+   * 2026-08-03 on two repositories sharing a name: the ambiguity error lists both
+   * ids, and the `full_name` resolves each unambiguously.
+   *
+   * Note it is the *client* that filters: `GET …/repositories?name=` is silently
+   * ignored upstream (live 2026-08-03), so a server-side name filter is not an
+   * option even where one appears to exist.
+   *
+   * The label is `repo`, matching the command (`pingcode scm repo`) — and it also
+   * pluralises correctly in the engine's `"x" matches 2 ${label}s` message, which
+   * `repository` would not.
+   */
+  'scm-repo': {
+    label: 'repo',
+    path: ENDPOINTS.scmRepositories,
+    parent: 'scm-platform',
+    aliases: ['full_name'],
+    hint:
+      'repository names are unique only per platform, so pass the full_name (owner/name) or the id ' +
+      'when two collide — list them with `pingcode scm repo list --platform <platform>`',
+  },
 } as const;
 
 /**

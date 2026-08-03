@@ -96,6 +96,10 @@ export const resolveTestPlanType: ScopedResolver = scoped('testhub-plan-type');
  */
 export const resolveCaseImportantLevel: RootResolver = root('testhub-case-important-level');
 
+// scm (源码管理) — the parent is a hosting platform, **not** a ship product
+export const resolvePlatform: RootResolver = root('scm-platform');
+export const resolveRepository: ScopedResolver = scoped('scm-repo');
+
 export type ResolveStateOptions = {
   projectId: string;
   /** Required to resolve a **name**; states live in the type's state scheme. */

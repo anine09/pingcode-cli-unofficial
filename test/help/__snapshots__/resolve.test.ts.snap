@@ -51,6 +51,9 @@ Commands:
                                                           (/v1/testhub/libraries/{parent}/plans)
   testhub-plan-type [options] <name>                      plan type → id
                                                           (/v1/testhub/libraries/{parent}/plan_types)
+  scm-platform [options] <name>                           hosting platform → id (/v1/scm/products)
+  scm-repo [options] <name>                               repo → id
+                                                          (/v1/scm/products/{parent}/repositories)
   help [command]                                          display help for command
 
 Every lookup follows the same rules as the refined commands, because it is the same

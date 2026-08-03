@@ -484,6 +484,12 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100077': 'not_found',
       '100801': 'not_found',
       '100903': 'not_found',
+      // S1a: the three scm 托管平台 families, each naming the resource that is absent
+      // (08-02-full-api-coverage S1a smoke, 2026-08-03). Behaviour is asserted through
+      // the wrappers in `test/scm.test.ts`.
+      '100200': 'not_found',
+      '100202': 'not_found',
+      '100209': 'not_found',
     });
   });
 

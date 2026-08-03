@@ -229,4 +229,77 @@ export const ENDPOINTS = {
   activities: '/v1/activities',
   /** `GET` one activity record; needs the principal query. */
   activity: (activityId: string): string => `/v1/activities/${encodeURIComponent(activityId)}`,
+
+  // -------------------------------------------------------------------------
+  // scm (源码管理 / DevOps 数据集成) — research §3.12.1-3, live-verified 2026-08-03
+  // -------------------------------------------------------------------------
+  //
+  // Three warnings that apply to every path below.
+  //
+  //  1. **`/v1/scm/products` is a *hosting platform*, not a ship product.** The two
+  //     resources share a URL segment and nothing else: a ship product is 产品 in
+  //     产品管理, an scm "product" is 托管平台 — a GitHub/GitLab/SVN server record.
+  //     The CLI therefore calls it `scm platform`, and the resolver kind is
+  //     `scm-platform`, so the two can never be confused at a call site.
+  //  2. **The whole area is 企业令牌-only** ([S§3.12]): these are the write-back
+  //     integration endpoints a CI system uses, and `client_credentials` — which is
+  //     the only flow this CLI has — is exactly the token they want. Scopes are
+  //     `pcp:read:devops:code` / `pcp:write:devops:code`.
+  //  3. **`PUT` is deliberately absent here.** All three families document a fifth
+  //     verb (`PUT …/products/{id}`, `…/users/{id}`, `…/repositories/{id}`) that
+  //     replaces the whole record and blanks every field the caller omits. Design
+  //     D8.4 keeps every `PUT` out of the refined layer; they stay reachable as
+  //     `pingcode api PUT /v1/scm/products/<id>` and nowhere else.
+  //
+  // Live findings (2026-08-03, public cloud) that the docs do not state:
+  //
+  //  - `GET /v1/scm/products?name=` is an **exact, case-insensitive** filter, not a
+  //    fuzzy one: `name=github` returns the platform named `Github`, `name=git`
+  //    returns nothing. So it cannot stand in for a search, and name resolution
+  //    loads the (short) list and matches client-side instead.
+  //  - `GET …/repositories?name=` is **silently ignored** — only `full_name`
+  //    filters. Passing `name` returned all 38 repositories of the platform.
+  //    `scm repo list` therefore exposes `--full-name` and not `--name`.
+  //  - a repository's `owner_name` is an **upsert**: an unknown git username is
+  //    created as a platform user rather than rejected (200 + a fresh owner id).
+  //  - **unknown body fields are silently dropped**, not rejected: posting
+  //    `user_id` / `email` to `…/users` returned 200 and stored neither. So a
+  //    misspelled field name fails quietly, which is why the CLI sends only the
+  //    documented ones.
+  //  - Absence is answered with HTTP **400** and a per-resource code:
+  //    `100200` platform, `100202` repository, `100209` platform user — on `GET`
+  //    *and* on `PATCH*`. All three are in `ERROR_CODE_OVERRIDES` (exit 5).
+  //    A path segment that is not an ObjectId is a real `404` + `100002`
+  //    (`资源路径错误`) instead, which the status-first mapping already handles.
+  //  - Other codes seen and deliberately left on exit 7: `100003` (`type` is not a
+  //    valid enum value) and `100220` (`'product'已经存在`, a duplicate platform name).
+
+  /** 托管平台. `?name=` is an exact, case-insensitive filter (live 2026-08-03). */
+  scmPlatforms: '/v1/scm/products',
+  scmPlatform: (platformId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}`,
+
+  /**
+   * 托管平台用户 — a **git author identity**, not a PingCode member.
+   *
+   * The resource carries `name` / `display_name` / `html_url` / `avatar_url` and
+   * **no reference to a PingCode member** (live 2026-08-03: the response has no
+   * `user`, no `user_id`, no `email`, and posting those field names is accepted and
+   * ignored). Attribution works through the name string: a commit's
+   * `committer_name` and a branch's `sender_name` are matched against these records
+   * ([S§3.12.7]), which is why creating them is a prerequisite for S1b's write-back
+   * rather than optional configuration.
+   *
+   * `?name=` is an exact filter here too, and a name is unique per platform.
+   */
+  scmPlatformUsers: (platformId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/users`,
+  scmPlatformUser: (platformId: string, userId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/users/${encodeURIComponent(userId)}`,
+
+  /** 代码仓库. `full_name` (`owner/name`) is unique per platform; `name` is not. */
+  scmRepositories: (platformId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories`,
+  scmRepository: (platformId: string, repositoryId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}`,
 } as const;

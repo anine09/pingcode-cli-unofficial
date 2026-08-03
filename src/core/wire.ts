@@ -279,6 +279,29 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   '100077': 'not_found',
   '100801': 'not_found',
   '100903': 'not_found',
+  // S1a (08-02-full-api-coverage) scm smoke, 2026-08-03, live tenant. The three
+  // 托管平台 families each name the resource that is absent, all HTTP **400**, each
+  // observed with a syntactically valid but nonexistent 24-hex id on **both** `GET`
+  // and `PATCH` (so a write path exits 5 too, exactly like testhub's pre-read):
+  //   100200 "'product'资源不存在"     — GET/PATCH /v1/scm/products/{id}, and also when the
+  //                                    platform in the path of a child list is missing
+  //                                    (GET …/{id}/repositories)
+  //   100202 "'repository'资源不存在"  — GET/PATCH …/repositories/{id}
+  //   100209 "'user'资源不存在"        — GET/PATCH …/users/{id}
+  // Note "product" here is a 托管平台, not a ship product — different resource, and
+  // ship's own not-found codes (100725/100711) are unrelated rows above.
+  //
+  // Deliberately **not** mapped, from the same smoke:
+  //  - `100002` (`资源路径错误`) — returned with a real HTTP **404** when a path segment
+  //    is not an ObjectId (`/v1/scm/products/notanid`). The status-first branch already
+  //    makes that exit 5; adding a row would be redundant, not wrong.
+  //  - `100003` (`'type'不是有效的字符串(不是有效的枚举值)`) and `100220`
+  //    (`'product'已经存在`, a duplicate platform name) — input validation and a
+  //    uniqueness conflict. Neither is an absence, and calling a rejected enum value
+  //    "not found" would send an agent looking for a missing record.
+  '100200': 'not_found',
+  '100202': 'not_found',
+  '100209': 'not_found',
 };
 
 const NOT_FOUND_HINT =

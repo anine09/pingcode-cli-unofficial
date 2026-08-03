@@ -44,11 +44,12 @@ describe('resolve command surface', () => {
     ]);
   });
 
-  it('covers 25 of the 27 kinds, and omits exactly the two nothing names', () => {
+  it('covers 27 of the 29 kinds, and omits exactly the two nothing names', () => {
     // The count is the honest half of the assertion above: it moves only when the
     // table does, and it is what catches a row that quietly stopped being resolvable.
-    expect(META_KINDS).toHaveLength(27);
-    expect(RESOLVABLE_KINDS).toHaveLength(25);
+    // 27 → 29 with S1a's `scm-platform` / `scm-repo`.
+    expect(META_KINDS).toHaveLength(29);
+    expect(RESOLVABLE_KINDS).toHaveLength(27);
 
     // Ticket state plans are found by scanning for an embedded `product.id` (ship
     // GOTCHA #23) and their flows are graph edges — neither is addressed by a name, so
