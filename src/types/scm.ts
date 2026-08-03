@@ -1,11 +1,11 @@
 /**
  * scm / build / release (DevOps 数据集成) resource types — research §3.12.
  *
- * S1a fills in the first three families (托管平台 / 托管平台用户 / 代码仓库); S1b–S1d add
- * branches, commits, refs, pull requests, reviews, builds and deploys **here**, and
- * only here: `src/types/api.ts` already re-exports this module, so a new module's
- * types reach every existing `from '../types/api'` import without touching a shared
- * file (design D6.5/D6.6).
+ * S1a fills in the first three families (托管平台 / 托管平台用户 / 代码仓库); S1b adds
+ * branches, commits and refs; S1c adds pull requests and code reviews; S1d adds builds
+ * and deploys **here**, and only here: `src/types/api.ts` already re-exports this
+ * module, so a new module's types reach every existing `from '../types/api'` import
+ * without touching a shared file (design D6.5/D6.6).
  *
  * Conventions are module-wide and stated once in `src/types/api.ts`: API
  * `snake_case` field names, 10-digit unix **seconds** for every timestamp, an index
@@ -278,5 +278,113 @@ export type ScmCommitRef = {
   commit?: Ref | undefined;
   /** The referenced entity — a 代码分支 today; `type` is `branch`. */
   meta?: Ref | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * `GET …/repositories/{repository_id}/pull_requests[/{pull_request_id}]` — 拉取请求
+ * ([S§3.12.5]).
+ *
+ * Repository-scoped, and **permanent**: there is no `DELETE` (only the `PUT` this CLI
+ * excludes, design D8.4).
+ *
+ * Four shape facts the field list encodes:
+ *
+ *  - **read objects, write scalars.** `author` / `merged_by` are 托管平台用户 references
+ *    on a read while the write sends `creator_name` / `merged_by_name` strings, and
+ *    `source_branch` / `target_branch` are branch references while the write sends
+ *    `source_branch_id` / `target_branch_id`. The same split as a branch's
+ *    `sender`/`sender_name`; the two never appear in one payload.
+ *  - **`number` is the only human key.** There is no `identifier` and no `short_id`
+ *    anywhere in scm, so a pull request is addressed by its 24-hex id and *found* by
+ *    its `number`, which is unique per repository.
+ *  - **`status` is a closed enum** (`open|closed|merged|abandoned`), typed as a plain
+ *    `string` for the module's usual reason: the CLI never refuses a value the server
+ *    might later accept. The docs additionally make `merged_at`,
+ *    `merged_commit_sha` and `merged_by_name` required *when* the status is `merged` —
+ *    a conditional the server owns.
+ *  - **`work_items` is the only evidence a link landed**, exactly as on a branch: an
+ *    unknown identifier in `work_item_identifiers` is dropped with a 200.
+ *
+ * The six `*_count` fields are caller-supplied statistics, not server-derived — unlike
+ * a commit's `file_changed_count`, nothing recomputes them.
+ */
+export type ScmPullRequest = {
+  id: string;
+  url?: string | undefined;
+  /** The 托管平台; embedded on reads, never written (it is in the path). */
+  product?: Ref | undefined;
+  /** The 代码仓库; embedded on reads, never written (it is in the path). */
+  repository?: Ref | undefined;
+  title?: string | undefined;
+  /** Unique within the repository, and the only value a caller can search by. */
+  number?: number | undefined;
+  /** One of `open` / `closed` / `merged` / `abandoned`; not validated client-side. */
+  status?: string | undefined;
+  description?: string | undefined;
+  /** The creator's git identity. Written as the `creator_name` string. */
+  author?: Ref | undefined;
+  /** Written as `source_branch_id`. Optional on create — a PR may have no source. */
+  source_branch?: Ref | undefined;
+  /** Written as `target_branch_id`, which create **requires**. */
+  target_branch?: Ref | undefined;
+  /** Unix seconds, server-assigned. */
+  created_at?: number | undefined;
+  /** Unix seconds. Required by the docs when `status` is `merged`. */
+  merged_at?: number | undefined;
+  merged_commit_sha?: string | undefined;
+  /** The merger's git identity. Written as the `merged_by_name` string. */
+  merged_by?: Ref | undefined;
+  comments_count?: number | undefined;
+  review_comments_count?: number | undefined;
+  commits_count?: number | undefined;
+  additions_count?: number | undefined;
+  deletions_count?: number | undefined;
+  changed_files_count?: number | undefined;
+  /** Linked work items. `[]` when none — never `undefined`, so call sites do not branch. */
+  work_items: ScmWorkItemRef[];
+  [key: string]: unknown;
+};
+
+/**
+ * `GET …/pull_requests/{pull_request_id}/reviews[/{review_id}]` — 代码评审
+ * ([S§3.12.6]): one review event on one pull request.
+ *
+ * ⚠️ **This is not the cross-object `/v1/reviews` resource.** That one (8 endpoints,
+ * reachable only through `pingcode api`) is a polymorphic 评审 object addressed by
+ * `principal_type` + `pilot_id`, with review *contents* hanging off it. This one is a
+ * flat record of "someone approved / commented on / requested changes to this PR". The
+ * two share a word, no id space and no field set, which is why this type lives in
+ * `types/scm.ts` and nothing here imports from the crosscutting layer.
+ *
+ * Three shape facts:
+ *
+ *  - **`reviewer` is a reference on reads, `reviewer_name` a string on writes** — the
+ *    same split as a pull request's `author`.
+ *  - **`pull_request` is embedded as a summary** carrying `id`, `url` and `number`, so
+ *    it is a `Ref` and its `number` survives through the index signature.
+ *  - **`submitted_at` is the only time a review has.** It is required on create and
+ *    there is no `created_at` / `updated_at` on the resource, so the caller — a CI
+ *    system replaying a review event — owns the timestamp entirely.
+ *
+ * `status` is `comment` / `approved` / `request_changes`, typed as a `string` for the
+ * usual reason. `html_url` is optional and, per the docs, its absence simply means
+ * PingCode renders no jump link.
+ */
+export type ScmCodeReview = {
+  id: string;
+  url?: string | undefined;
+  product?: Ref | undefined;
+  repository?: Ref | undefined;
+  /** The pull request this review belongs to; carries `number` beyond a plain `Ref`. */
+  pull_request?: Ref | undefined;
+  /** The reviewer's git identity. Written as the `reviewer_name` string. */
+  reviewer?: Ref | undefined;
+  /** One of `comment` / `approved` / `request_changes`; not validated client-side. */
+  status?: string | undefined;
+  description?: string | undefined;
+  /** Unix seconds, caller-supplied and required on create. */
+  submitted_at?: number | undefined;
+  html_url?: string | undefined;
   [key: string]: unknown;
 };

@@ -1,7 +1,8 @@
 /**
  * scm / build / release parsers — research §3.12.
  *
- * S1a fills in the first three families; S1b–S1d add theirs **here**, and only here:
+ * S1a fills in the first three families; S1b adds branches, commits and refs, S1c pull
+ * requests and code reviews, S1d builds and deploys — **here**, and only here:
  * `src/api/parse.ts` already re-exports this module, so new parsers reach every
  * existing `from '../api/parse'` import without touching a shared file (design
  * D6.5/D6.6). Import the primitives from `./common`.
@@ -20,10 +21,12 @@
 
 import type {
   ScmBranch,
+  ScmCodeReview,
   ScmCommit,
   ScmCommitRef,
   ScmPlatform,
   ScmPlatformUser,
+  ScmPullRequest,
   ScmRepository,
   ScmWorkItemRef,
 } from '../../types/api';
@@ -223,5 +226,83 @@ export function parseScmCommitRef(raw: unknown): ScmCommitRef {
     repository: parseRef(record.repository),
     commit: parseRef(record.commit),
     meta: parseRef(record.meta),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 拉取请求 / 代码评审 (S1c) — design D13
+// ---------------------------------------------------------------------------
+
+/**
+ * 拉取请求.
+ *
+ * Five reference fields, all parsed as `Ref`s because that is what reads return even
+ * though the writes send scalars: `author` ← `creator_name`, `merged_by` ←
+ * `merged_by_name`, `source_branch` / `target_branch` ← `*_branch_id`. Same
+ * read-object/write-scalar split as a branch's `sender`.
+ *
+ * `number` and the six `*_count` fields go through `asNumber`, so a count the wire
+ * sends as a string still lands as a number and a missing one stays `undefined` rather
+ * than becoming `0` — the difference between "no comments" and "not reported" is the
+ * caller's to make, not ours.
+ *
+ * `work_items` reuses the branch/commit normalisation for the reason stated there: the
+ * array is the only evidence that an identifier actually linked, so it must be an
+ * array unconditionally and `identifier` must survive as a real field.
+ */
+export function parseScmPullRequest(raw: unknown): ScmPullRequest {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    url: asString(record.url),
+    product: parseRef(record.product),
+    repository: parseRef(record.repository),
+    title: asString(record.title),
+    number: asNumber(record.number),
+    status: asString(record.status),
+    description: asString(record.description),
+    author: parseRef(record.author),
+    source_branch: parseRef(record.source_branch),
+    target_branch: parseRef(record.target_branch),
+    created_at: asNumber(record.created_at),
+    merged_at: asNumber(record.merged_at),
+    merged_commit_sha: asString(record.merged_commit_sha),
+    merged_by: parseRef(record.merged_by),
+    comments_count: asNumber(record.comments_count),
+    review_comments_count: asNumber(record.review_comments_count),
+    commits_count: asNumber(record.commits_count),
+    additions_count: asNumber(record.additions_count),
+    deletions_count: asNumber(record.deletions_count),
+    changed_files_count: asNumber(record.changed_files_count),
+    work_items: parseScmWorkItemRefs(record.work_items),
+  };
+}
+
+/**
+ * 代码评审 — the review event on a pull request, **not** the cross-object
+ * `/v1/reviews` object (see `ScmCodeReview`). Nothing in the crosscutting parse layer
+ * is reused here, deliberately: the two resources share only a word.
+ *
+ * `pull_request` is a `Ref` rather than a `ScmPullRequest`: the embedded form carries
+ * `id` / `url` / `number` and none of the branch references, counts or `work_items`, so
+ * typing it as the full resource would promise fields that are never there while
+ * `number` survives through `Ref`'s index signature anyway. Same call as the embedded
+ * commit on a ref.
+ */
+export function parseScmCodeReview(raw: unknown): ScmCodeReview {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    url: asString(record.url),
+    product: parseRef(record.product),
+    repository: parseRef(record.repository),
+    pull_request: parseRef(record.pull_request),
+    reviewer: parseRef(record.reviewer),
+    status: asString(record.status),
+    description: asString(record.description),
+    submitted_at: asNumber(record.submitted_at),
+    html_url: asString(record.html_url),
   };
 }

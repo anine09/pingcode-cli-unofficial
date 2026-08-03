@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseScmBranch,
+  parseScmCodeReview,
   parseScmCommit,
   parseScmCommitRef,
   parseScmPlatform,
   parseScmPlatformUser,
+  parseScmPullRequest,
   parseScmRepository,
 } from '../src/api/parse';
 import {
@@ -13,29 +15,39 @@ import {
   createCommitRef,
   createPlatform,
   createPlatformUser,
+  createPullRequest,
   createRepository,
+  createReview,
   deleteBranch,
   getBranch,
   getCommit,
   getCommitRef,
   getPlatform,
   getPlatformUser,
+  getPullRequest,
   getRepository,
+  getReview,
   iterateBranches,
   iterateCommits,
   iteratePlatforms,
+  iteratePullRequests,
   iterateRepositories,
+  iterateReviews,
   listBranches,
   listCommitRefs,
   listCommits,
   listPlatformUsers,
   listPlatforms,
+  listPullRequests,
   listRepositories,
+  listReviews,
   REF_META_TYPE_BRANCH,
   updateBranch,
   updatePlatform,
   updatePlatformUser,
+  updatePullRequest,
   updateRepository,
+  updateReview,
 } from '../src/api/scm';
 import { THIRTY_DAYS_MS } from '../src/core/auth';
 import { CATALOG } from '../src/core/catalog';
@@ -79,6 +91,8 @@ const COMMIT = '6a706a9a919cce9794f011a3';
 const REF = '6a706ac439cbed1cf7126c2d';
 /** A real 40-hex SHA: the one identifier this API shape-validates (design D12.2). */
 const SHA = 'e35cc1ed300bfe85da6d6b8108ddb33d28b26ae5';
+const PR = '6a70a5f1919cce9794f01c3f';
+const REVIEW = '6a70a62839cbed1cf7127e11';
 
 function ctxFor(responses: Array<() => Response>, options: { dryRun?: boolean } = {}) {
   const fake = createFakeFetch(responses);
@@ -131,6 +145,25 @@ describe('scm endpoint paths', () => {
     expect(ENDPOINTS.scmCommit(COMMIT)).toBe(`/v1/scm/commits/${COMMIT}`);
   });
 
+  it('nests a pull request under the repository and a review under the pull request', () => {
+    expect(ENDPOINTS.scmPullRequests(PLATFORM, REPO)).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/pull_requests`,
+    );
+    expect(ENDPOINTS.scmPullRequest(PLATFORM, REPO, PR)).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/pull_requests/${PR}`,
+    );
+    // Three parents deep — the deepest path in the CLI, and the reason every review
+    // leaf requires `--pr-id` (design D13).
+    expect(ENDPOINTS.scmPullRequestReviews(PLATFORM, REPO, PR)).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/pull_requests/${PR}/reviews`,
+    );
+    expect(ENDPOINTS.scmPullRequestReview(PLATFORM, REPO, PR, REVIEW)).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/pull_requests/${PR}/reviews/${REVIEW}`,
+    );
+    // …and it is NOT the cross-object review resource, which lives at the org root.
+    expect(ENDPOINTS.scmPullRequestReviews(PLATFORM, REPO, PR)).not.toBe('/v1/reviews');
+  });
+
   it('percent-encodes ids rather than trusting their shape', () => {
     // Ids are never validated (research §6.8), so a pasted value with a slash must
     // not be able to walk out of its path segment.
@@ -158,6 +191,10 @@ describe('scm endpoint paths', () => {
       '/v1/scm/products/{product_id}/repositories/{repository_id}/refs/{ref_id}',
       '/v1/scm/commits',
       '/v1/scm/commits/{commit_id_or_sha}',
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/pull_requests',
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/pull_requests/{pull_request_id}',
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/pull_requests/{pull_request_id}/reviews',
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/pull_requests/{pull_request_id}/reviews/{review_id}',
     ]) {
       expect(scmPaths, path).toContain(path);
     }
@@ -907,8 +944,258 @@ describe('scm not-found mapping, part 2 (S1b: exit 5 from HTTP 400)', () => {
   });
 });
 
+describe('scm normalisation, part 3: pull requests / code reviews (S1c)', () => {
+  it('parses a pull request, keeping every reference a ref and every count a number', () => {
+    const pullRequest = parseScmPullRequest({
+      id: PR,
+      url: 'https://open.pingcode.com/v1/scm/products/x',
+      product: { id: PLATFORM, name: '[CLI smoke] pingcode-cli', type: 'other' },
+      repository: { id: REPO, name: 'pingcode-cli-unofficial', full_name: 'acme/x' },
+      title: 'feat: add login',
+      number: 42,
+      status: 'open',
+      description: null,
+      author: { id: USER, name: 'cli-smoke-bot' },
+      source_branch: { id: BRANCH, name: 'feature/login' },
+      target_branch: { id: 'b2', name: 'main' },
+      created_at: 1785750479,
+      merged_at: null,
+      merged_commit_sha: null,
+      merged_by: null,
+      comments_count: 2,
+      commits_count: 3,
+      changed_files_count: 0,
+      work_items: [{ id: 'w1', identifier: 'YYHC-10', title: 'a story', type: 'story' }],
+      future_field: 'kept',
+    });
+
+    // Reads return references while writes send `creator_name` / `*_branch_id` scalars;
+    // promoting either side into the other would invent a field.
+    expect(pullRequest.author?.name).toBe('cli-smoke-bot');
+    expect(pullRequest.source_branch?.id).toBe(BRANCH);
+    expect(pullRequest.target_branch?.name).toBe('main');
+    expect(pullRequest.number).toBe(42);
+    expect(pullRequest.status).toBe('open');
+    // `0` is a real count and must survive; `null` is normalised away by the shared
+    // parse layer, which is what makes "absent" mean "not reported".
+    expect(pullRequest.changed_files_count).toBe(0);
+    expect(pullRequest.merged_at).toBeUndefined();
+    expect(pullRequest.merged_by).toBeUndefined();
+    expect(pullRequest.description).toBeUndefined();
+    expect(pullRequest.work_items[0]?.identifier).toBe('YYHC-10');
+    expect(pullRequest.future_field).toBe('kept');
+  });
+
+  it('normalises a pull request without work_items to [] rather than undefined', () => {
+    expect(parseScmPullRequest({ id: PR }).work_items).toEqual([]);
+    expect(parseScmPullRequest({ id: PR, work_items: 'nonsense' }).work_items).toEqual([]);
+  });
+
+  it('parses a code review, keeping the pull request a ref that still carries its number', () => {
+    const review = parseScmCodeReview({
+      id: REVIEW,
+      product: { id: PLATFORM, name: 'p' },
+      repository: { id: REPO, name: 'r' },
+      pull_request: { id: PR, number: 42, url: 'https://open.pingcode.com/v1/x' },
+      reviewer: { id: USER, name: 'cli-smoke-bot' },
+      status: 'approved',
+      description: 'looks good',
+      submitted_at: 1785751200,
+      html_url: null,
+    });
+
+    expect(review.reviewer?.name).toBe('cli-smoke-bot');
+    expect(review.status).toBe('approved');
+    expect(review.submitted_at).toBe(1785751200);
+    // The embedded pull request is a *summary*: `number` survives through `Ref`'s index
+    // signature, and nothing here promises the branches, counts or work items that a
+    // full `ScmPullRequest` has.
+    expect(review.pull_request?.id).toBe(PR);
+    expect(review.pull_request?.number).toBe(42);
+    expect(review.pull_request?.work_items).toBeUndefined();
+    expect(review.html_url).toBeUndefined();
+  });
+
+  it('does not share a parser with the cross-object /v1/reviews resource', async () => {
+    // Design D13: two unrelated resources share the word "review". The scm one is
+    // parsed here; the polymorphic `/v1/reviews` object is generic-layer-only and has no
+    // parser at all. Asserted so a later "unify the review parsers" refactor fails.
+    const parse = (await import('../src/api/parse')) as Record<string, unknown>;
+    expect(typeof parse.parseScmCodeReview).toBe('function');
+    expect(Object.keys(parse).filter((name) => /^parse.*Review/.test(name))).toEqual([
+      'parseScmCodeReview',
+    ]);
+  });
+});
+
+describe('pull requests api (S1c)', () => {
+  it('lists pull requests under the repository with both documented filters', async () => {
+    const { ctx, fake } = ctxFor([() => envelope([{ id: PR, number: 42 }])]);
+    await listPullRequests(
+      ctx,
+      PLATFORM,
+      REPO,
+      { number: 42, work_item_id: 'w1' },
+      { pageIndex: 0, pageSize: 30 },
+    );
+
+    expect(fake.calls[0]?.method).toBe('GET');
+    const url = fake.urls()[0] ?? '';
+    expect(url).toContain(`/v1/scm/products/${PLATFORM}/repositories/${REPO}/pull_requests?`);
+    expect(url).toContain('number=42');
+    expect(url).toContain('work_item_id=w1');
+  });
+
+  it('walks every page of pull requests', async () => {
+    const { ctx } = ctxFor([
+      () => envelope([{ id: 'pr1', number: 1 }], { page_index: 0, page_size: 1 }),
+      () => envelope([{ id: 'pr2', number: 2 }], { page_index: 1, page_size: 1 }),
+      () => envelope([], { page_index: 2, page_size: 1 }),
+    ]);
+    const values = await collect(iteratePullRequests(ctx, PLATFORM, REPO, {}, { pageSize: 1 }));
+    expect(values.map((pullRequest) => pullRequest.id)).toEqual(['pr1', 'pr2']);
+  });
+
+  it('gets one pull request by id', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: PR, number: 42 })]);
+    await getPullRequest(ctx, PLATFORM, REPO, PR);
+    expect(fake.urls()[0]).toContain(`/pull_requests/${PR}`);
+  });
+
+  it('creates a pull request with the five required fields and nothing else', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: PR })]);
+    await createPullRequest(ctx, PLATFORM, REPO, {
+      title: 'feat: x',
+      number: 42,
+      creator_name: 'bot',
+      target_branch_id: 'b2',
+      status: 'open',
+    });
+
+    expect(fake.calls[0]?.method).toBe('POST');
+    expect(fake.calls[0]?.body).toEqual({
+      title: 'feat: x',
+      number: 42,
+      creator_name: 'bot',
+      target_branch_id: 'b2',
+      status: 'open',
+    });
+  });
+
+  it('sends a zero count rather than dropping it', async () => {
+    // `compact` drops only `undefined`, which is what makes "0 changed files" and "no
+    // count reported" different requests.
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: PR })]);
+    await createPullRequest(ctx, PLATFORM, REPO, {
+      title: 'feat: x',
+      number: 42,
+      creator_name: 'bot',
+      target_branch_id: 'b2',
+      status: 'open',
+      changed_files_count: 0,
+      work_item_identifiers: ['YYHC-10'],
+    });
+    expect(fake.calls[0]?.body).toMatchObject({
+      changed_files_count: 0,
+      work_item_identifiers: ['YYHC-10'],
+    });
+  });
+
+  it('patches with PATCH and always carries status, the one mandatory patch field', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: PR })]);
+    await updatePullRequest(ctx, PLATFORM, REPO, PR, { status: 'merged', title: 'feat: y' });
+
+    expect(fake.calls[0]?.method).toBe('PATCH');
+    expect(fake.calls[0]?.body).toEqual({ status: 'merged', title: 'feat: y' });
+  });
+
+  it('sends an empty work_item_identifiers array, because [] is how you clear links', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: PR })]);
+    await updatePullRequest(ctx, PLATFORM, REPO, PR, { status: 'open', work_item_identifiers: [] });
+    expect(fake.calls[0]?.body).toEqual({ status: 'open', work_item_identifiers: [] });
+  });
+
+  it('sends nothing on a pull request write under --dry-run, while reads still run', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: PR })], { dryRun: true });
+    await expect(
+      createPullRequest(ctx, PLATFORM, REPO, {
+        title: 't',
+        number: 1,
+        creator_name: 'bot',
+        target_branch_id: 'b2',
+        status: 'open',
+      }),
+    ).rejects.toBeInstanceOf(DryRunHalt);
+    expect(fake.calls).toHaveLength(0);
+
+    await getPullRequest(ctx, PLATFORM, REPO, PR);
+    expect(fake.calls).toHaveLength(1);
+  });
+});
+
+describe('code reviews api (S1c)', () => {
+  it('lists the reviews of one pull request, with no query parameters at all', async () => {
+    // The endpoint documents none — not even the `?number=`-style filter the pull
+    // request list has — so the wrapper takes no query argument to grow one into.
+    const { ctx, fake } = ctxFor([() => envelope([{ id: REVIEW, status: 'approved' }])]);
+    await listReviews(ctx, PLATFORM, REPO, PR, { pageIndex: 1, pageSize: 2 });
+
+    const url = fake.urls()[0] ?? '';
+    expect(url).toContain(`/pull_requests/${PR}/reviews?`);
+    expect(url).toContain('page_index=1');
+    expect(url).toContain('page_size=2');
+    // Only the paging pair is on the wire.
+    expect(new URL(url).searchParams.size).toBe(2);
+  });
+
+  it('walks every page of reviews', async () => {
+    const { ctx } = ctxFor([
+      () => envelope([{ id: 'r1' }], { page_index: 0, page_size: 1 }),
+      () => envelope([], { page_index: 1, page_size: 1 }),
+    ]);
+    const values = await collect(iterateReviews(ctx, PLATFORM, REPO, PR, { pageSize: 1 }));
+    expect(values.map((review) => review.id)).toEqual(['r1']);
+  });
+
+  it('gets one review', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: REVIEW })]);
+    await getReview(ctx, PLATFORM, REPO, PR, REVIEW);
+    expect(fake.urls()[0]).toContain(`/pull_requests/${PR}/reviews/${REVIEW}`);
+  });
+
+  it('creates a review with its three required fields', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: REVIEW })]);
+    await createReview(ctx, PLATFORM, REPO, PR, {
+      status: 'approved',
+      reviewer_name: 'bot',
+      submitted_at: 1785751200,
+    });
+
+    expect(fake.calls[0]?.method).toBe('POST');
+    // `submitted_at` is mandatory because the resource has no server-assigned time.
+    expect(fake.calls[0]?.body).toEqual({
+      status: 'approved',
+      reviewer_name: 'bot',
+      submitted_at: 1785751200,
+    });
+  });
+
+  it('patches a review with PATCH, and has no mandatory field to carry', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: REVIEW })]);
+    await updateReview(ctx, PLATFORM, REPO, PR, REVIEW, { description: 'revised' });
+
+    expect(fake.calls[0]?.method).toBe('PATCH');
+    expect(fake.calls[0]?.body).toEqual({ description: 'revised' });
+  });
+
+  it('exposes no review delete, because upstream has none', async () => {
+    const scm = (await import('../src/api/scm')) as Record<string, unknown>;
+    expect(Object.keys(scm).filter((name) => /^delete/.test(name))).toEqual(['deleteBranch']);
+  });
+});
+
 describe('no PUT reaches the refined layer (design D8.4)', () => {
-  it('exposes no replace wrapper for the three families that document one', async () => {
+  it('exposes no replace wrapper for the five families that document one', async () => {
     const scm = (await import('../src/api/scm')) as Record<string, unknown>;
     const suspicious = Object.keys(scm).filter((name) => /replace|put/i.test(name));
     expect(suspicious).toEqual([]);
@@ -923,6 +1210,16 @@ describe('no PUT reaches the refined layer (design D8.4)', () => {
     expect(puts).toContain('/v1/scm/products/{product_id}');
     expect(puts).toContain('/v1/scm/products/{product_id}/users/{user_id}');
     expect(puts).toContain('/v1/scm/products/{product_id}/repositories/{repository_id}');
+    // S1c's two, the last in the module — five families with a PUT, none with a leaf.
+    expect(puts).toContain(
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/pull_requests/{pull_request_id}',
+    );
+    expect(puts).toContain(
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/pull_requests/{pull_request_id}/reviews/{review_id}',
+    );
+    // And that is all of them: scm documents exactly five, so a sixth appearing means
+    // the catalog was regenerated against a changed API and this child's count is stale.
+    expect(puts).toHaveLength(5);
   });
 
   it('confirms the branch family has no PUT upstream either, only a DELETE', () => {

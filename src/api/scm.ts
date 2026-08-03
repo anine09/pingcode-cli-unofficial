@@ -4,10 +4,12 @@ import { request } from '../core/http';
 import type { Page, PageRequest, PaginateOptions } from '../core/paginate';
 import type {
   ScmBranch,
+  ScmCodeReview,
   ScmCommit,
   ScmCommitRef,
   ScmPlatform,
   ScmPlatformUser,
+  ScmPullRequest,
   ScmRepository,
 } from '../types/api';
 import {
@@ -15,10 +17,12 @@ import {
   fetchPageOf,
   iterateOf,
   parseScmBranch,
+  parseScmCodeReview,
   parseScmCommit,
   parseScmCommitRef,
   parseScmPlatform,
   parseScmPlatformUser,
+  parseScmPullRequest,
   parseScmRepository,
 } from './parse';
 
@@ -53,6 +57,17 @@ import {
  *    both *required* query parameters, which is why `ScmRefListQuery` has no
  *    optional fields and `listCommitRefs` takes it as a positional rather than
  *    defaulting it to `{}`.
+ *
+ * S1c adds 拉取请求 and 代码评审, which bend two more:
+ *
+ *  - **`updatePullRequest` requires `status`.** It is the only PATCH in scm with a
+ *    mandatory field, so `UpdatePullRequestInput` is the only `Update*Input` here that
+ *    is not "any subset" — see its doc comment.
+ *  - **a 代码评审 is nested three parents deep** (platform → repository → pull request),
+ *    the deepest path in the CLI, and its list takes no query parameters at all. It is
+ *    also **not** the cross-object `/v1/reviews` resource, which stays in the generic
+ *    layer; nothing here imports from `api/common.ts` and nothing there knows about
+ *    these four endpoints.
  *
  * Nothing here formats or resolves: names become ids in `core/metadata`, rendering
  * happens in `cli/`.
@@ -656,4 +671,271 @@ export async function createCommitRef(
     body: compact(input),
   });
   return parseScmCommitRef(raw);
+}
+
+// ---------------------------------------------------------------------------
+// 拉取请求 pull requests (S1c)
+// ---------------------------------------------------------------------------
+
+export type PullRequestListQuery = {
+  /**
+   * The pull request **number**, unique per repository — the only human-readable key
+   * this family has (there is no `identifier` and no `short_id` in scm).
+   */
+  number?: number | undefined;
+  /** Only pull requests linked to this work item **id** (not its identifier). */
+  work_item_id?: string | undefined;
+};
+
+/**
+ * Required: `title`, `number`, `creator_name`, `target_branch_id`, `status`.
+ *
+ * Note the asymmetry with the excluded `PUT`, which makes `source_branch_id` required
+ * as well: on a create a pull request may legitimately have no recorded source branch.
+ *
+ * `status` is `open|closed|merged|abandoned`, and the docs make `merged_at`,
+ * `merged_commit_sha` and `merged_by_name` required **when it is `merged`** — a
+ * conditional this layer passes through rather than enforcing, since the server owns
+ * it and a CLI that guessed would refuse calls the API accepts.
+ */
+export type CreatePullRequestInput = {
+  title: string;
+  /** Unique within the repository. */
+  number: number;
+  /** A git username, exactly like a branch's `sender_name`. */
+  creator_name: string;
+  target_branch_id: string;
+  status: string;
+  source_branch_id?: string | undefined;
+  description?: string | undefined;
+  merged_at?: number | undefined;
+  merged_commit_sha?: string | undefined;
+  merged_by_name?: string | undefined;
+  comments_count?: number | undefined;
+  review_comments_count?: number | undefined;
+  commits_count?: number | undefined;
+  additions_count?: number | undefined;
+  deletions_count?: number | undefined;
+  changed_files_count?: number | undefined;
+  /** Work item **identifiers** (`PLM-001`), not ids. Unknown ones are silently dropped. */
+  work_item_identifiers?: string[] | undefined;
+};
+
+/**
+ * **`status` is required even on the PATCH** ([S§3.12.5]) — the only mandatory PATCH
+ * field anywhere in scm, and the reason this type declares it non-optional while every
+ * other `Update*Input` in the module is "any subset". A caller that only wants to
+ * change the title must therefore supply the *current* status; the command layer reads
+ * it back off the resource rather than inventing one, the same read-modify-write
+ * testhub's run patch settled on.
+ *
+ * `number` is deliberately absent: it is create-only upstream.
+ */
+export type UpdatePullRequestInput = {
+  status: string;
+  title?: string | undefined;
+  creator_name?: string | undefined;
+  description?: string | undefined;
+  target_branch_id?: string | undefined;
+  source_branch_id?: string | undefined;
+  merged_at?: number | undefined;
+  merged_commit_sha?: string | undefined;
+  merged_by_name?: string | undefined;
+  comments_count?: number | undefined;
+  review_comments_count?: number | undefined;
+  commits_count?: number | undefined;
+  additions_count?: number | undefined;
+  deletions_count?: number | undefined;
+  changed_files_count?: number | undefined;
+  /** Replaces the whole link set; `[]` clears it. */
+  work_item_identifiers?: string[] | undefined;
+};
+
+export async function listPullRequests(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  query: PullRequestListQuery = {},
+  page: PageRequest = {},
+): Promise<Page<ScmPullRequest>> {
+  return await fetchPageOf(
+    ctx,
+    ENDPOINTS.scmPullRequests(platformId, repositoryId),
+    { ...query },
+    page,
+    parseScmPullRequest,
+  );
+}
+
+export function iteratePullRequests(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  query: PullRequestListQuery = {},
+  options: PaginateOptions = {},
+): AsyncGenerator<ScmPullRequest, void, undefined> {
+  return iterateOf(
+    ctx,
+    ENDPOINTS.scmPullRequests(platformId, repositoryId),
+    { ...query },
+    options,
+    parseScmPullRequest,
+  );
+}
+
+export async function getPullRequest(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  pullRequestId: string,
+): Promise<ScmPullRequest> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.scmPullRequest(platformId, repositoryId, pullRequestId),
+  });
+  return parseScmPullRequest(raw);
+}
+
+export async function createPullRequest(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  input: CreatePullRequestInput,
+): Promise<ScmPullRequest> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.scmPullRequests(platformId, repositoryId),
+    body: compact(input),
+  });
+  return parseScmPullRequest(raw);
+}
+
+export async function updatePullRequest(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  pullRequestId: string,
+  patch: UpdatePullRequestInput,
+): Promise<ScmPullRequest> {
+  const raw = await request<unknown>(ctx, {
+    method: 'PATCH',
+    path: ENDPOINTS.scmPullRequest(platformId, repositoryId, pullRequestId),
+    body: compact(patch),
+  });
+  return parseScmPullRequest(raw);
+}
+
+// ---------------------------------------------------------------------------
+// 代码评审 code reviews (S1c) — nested under one pull request
+// ---------------------------------------------------------------------------
+
+/**
+ * Required: `status` (`comment|approved|request_changes`), `reviewer_name`,
+ * `submitted_at`.
+ *
+ * `submitted_at` being mandatory is the family's one unusual requirement: a review
+ * carries no server-assigned `created_at`, so the caller — replaying a review event
+ * from a hosting platform — owns the timestamp outright.
+ */
+export type CreateReviewInput = {
+  status: string;
+  /** A git username, exactly like a pull request's `creator_name`. */
+  reviewer_name: string;
+  /** Unix seconds. The only time a review has. */
+  submitted_at: number;
+  description?: string | undefined;
+  /** Absent means PingCode renders no jump link (per the docs). */
+  html_url?: string | undefined;
+};
+
+/** Any subset — unlike the pull request PATCH, this one has no mandatory field. */
+export type UpdateReviewInput = {
+  status?: string | undefined;
+  reviewer_name?: string | undefined;
+  submitted_at?: number | undefined;
+  description?: string | undefined;
+  html_url?: string | undefined;
+};
+
+/**
+ * The review list takes **no query parameters at all** — not even the `?number=`-style
+ * filter the pull request list has. Reviews are enumerated one pull request at a time,
+ * which is also why there is no repository-wide or organisation-wide variant to reach
+ * for: the API offers none.
+ */
+export async function listReviews(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  pullRequestId: string,
+  page: PageRequest = {},
+): Promise<Page<ScmCodeReview>> {
+  return await fetchPageOf(
+    ctx,
+    ENDPOINTS.scmPullRequestReviews(platformId, repositoryId, pullRequestId),
+    {},
+    page,
+    parseScmCodeReview,
+  );
+}
+
+export function iterateReviews(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  pullRequestId: string,
+  options: PaginateOptions = {},
+): AsyncGenerator<ScmCodeReview, void, undefined> {
+  return iterateOf(
+    ctx,
+    ENDPOINTS.scmPullRequestReviews(platformId, repositoryId, pullRequestId),
+    {},
+    options,
+    parseScmCodeReview,
+  );
+}
+
+export async function getReview(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  pullRequestId: string,
+  reviewId: string,
+): Promise<ScmCodeReview> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.scmPullRequestReview(platformId, repositoryId, pullRequestId, reviewId),
+  });
+  return parseScmCodeReview(raw);
+}
+
+export async function createReview(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  pullRequestId: string,
+  input: CreateReviewInput,
+): Promise<ScmCodeReview> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.scmPullRequestReviews(platformId, repositoryId, pullRequestId),
+    body: compact(input),
+  });
+  return parseScmCodeReview(raw);
+}
+
+export async function updateReview(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  pullRequestId: string,
+  reviewId: string,
+  patch: UpdateReviewInput,
+): Promise<ScmCodeReview> {
+  const raw = await request<unknown>(ctx, {
+    method: 'PATCH',
+    path: ENDPOINTS.scmPullRequestReview(platformId, repositoryId, pullRequestId, reviewId),
+    body: compact(patch),
+  });
+  return parseScmCodeReview(raw);
 }

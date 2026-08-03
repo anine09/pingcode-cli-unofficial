@@ -391,4 +391,82 @@ export const ENDPOINTS = {
     `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/refs`,
   scmRef: (platformId: string, repositoryId: string, refId: string): string =>
     `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/refs/${encodeURIComponent(refId)}`,
+
+  // -------------------------------------------------------------------------
+  // scm, part 3: 拉取请求 / 代码评审 — research §3.12.5-6 (design D13)
+  // -------------------------------------------------------------------------
+  //
+  // The three warnings at the top of the scm section still apply (a "product" is a
+  // hosting platform, the whole area is 企业令牌-only, `PUT` never reaches the refined
+  // layer). Four more, specific to these two families:
+  //
+  //  1. **A code review here is NOT the cross-object `/v1/reviews` resource.** Two
+  //     unrelated things share the word: `/v1/reviews` (8 endpoints, generic layer) is
+  //     a polymorphic 评审 object addressed by `principal_type` + `pilot_id` and used
+  //     by 需求/用例 review flows, while these four are 代码评审 — a review event on one
+  //     pull request, reachable only under `…/pull_requests/{id}/reviews`. They share
+  //     no id space and no field set. Do not "unify" them.
+  //  2. **Both families keep their `PUT` out of the refined layer** (D8.4), so each
+  //     contributes four leaves, not five. `PUT …/pull_requests/{id}` additionally
+  //     makes `source_branch_id` **required** where `POST` leaves it optional, which is
+  //     exactly the "replacement blanks what you omit" hazard the exclusion exists for.
+  //  3. **`PATCH …/pull_requests/{id}` requires `status`** — the only PATCH in scm with
+  //     a mandatory field ([S§3.12.5]; the review PATCH has none). A partial update
+  //     that only changes the title therefore cannot be expressed as one request, so
+  //     the command layer re-reads the pull request and re-emits its current status,
+  //     the same read-modify-write testhub's run patch settled on ([TH§7]).
+  //  4. **A review is addressed under its pull request, so its path has three parents**
+  //     (platform, repository, pull request) — the deepest path in the CLI. There is no
+  //     org-wide or repository-wide review list: reviews are enumerated one pull
+  //     request at a time, exactly as refs are enumerated one branch at a time.
+  //
+  // Field shapes worth knowing before writing a command (docs + the shipped examples;
+  // read/write asymmetries follow the module's usual pattern):
+  //
+  //  - reads return **references** (`author`, `merged_by`, `reviewer`,
+  //    `source_branch`, `target_branch`) while writes take **name/id scalars**
+  //    (`creator_name`, `merged_by_name`, `reviewer_name`, `source_branch_id`,
+  //    `target_branch_id`). The two never appear in the same payload.
+  //  - `status` is a closed enum on both: `open|closed|merged|abandoned` for a pull
+  //    request, `comment|approved|request_changes` for a review. Neither is validated
+  //    client-side — a value the server later accepts must not be refused by a CLI
+  //    that shipped before it.
+  //  - `number` is unique per repository and is the only human-readable key a pull
+  //    request has (there is no `identifier` and no `short_id`), which is why the list
+  //    exposes `?number=`.
+  //  - `merged_at` / `merged_commit_sha` / `merged_by_name` are documented as required
+  //    **when `status` is `merged`** — a conditional the docs state and the CLI passes
+  //    through rather than second-guessing.
+  //  - a review's `submitted_at` is required on create; there is no `created_at` on the
+  //    resource, so it is the only time a review carries.
+  //
+  // **No DELETE in either family**, like the rest of scm: a pull request and a review
+  // are permanent once written.
+
+  /**
+   * 拉取请求 — repository-scoped. `?number=` and `?work_item_id=` are the two
+   * documented filters.
+   */
+  scmPullRequests: (platformId: string, repositoryId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/pull_requests`,
+  scmPullRequest: (platformId: string, repositoryId: string, pullRequestId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/pull_requests/${encodeURIComponent(pullRequestId)}`,
+
+  /**
+   * 代码评审 — nested under one 拉取请求, and **not** the cross-object `/v1/reviews`
+   * resource (see the note above). The list takes no query parameters at all.
+   */
+  scmPullRequestReviews: (
+    platformId: string,
+    repositoryId: string,
+    pullRequestId: string,
+  ): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/pull_requests/${encodeURIComponent(pullRequestId)}/reviews`,
+  scmPullRequestReview: (
+    platformId: string,
+    repositoryId: string,
+    pullRequestId: string,
+    reviewId: string,
+  ): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/pull_requests/${encodeURIComponent(pullRequestId)}/reviews/${encodeURIComponent(reviewId)}`,
 } as const;
