@@ -106,6 +106,13 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['scm branch deletion', /pingcode scm branch delete .*--yes/],
   ['scm commits', /pingcode scm commit (list|get|create)/],
   ['scm commit refs', /pingcode scm ref (list|get|create)/],
+  // S1c — the last two scm families. Three rows: the two resources, plus one for the
+  // `/v1/reviews` disambiguation, because an agent that conflates the two will hand a
+  // `scm review` id to `pingcode api GET /v1/reviews/{id}` and get a not-found it cannot
+  // explain.
+  ['scm pull requests', /pingcode scm pr (list|get|create|update)/],
+  ['scm code reviews', /pingcode scm review (list|get|create|update)/],
+  ['scm review is not /v1\/reviews', /`?scm review`? is not `?pingcode api . \/v1\/reviews`?/i],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {
@@ -270,6 +277,16 @@ describe('the module documents carry the per-module rules (design D6.4)', () => 
     // no delete anywhere, and PUT only through the escape hatch
     expect(scm).toMatch(/No DELETE exists upstream/i);
     expect(scm).toMatch(/pingcode api PUT \/v1\/scm\/products/);
+    // S1c: the two facts about pull requests and reviews that `--help` alone cannot
+    // carry, because both are about what the API is *missing*.
+    //  - `status` is mandatory on the pull request PATCH, so an omitted `--status` costs
+    //    a read rather than sending an incomplete body;
+    //  - a review is addressed under one pull request and there is no wider list, so
+    //    "show me every review" is not an operation an agent should look for.
+    expect(scm).toMatch(/required by the API on every patch/i);
+    expect(scm).toMatch(/no repository-wide or organisation-wide\s+review list/i);
+    // …and that a PR, unlike a branch, can never be withdrawn once written.
+    expect(scm).toMatch(/cannot be withdrawn/i);
   });
 
   it('the reserved modules promise nothing that does not exist yet', () => {

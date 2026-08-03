@@ -28,7 +28,7 @@ import {
   type PagingFlags,
   type ResolvedWrite,
 } from '../common';
-import { addRepoOptions, requireRepoScope, type RepoScope } from './branch';
+import { addRepoOptions, oneLine, requireRepoScope, type RepoScope } from './branch';
 
 /**
  * `pingcode scm ref …` — 提交引用 ([S§3.12.7]): the join record that says *this
@@ -96,10 +96,6 @@ function refField(ref: Ref | undefined, field: string): string | undefined {
 
 function shortSha(sha: string | undefined): string {
   return sha === undefined ? '' : sha.slice(0, 7);
-}
-
-function oneLine(text: string | undefined): string {
-  return (text ?? '').replace(/\s+/g, ' ').trim();
 }
 
 export function registerRefCommands(parent: Command): void {

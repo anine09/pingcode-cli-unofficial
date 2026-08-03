@@ -12,13 +12,17 @@ clones, pushes or inspects a repository. Every row you create is a record inside
 **The CI write-back path, in order.** Each step needs the one before it:
 
 ```
-platform → repo → branch ─┐
-                          ├→ ref   (the link between them)
+platform → repo → branch ─┬→ pr → review
+                          ├→ ref   (commit ↔ branch)
               commit ──────┘
 ```
 
 A commit is created *without* a repository (it is organisation-level), so `scm ref create`
 is what attaches it to a branch. Do not look for a `--repo` on `scm commit`.
+
+A pull request needs its **target branch id** first, and a code review needs its **pull
+request id** — both are ids, not names or numbers, so create the branch and the PR before
+you try to hang anything off them.
 
 **Two group-wide facts.**
 
@@ -226,6 +230,103 @@ pingcode scm ref get 5e451b7dd704c212f7de8b4f --platform Github --repo acme/ping
 - There is **no `update` and no `delete`**, and a ref outlives the branch it points at (see
   the branch delete warning above).
 
+### Pull requests — `scm pr`
+
+```bash
+pingcode scm pr list --platform Github --repo acme/pingcode-cli --json
+pingcode scm pr list --platform Github --repo acme/pingcode-cli --number 42 --json
+pingcode scm pr list --platform Github --repo acme/pingcode-cli --work-item-id 5edca524cad2fa112b06105c --json
+pingcode scm pr list --platform Github --repo acme/pingcode-cli --all --limit 200 --json
+
+pingcode scm pr get 594587fe700d43b81b080789 --platform Github --repo acme/pingcode-cli --json
+
+pingcode scm pr create --platform Github --repo acme/pingcode-cli \
+  --title "feat(auth): #PLM-001 add login" --number 42 --creator octocat \
+  --target-branch-id 564587fe700d43b81b080776 --source-branch-id 564587fe700d43b81b080767 \
+  --status open --work-item PLM-001 --json
+
+pingcode scm pr update 594587fe700d43b81b080789 --platform Github --repo acme/pingcode-cli \
+  --status merged --merged-at 2026-08-03T10:00:00Z \
+  --merged-commit-sha 96a024347146ebdc5f481f45e6e6871e0c43af5f --merged-by octocat --json
+```
+
+Rules that will bite otherwise:
+
+- **A pull request is addressed by its id, and *found* by its number.** scm has no
+  `identifier` and no `short_id` anywhere, and the detail path takes the 24-hex id only.
+  So `--number` is a **list filter**, and `pr get|update` take the id: run
+  `pingcode scm pr list --number 42 --json` and read `values[0].id`. The CLI does not
+  guess whether what you typed "looks like a number".
+- **`--status` is required by the API on every patch**, not just when you want to change
+  it. Omit it and the CLI reads the pull request first and re-sends its *current* status,
+  which costs one extra GET; pass `--status` and it does not. There is no way to send a
+  patch without a status.
+- **`--target-branch-id` is required on create, `--source-branch-id` is not** — and both
+  take **branch ids**, from `scm branch list --json`. (The API's `PUT`, which this CLI does
+  not offer, makes the source branch required too; that asymmetry is one reason it is
+  excluded.)
+- **`--merged-at`, `--merged-commit-sha` and `--merged-by` become required when
+  `--status merged`.** The server enforces that, not the CLI, so expect exit 7 rather than
+  exit 2 if you forget one.
+- **`--creator` and `--merged-by` are git usernames**, matched against 托管平台用户 rows by
+  name — the same attribution model as branch `--sender`. Create the identity first with
+  `scm platform-user create`.
+- **The six `--*-count` flags are yours to report.** Nothing server-side recomputes them,
+  and an omitted count is *not reported* rather than zero, so `--changed-files-count 0` and
+  omitting the flag mean different things.
+- **`--work-item` takes an identifier (`PLM-001`) and an unknown one is silently
+  ignored**, exactly as on a branch: the response's `work_items` array is the only
+  evidence, the CLI warns on stderr about identifiers that did not link, and the exit code
+  stays 0. On `update` it **REPLACES** the whole link set.
+- **`number` must be unique in the repository**; a duplicate is a server-side conflict
+  (exit 7), not a silent overwrite.
+
+### Code reviews — `scm review`
+
+⚠️ **`scm review` is not `pingcode api … /v1/reviews`.** Two unrelated resources share
+the word:
+
+| | `scm review` (this section) | `/v1/reviews` (generic layer only) |
+|---|---|---|
+| what | 代码评审: one review event on one pull request | 评审: a polymorphic review object with contents |
+| addressed by | platform + repository + pull request | `principal_type` + `pilot_id` |
+| used by | git / CI write-back | 需求 and 用例 review flows |
+| reachable as | `pingcode scm review …` | `pingcode api GET /v1/reviews …` |
+
+Their ids are not interchangeable. If you are recording "someone approved PR #42", you
+want this section.
+
+```bash
+pingcode scm review list --platform Github --repo acme/pingcode-cli \
+  --pr-id 594587fe700d43b81b080789 --json
+
+pingcode scm review get 524587fe700d43b81b080988 --platform Github --repo acme/pingcode-cli \
+  --pr-id 594587fe700d43b81b080789 --json
+
+pingcode scm review create --platform Github --repo acme/pingcode-cli \
+  --pr-id 594587fe700d43b81b080789 \
+  --status approved --reviewer octocat --submitted-at 2026-08-03T10:00:00Z \
+  --description "Review has approved" \
+  --html-url 'https://github.com/acme/pingcode-cli/pull/42#pullrequestreview-384383294' --json
+
+pingcode scm review update 524587fe700d43b81b080988 --platform Github --repo acme/pingcode-cli \
+  --pr-id 594587fe700d43b81b080789 --status request_changes --json
+```
+
+- **`--pr-id` is required on every leaf, and it takes an id, not a number.** A review is
+  addressed three parents deep, and **there is no repository-wide or organisation-wide
+  review list** — you enumerate one pull request at a time, exactly as with `scm ref` and
+  branches. Get the id from `scm pr list --number <n> --json`.
+- **`--submitted-at` is required on create.** A review carries **no server-assigned
+  timestamp at all** — no `created_at`, no `updated_at` — so the time is yours to supply.
+  On `update` it is optional like everything else: this PATCH has no mandatory field
+  (unlike `scm pr update`).
+- **`--status` is `comment` / `approved` / `request_changes`.** A value outside the enum
+  is rejected by the server (exit 7), not by the CLI.
+- **`--reviewer` is a git username**, attribution by name again.
+- **`--html-url` is optional**; without it PingCode shows no jump link back to the
+  hosting platform. **Quote it** in a shell — review URLs contain a `#`.
+
 ### Name → id
 
 ```bash
@@ -240,19 +341,27 @@ with no lookup, and the two are mutually exclusive (exit 2).
 ### What cannot be deleted, and why nothing is `replace`d
 
 **`scm branch delete` is the only delete in this module.** For everything else — platforms,
-git identities, repositories, commits and refs — **no DELETE exists upstream**. Nothing you
-create there can ever be removed through the API, so mark test data clearly and check
-spellings before you write. `--owner-name` and branch `--sender` are the two flags that can
-create a row by accident.
+git identities, repositories, commits, refs, **pull requests and code reviews** —
+**no DELETE exists upstream**. Nothing you create there can ever be removed through the API, so
+mark test data clearly and check spellings before you write. A mistyped pull request title
+can be patched; a pull request created against the wrong repository or with the wrong
+`--number` **cannot be withdrawn**. `--owner-name` and branch `--sender` are the two flags
+that can create a row by accident.
 
 **`PUT` is deliberately not offered anywhere.** Five scm families document a `PUT` that
 replaces the whole record and blanks every field you did not send, and this API never
-documents what clearing a field does. Use `update` (PATCH). If you truly want a full
-replacement, ask for it explicitly through the escape hatch:
+documents what clearing a field does. Use `update` (PATCH). **Full replacement of a pull
+request or a code review therefore goes through `pingcode api PUT`**, and note that the
+pull request `PUT` additionally *requires* `source_branch_id` where the create leaves it
+optional — omitting a field there is not "leave it alone", it is a rejection or a wipe. If
+you truly want a full replacement, ask for it explicitly through the escape hatch:
 
 ```bash
 pingcode api PUT /v1/scm/products/68393e8b47512a5d5d4e5b55 \
   --set name=Github --set type=github
+
+pingcode api PUT /v1/scm/products/<platform>/repositories/<repo>/pull_requests/<pr> \
+  --set title=… --set creator_name=… --set source_branch_id=… --set target_branch_id=… --set status=open
 ```
 
 See [`api.md`](api.md).
@@ -260,8 +369,8 @@ See [`api.md`](api.md).
 ⚠️ **代码分支 has no `PUT` upstream at all** — its fifth verb is `DELETE`, which is why
 `scm branch delete` exists while its siblings have none. So there is nothing missing to
 "complete": do not add a `scm branch replace`, and do not expect `scm platform delete` to
-appear. Pull requests and code reviews are the remaining unrefined families and stay
-reachable through `pingcode api` for now.
+appear. All six documented scm families are now refined commands; the only part of
+`/v1/scm/**` that is generic-layer-only is those five `PUT`s.
 
 ### Errors you should expect
 
@@ -280,3 +389,8 @@ reachable through `pingcode api` for now.
 | deleting the **default** branch | 7 |
 | a `--type` outside the enum, or a duplicate name / SHA / ref | 7 |
 | `scm ref list` for a branch that was deleted (server error) | 7 |
+| `--pr-id` missing on any `scm review` leaf | 2 |
+| a non-numeric `--number`, or a non-date `--merged-at` / `--submitted-at` | 2 |
+| a pull request or code review id that does not exist | 5 |
+| `--status merged` without `--merged-at` / `--merged-commit-sha` / `--merged-by` | 7 |
+| a `--status` outside its enum, or a duplicate pull request `--number` | 7 |

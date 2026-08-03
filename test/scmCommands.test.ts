@@ -777,3 +777,302 @@ describe('scm ref commands', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// S1c: pull requests / code reviews
+// ---------------------------------------------------------------------------
+
+const PR = '6a70a5f1919cce9794f01c3f';
+const REVIEW = '6a70a62839cbed1cf7127e11';
+
+const pullRequestsPage = (
+  values: unknown[] = [{ id: PR, number: 42, title: 'feat: x', status: 'open' }],
+) => jsonResponse({ page_index: 0, page_size: 30, total: values.length, values });
+
+describe('scm pr commands', () => {
+  it('resolves --platform then --repo, and lists that repository’s pull requests', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'list', '--platform', 'Github', '--repo', 'code-interpreter', '--json'],
+      [platformsPage, reposPage, () => pullRequestsPage()],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[2]?.url).toContain(`/repositories/${REPO}/pull_requests?`);
+    expect(run.stderr).toBe('');
+    JSON.parse(run.stdout);
+  });
+
+  it('requires --repo, like every repository-scoped leaf', async () => {
+    const run = await runCli(['scm', 'pr', 'list', '--platform-id', PLATFORM], [platformsPage]);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('--repo <name|full_name|id> is required');
+  });
+
+  it('sends --number as a query filter', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'list', '--platform-id', PLATFORM, '--repo-id', REPO, '--number', '42', '--json'],
+      [() => pullRequestsPage()],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls).toHaveLength(1);
+    expect(run.calls[0]?.url).toContain('number=42');
+  });
+
+  it('refuses a non-numeric --number before any request (exit 2)', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'list', '--platform-id', PLATFORM, '--repo-id', REPO, '--number', 'forty-two'],
+      [() => pullRequestsPage()],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('--number');
+  });
+
+  it('gets a pull request by id, resolving nothing and validating no shape', async () => {
+    // The positional is an id: scm has no identifier and no short_id, and the detail
+    // path takes the 24-hex id only. Whatever was typed goes through verbatim.
+    const run = await runCli(
+      ['scm', 'pr', 'get', PR, '--platform-id', PLATFORM, '--repo-id', REPO, '--json'],
+      [() => jsonResponse({ id: PR, number: 42 })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls).toHaveLength(1);
+    expect(run.calls[0]?.url).toMatch(new RegExp(`/pull_requests/${PR}$`));
+  });
+
+  it('prints the request plan and sends nothing on a dry-run create', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--title', 'feat: login', '--number', '42', '--creator', 'bot',
+       '--target-branch-id', BRANCH, '--status', 'open', '--dry-run', '--json'],
+      [() => jsonResponse({ id: PR })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes).toEqual([]);
+    const plan = JSON.parse(run.stdout) as { request: { method: string; body: unknown } };
+    expect(plan.request.method).toBe('POST');
+    expect(plan.request.body).toEqual({
+      title: 'feat: login',
+      number: 42,
+      creator_name: 'bot',
+      target_branch_id: BRANCH,
+      status: 'open',
+    });
+  });
+
+  it('parses the merge trio and the counts into numbers and unix seconds', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--title', 't', '--number', '7', '--creator', 'bot',
+       '--target-branch-id', BRANCH, '--status', 'merged',
+       '--merged-at', '2026-08-03T10:00:00Z', '--merged-commit-sha', SHA, '--merged-by', 'bot',
+       '--commits-count', '3', '--changed-files-count', '0', '--json'],
+      [() => jsonResponse({ id: PR })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes[0]?.body).toEqual({
+      title: 't',
+      number: 7,
+      creator_name: 'bot',
+      target_branch_id: BRANCH,
+      status: 'merged',
+      merged_at: 1785751200,
+      merged_commit_sha: SHA,
+      merged_by_name: 'bot',
+      commits_count: 3,
+      // Zero is a value, not an omission.
+      changed_files_count: 0,
+    });
+  });
+
+  it('warns when the API silently dropped a work-item link, and still exits 0', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--title', 't', '--number', '7', '--creator', 'bot',
+       '--target-branch-id', BRANCH, '--status', 'open',
+       '--work-item', 'YYHC-10', '--work-item', 'NOSUCH-99999', '--json'],
+      [() => jsonResponse({ id: PR, work_items: [{ id: 'w1', identifier: 'YYHC-10' }] })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stderr).toContain('NOSUCH-99999');
+    expect(run.stderr).not.toContain('YYHC-10');
+    JSON.parse(run.stdout);
+  });
+
+  it('reads the current status back when --status is omitted on update', async () => {
+    // The API requires `status` on every PATCH, so "only change the title" is two
+    // requests: a GET to learn the status, then the PATCH carrying it (design D13).
+    const run = await runCli(
+      ['scm', 'pr', 'update', PR, '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--title', 'feat: renamed', '--json'],
+      [
+        () => jsonResponse({ id: PR, number: 42, status: 'open' }),
+        () => jsonResponse({ id: PR, number: 42, status: 'open', title: 'feat: renamed' }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls).toHaveLength(2);
+    expect(run.calls[0]?.method).toBe('GET');
+    expect(run.writes).toHaveLength(1);
+    expect(run.writes[0]?.method).toBe('PATCH');
+    expect(run.writes[0]?.body).toEqual({ status: 'open', title: 'feat: renamed' });
+  });
+
+  it('skips that read when --status was given, so the patch is one request', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'update', PR, '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--status', 'merged', '--json'],
+      [() => jsonResponse({ id: PR, status: 'merged' })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls).toHaveLength(1);
+    expect(run.writes[0]?.body).toEqual({ status: 'merged' });
+  });
+
+  it('refuses an empty pull request patch before any request (exit 2)', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'update', PR, '--platform-id', PLATFORM, '--repo-id', REPO],
+      [() => jsonResponse({ id: PR, status: 'open' })],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('nothing to update');
+  });
+
+  it('says so rather than sending a statusless patch when the row reports no status', async () => {
+    const run = await runCli(
+      ['scm', 'pr', 'update', PR, '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--title', 't', '--json'],
+      [() => jsonResponse({ id: PR, number: 42 })],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toEqual([]);
+    const error = JSON.parse(run.stderr) as { error: { kind: string; message: string } };
+    expect(error.error.kind).toBe('usage');
+    expect(error.error.message).toContain('--status is required');
+  });
+
+  it('offers no delete and no replace leaf', async () => {
+    for (const verb of ['delete', 'replace']) {
+      const run = await runCli(
+        ['scm', 'pr', verb, PR, '--platform-id', PLATFORM, '--repo-id', REPO],
+        [],
+      );
+      expect(run.exit, verb).toBe(2);
+      expect(run.calls, verb).toEqual([]);
+    }
+  });
+});
+
+describe('scm review commands', () => {
+  const reviewsPage = (values: unknown[] = [{ id: REVIEW, status: 'approved' }]) =>
+    jsonResponse({ page_index: 0, page_size: 30, total: values.length, values });
+
+  it('requires --pr-id on list, because a review has no wider list', async () => {
+    const run = await runCli(
+      ['scm', 'review', 'list', '--platform-id', PLATFORM, '--repo-id', REPO],
+      [() => reviewsPage()],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('--pr-id');
+  });
+
+  it('lists the reviews of one pull request with only the paging query', async () => {
+    const run = await runCli(
+      ['scm', 'review', 'list', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--pr-id', PR, '--page-size', '2', '--json'],
+      [() => reviewsPage()],
+    );
+    expect(run.exit).toBe(0);
+    const url = new URL(run.calls[0]?.url ?? 'https://x.invalid');
+    expect(url.pathname).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/pull_requests/${PR}/reviews`,
+    );
+    expect([...url.searchParams.keys()].sort()).toEqual(['page_index', 'page_size']);
+  });
+
+  it('gets one review under its pull request', async () => {
+    const run = await runCli(
+      ['scm', 'review', 'get', REVIEW, '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--pr-id', PR, '--json'],
+      [() => jsonResponse({ id: REVIEW, status: 'approved', pull_request: { id: PR, number: 42 } })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[0]?.url).toContain(`/pull_requests/${PR}/reviews/${REVIEW}`);
+    expect(JSON.parse(run.stdout)).toMatchObject({ id: REVIEW });
+  });
+
+  it('creates a review, sending submitted_at as unix seconds', async () => {
+    const run = await runCli(
+      ['scm', 'review', 'create', '--platform-id', PLATFORM, '--repo-id', REPO, '--pr-id', PR,
+       '--status', 'approved', '--reviewer', 'bot',
+       '--submitted-at', '2026-08-03T10:00:00Z', '--description', 'looks good', '--json'],
+      [() => jsonResponse({ id: REVIEW, status: 'approved' })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes).toHaveLength(1);
+    expect(run.writes[0]?.method).toBe('POST');
+    expect(run.writes[0]?.body).toEqual({
+      status: 'approved',
+      reviewer_name: 'bot',
+      submitted_at: 1785751200,
+      description: 'looks good',
+    });
+  });
+
+  it('refuses a non-date --submitted-at before any request', async () => {
+    const run = await runCli(
+      ['scm', 'review', 'create', '--platform-id', PLATFORM, '--repo-id', REPO, '--pr-id', PR,
+       '--status', 'approved', '--reviewer', 'bot', '--submitted-at', 'yesterday'],
+      [() => jsonResponse({ id: REVIEW })],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+  });
+
+  it('sends nothing on a dry-run review create', async () => {
+    const run = await runCli(
+      ['scm', 'review', 'create', '--platform-id', PLATFORM, '--repo-id', REPO, '--pr-id', PR,
+       '--status', 'comment', '--reviewer', 'bot', '--submitted-at', '1785751200',
+       '--dry-run', '--json'],
+      [() => jsonResponse({ id: REVIEW })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes).toEqual([]);
+    expect(JSON.parse(run.stdout)).toMatchObject({ dry_run: true });
+  });
+
+  it('patches a review with only the fields it was given', async () => {
+    const run = await runCli(
+      ['scm', 'review', 'update', REVIEW, '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--pr-id', PR, '--status', 'request_changes', '--json'],
+      [() => jsonResponse({ id: REVIEW, status: 'request_changes' })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes[0]?.method).toBe('PATCH');
+    expect(run.writes[0]?.body).toEqual({ status: 'request_changes' });
+  });
+
+  it('refuses an empty review patch (exit 2)', async () => {
+    const run = await runCli(
+      ['scm', 'review', 'update', REVIEW, '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--pr-id', PR],
+      [() => jsonResponse({ id: REVIEW })],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('nothing to update');
+  });
+
+  it('offers no delete and no replace leaf', async () => {
+    for (const verb of ['delete', 'replace']) {
+      const run = await runCli(
+        ['scm', 'review', verb, REVIEW, '--platform-id', PLATFORM, '--repo-id', REPO, '--pr-id', PR],
+        [],
+      );
+      expect(run.exit, verb).toBe(2);
+      expect(run.calls, verb).toEqual([]);
+    }
+  });
+});

@@ -225,13 +225,28 @@ async function resolveBranchRef(
 // work item link verification
 // ---------------------------------------------------------------------------
 
-function identifiersOf(workItems: ScmWorkItemRef[]): string[] {
+/**
+ * The identifiers of an embedded `work_items[]`.
+ *
+ * Exported because three scm families carry the array (branch, commit, pull request)
+ * and each renders it the same way. `branch.ts` is the group's de-facto shared module
+ * for the work-item-link contract — `warnUnlinkedWorkItems` already lives here and
+ * `commit.ts` / `ref.ts` already import from here — so the helpers stay together
+ * rather than being copied a third time or promoted into `cli/commands/common.ts`,
+ * which every parallel child edits (the same call S1a made for `addPairOptions`).
+ */
+export function identifiersOf(workItems: ScmWorkItemRef[]): string[] {
   const out: string[] = [];
   for (const item of workItems) {
     const identifier = item.identifier ?? item.name;
     if (identifier !== undefined && identifier !== '') out.push(identifier);
   }
   return out;
+}
+
+/** A table cell must stay on one line; the API's text fields frequently do not. */
+export function oneLine(text: string | undefined): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -263,8 +278,13 @@ export function warnUnlinkedWorkItems(
   );
 }
 
-/** `--work-item` values, trimmed and rejected when blank (the API rejects `""` too). */
-function workItemIdentifiers(values: string[] | undefined): string[] | undefined {
+/**
+ * `--work-item` values, trimmed and rejected when blank (the API rejects `""` too).
+ *
+ * Exported alongside `warnUnlinkedWorkItems` and `identifiersOf`: the three are one
+ * contract — validate what you send, then check what came back.
+ */
+export function workItemIdentifiers(values: string[] | undefined): string[] | undefined {
   if (values === undefined) return undefined;
   const identifiers = values.map((value) => value.trim());
   if (identifiers.some((identifier) => identifier === '')) {

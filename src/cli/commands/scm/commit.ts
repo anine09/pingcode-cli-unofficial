@@ -10,7 +10,7 @@ import {
 import type { Ctx } from '../../../core/context';
 import { UsageError } from '../../../core/errors';
 import { collect } from '../../../core/paginate';
-import type { ScmCommit, ScmWorkItemRef } from '../../../types/api';
+import type { ScmCommit } from '../../../types/api';
 import { addGlobalOptions } from '../../globals';
 import { errLine, paint, type Column } from '../../output';
 import {
@@ -27,7 +27,7 @@ import {
   timestampCell,
   type PagingFlags,
 } from '../common';
-import { warnUnlinkedWorkItems } from './branch';
+import { identifiersOf, oneLine, warnUnlinkedWorkItems, workItemIdentifiers } from './branch';
 
 /**
  * `pingcode scm commit …` — 提交 ([S§3.12.7]).
@@ -93,19 +93,6 @@ export const COMMIT_COLUMNS: Column<ScmCommit>[] = [
  */
 function shortSha(sha: string | undefined): string {
   return sha === undefined ? '' : sha.slice(0, 7);
-}
-
-function oneLine(text: string | undefined): string {
-  return (text ?? '').replace(/\s+/g, ' ').trim();
-}
-
-function identifiersOf(workItems: ScmWorkItemRef[]): string[] {
-  const out: string[] = [];
-  for (const item of workItems) {
-    const identifier = item.identifier ?? item.name;
-    if (identifier !== undefined && identifier !== '') out.push(identifier);
-  }
-  return out;
 }
 
 export function registerCommitCommands(parent: Command): void {
@@ -224,17 +211,6 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
   const commit = await createCommit(ctx, input);
   warnUnlinkedWorkItems(ctx, identifiers, commit.work_items);
   printCommit(commit, ctx, 'created');
-}
-
-function workItemIdentifiers(values: string[] | undefined): string[] | undefined {
-  if (values === undefined) return undefined;
-  const identifiers = values.map((value) => value.trim());
-  if (identifiers.some((identifier) => identifier === '')) {
-    throw new UsageError('--work-item must not be empty', {
-      hint: 'pass a work item identifier such as PLM-001, or omit the flag',
-    });
-  }
-  return identifiers;
 }
 
 function printCommit(commit: ScmCommit, ctx: Ctx, verb?: string): void {
