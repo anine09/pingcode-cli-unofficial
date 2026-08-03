@@ -33,6 +33,10 @@ Commands:
   get [options] <case>     show one case (accepts an id or a short_id)
   create [options]         create a case (only the library and --title are required)
   update [options] <case>  patch a case — only the fields you pass are sent, and they replace
+  relation                 关联 cross-kind links of a test case (principal_type=test_case)
+  comment                  评论 comments on a test case (principal_type=test_case)
+  attachment               附件 attachments of a test case (principal_type=test_case)
+  activity                 活动记录 audit trail of a test case (principal_type=test_case)
   help [command]           display help for command
 "
 `;
@@ -112,6 +116,10 @@ Commands:
                          own executor unless you name another one
   bulk [options]         insert, update and delete the runs of one plan in a single call — the only
                          way to delete a run. Each list is capped at 50, checked before the request
+  relation               关联 cross-kind links of a test run (principal_type=test_run)
+  comment                评论 comments on a test run (principal_type=test_run)
+  attachment             附件 attachments of a test run (principal_type=test_run)
+  activity               活动记录 audit trail of a test run (principal_type=test_run)
   help [command]         display help for command
 "
 `;

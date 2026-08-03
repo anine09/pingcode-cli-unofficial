@@ -26,6 +26,7 @@ import { collect, type SearchPayload } from '../../core/paginate';
 import type { ShipIdea } from '../../types/api';
 import { addGlobalOptions } from '../globals';
 import { errLine, paint, type Column } from '../output';
+import { addCrosscutting } from './_shared/crosscutting';
 import {
   addPagingOptions,
   addShipStateOptions,
@@ -186,6 +187,13 @@ export function registerIdeaCommands(parent: Command): void {
     { hidden: true },
   ).action(async (target: string, flags: UpdateFlags, command: Command) => {
     await runUpdate(target, flags, command);
+  });
+
+  // All four families accept `principal_type=idea`, live-verified 2026-08-03 — and an
+  // idea is the one principal `/v1/relations` accepts against every other kind, which
+  // makes this the requirement→work-item→case traceability entry point (design D5.2).
+  addCrosscutting(group, 'idea', {
+    resolveId: async (ctx, ref) => (await resolveShipRef(ctx, 'idea', ref)).id,
   });
 }
 

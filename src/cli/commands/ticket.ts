@@ -33,6 +33,7 @@ import { collect, type SearchPayload } from '../../core/paginate';
 import type { Ref, ShipTicket } from '../../types/api';
 import { addGlobalOptions } from '../globals';
 import { errLine, paint, type Column } from '../output';
+import { addCrosscutting } from './_shared/crosscutting';
 import { present, resolvePropertiesWith, type ResolvedProperties } from './idea';
 import {
   addPagingOptions,
@@ -218,6 +219,13 @@ export function registerTicketCommands(parent: Command): void {
       });
     }
     await runUpdate(target, flags, command);
+  });
+
+  // All four families accept `principal_type=ticket`, live-verified 2026-08-03. Note
+  // the asymmetry the matrix in `api/common.ts` records: a ticket links to a work item
+  // or an idea, but the test-case pairing only exists in the other direction.
+  addCrosscutting(group, 'ticket', {
+    resolveId: async (ctx, ref) => (await resolveShipRef(ctx, 'ticket', ref)).id,
   });
 }
 

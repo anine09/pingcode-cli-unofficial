@@ -51,6 +51,10 @@ Commands:
                                     replace
   transition [options] <work-item>  move a work item to another state (workflow-validated by the
                                     server)
+  relation                          关联 cross-kind links of a work item (principal_type=work_item)
+  comment                           评论 comments on a work item (principal_type=work_item)
+  attachment                        附件 attachments of a work item (principal_type=work_item)
+  activity                          活动记录 audit trail of a work item (principal_type=work_item)
   help [command]                    display help for command
 "
 `;

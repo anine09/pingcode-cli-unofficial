@@ -31,6 +31,10 @@ Commands:
   get [options] <idea>     show one idea
   create [options]         create an idea (only --product and --title are required)
   update [options] <idea>  patch an idea — only the fields you pass are sent, and they replace
+  relation                 关联 cross-kind links of a idea (principal_type=idea)
+  comment                  评论 comments on a idea (principal_type=idea)
+  attachment               附件 attachments of a idea (principal_type=idea)
+  activity                 活动记录 audit trail of a idea (principal_type=idea)
   help [command]           display help for command
 "
 `;
@@ -124,6 +128,10 @@ Commands:
   update [options] <ticket>      patch a ticket — only the fields you pass are sent, and they
                                  replace
   transition [options] <ticket>  move a ticket to another state (--dry-run previews the legal ones)
+  relation                       关联 cross-kind links of a ticket (principal_type=ticket)
+  comment                        评论 comments on a ticket (principal_type=ticket)
+  attachment                     附件 attachments of a ticket (principal_type=ticket)
+  activity                       活动记录 audit trail of a ticket (principal_type=ticket)
   help [command]                 display help for command
 "
 `;

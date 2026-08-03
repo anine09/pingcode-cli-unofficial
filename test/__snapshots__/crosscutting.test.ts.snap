@@ -1,0 +1,305 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the cross-object help surface > the reference mount, verbatim — the only new snapshot entry this feature adds 1`] = `
+"### project work-item relation
+Usage: pingcode project work-item relation [options] [command]
+
+关联 cross-kind links of a work item (principal_type=work_item)
+
+Options:
+  -h, --help                            display help for command
+
+Commands:
+  list [options] <ref>                  list the links of one object, filtered by the kind on the
+                                        other end
+  get [options] <ref> <relation-id>     show one link (the reference is taken for symmetry and not
+                                        sent)
+  add [options] <ref>                   link this object to another one
+  delete [options] <ref> <relation-id>  remove a link — both directions go at once (the reference
+                                        is not sent)
+  help [command]                        display help for command
+
+accepted --target-type for this principal: idea ticket test_case page
+The API declares no vocabulary for this endpoint, so that list is what a live
+tenant accepted — it is a hint, not a rule, and nothing is refused locally.
+Links between two objects of the same kind are a different, typed family:
+reach those with \`pingcode api POST /v1/pjm/work_items/{id}/relations\`.
+
+
+### project work-item relation list
+Usage: pingcode project work-item relation list [options] <ref>
+
+list the links of one object, filtered by the kind on the other end
+
+Arguments:
+  ref                   the work item this applies to, in any form its own read commands accept
+                        (resolved to an id first)
+
+Options:
+  --target-type <kind>  kind of object on the other end — see the note under \`relation --help\` for
+                        the pairs this API takes
+  --page <n>            page index, 0-based (default: "0")
+  --page-size <n>       rows per page, 1-100 (default: "30")
+  --all                 walk every page (best effort: the API guarantees no ordering)
+  --limit <n>           stop after this many rows with --all (default: "500")
+  -h, --help            display help for command
+
+### project work-item relation get
+Usage: pingcode project work-item relation get [options] <ref> <relation-id>
+
+show one link (the reference is taken for symmetry and not sent)
+
+Arguments:
+  ref          the work item this applies to, in any form its own read commands accept (resolved to
+               an id first)
+  relation-id  link id, as printed by list
+
+Options:
+  -h, --help   display help for command
+
+### project work-item relation add
+Usage: pingcode project work-item relation add [options] <ref>
+
+link this object to another one
+
+Arguments:
+  ref                   the work item this applies to, in any form its own read commands accept
+                        (resolved to an id first)
+
+Options:
+  --target-type <kind>  kind of object on the other end — see the note under \`relation --help\` for
+                        the pairs this API takes
+  --target-id <id>      id of the object on the other end — an id, never a name
+  -h, --help            display help for command
+
+### project work-item relation delete
+Usage: pingcode project work-item relation delete [options] <ref> <relation-id>
+
+remove a link — both directions go at once (the reference is not sent)
+
+Arguments:
+  ref          the work item this applies to, in any form its own read commands accept (resolved to
+               an id first)
+  relation-id  link id, as printed by list
+
+Options:
+  --yes        confirm the deletion — required, and there is no undo on this API
+  -h, --help   display help for command
+
+### project work-item comment
+Usage: pingcode project work-item comment [options] [command]
+
+评论 comments on a work item (principal_type=work_item)
+
+Options:
+  -h, --help                           display help for command
+
+Commands:
+  list [options] <ref>                 list the comments on one object, newest first as the API
+                                       returns them
+  get [options] <ref> <comment-id>     show one comment (the API needs the parent, an id alone is
+                                       not enough)
+  add [options] <ref>                  comment on this object — the write-back point for an
+                                       automated flow
+  delete [options] <ref> <comment-id>  soft-delete a comment: the row survives, flagged deleted
+  help [command]                       display help for command
+
+delete is a **soft** delete: the row stays in list with STATE=deleted, so treat
+that column as the answer to "is it still there". pjm also empties the text;
+ship keeps it, so an absent body is not the signal either.
+
+
+### project work-item comment list
+Usage: pingcode project work-item comment list [options] <ref>
+
+list the comments on one object, newest first as the API returns them
+
+Arguments:
+  ref              the work item this applies to, in any form its own read commands accept
+                   (resolved to an id first)
+
+Options:
+  --page <n>       page index, 0-based (default: "0")
+  --page-size <n>  rows per page, 1-100 (default: "30")
+  --all            walk every page (best effort: the API guarantees no ordering)
+  --limit <n>      stop after this many rows with --all (default: "500")
+  -h, --help       display help for command
+
+### project work-item comment get
+Usage: pingcode project work-item comment get [options] <ref> <comment-id>
+
+show one comment (the API needs the parent, an id alone is not enough)
+
+Arguments:
+  ref         the work item this applies to, in any form its own read commands accept (resolved to
+              an id first)
+  comment-id  comment id, as printed by list
+
+Options:
+  -h, --help  display help for command
+
+### project work-item comment add
+Usage: pingcode project work-item comment add [options] <ref>
+
+comment on this object — the write-back point for an automated flow
+
+Arguments:
+  ref                      the work item this applies to, in any form its own read commands accept
+                           (resolved to an id first)
+
+Options:
+  --text <text>            comment body, sent verbatim as plain text
+  --reply-to <comment-id>  make this a reply to an existing comment on this object
+  -h, --help               display help for command
+
+### project work-item comment delete
+Usage: pingcode project work-item comment delete [options] <ref> <comment-id>
+
+soft-delete a comment: the row survives, flagged deleted
+
+Arguments:
+  ref         the work item this applies to, in any form its own read commands accept (resolved to
+              an id first)
+  comment-id  comment id, as printed by list
+
+Options:
+  --yes       confirm the deletion — required, and there is no undo on this API
+  -h, --help  display help for command
+
+### project work-item attachment
+Usage: pingcode project work-item attachment [options] [command]
+
+附件 attachments of a work item (principal_type=work_item)
+
+Options:
+  -h, --help                              display help for command
+
+Commands:
+  list [options] <ref>                    list attachments — without --comment-id only the
+                                          object-level files
+  get [options] <ref> <attachment-id>     show one attachment — a snippet needs the --comment-id it
+                                          lives under
+  add-snippet [options] <ref>             attach a code snippet to a comment (the only attachment
+                                          write there is)
+  delete [options] <ref> <attachment-id>  delete an attachment for good — no soft delete, no undo
+  help [command]                          display help for command
+
+There is no file upload here: the API takes a file as one-step multipart/form-data,
+which this CLI cannot send, so only code snippets can be written. Snippets always
+hang off a comment — create one first and pass its id as --comment-id, on write
+and on every read, or the snippet is reported as not found.
+
+
+### project work-item attachment list
+Usage: pingcode project work-item attachment list [options] <ref>
+
+list attachments — without --comment-id only the object-level files
+
+Arguments:
+  ref                the work item this applies to, in any form its own read commands accept
+                     (resolved to an id first)
+
+Options:
+  --comment-id <id>  scope to one comment — mandatory for a snippet, which is invisible without it
+  --page <n>         page index, 0-based (default: "0")
+  --page-size <n>    rows per page, 1-100 (default: "30")
+  --all              walk every page (best effort: the API guarantees no ordering)
+  --limit <n>        stop after this many rows with --all (default: "500")
+  -h, --help         display help for command
+
+### project work-item attachment get
+Usage: pingcode project work-item attachment get [options] <ref> <attachment-id>
+
+show one attachment — a snippet needs the --comment-id it lives under
+
+Arguments:
+  ref                the work item this applies to, in any form its own read commands accept
+                     (resolved to an id first)
+  attachment-id      attachment id, as printed by list
+
+Options:
+  --comment-id <id>  scope to one comment — mandatory for a snippet, which is invisible without it
+  -h, --help         display help for command
+
+### project work-item attachment add-snippet
+Usage: pingcode project work-item attachment add-snippet [options] <ref>
+
+attach a code snippet to a comment (the only attachment write there is)
+
+Arguments:
+  ref                    the work item this applies to, in any form its own read commands accept
+                         (resolved to an id first)
+
+Options:
+  --comment-id <id>      comment to hang it on — required by the API in practice
+  --title <text>         snippet title, shown in the UI
+  --format <language>    language, one of: clike css dart django dockerfile go markdown nginx
+                         python php shell sql swift html javascript jsx pascal sass stylus vue yaml
+                         haskell
+  --content <text>       snippet body, sent verbatim
+  --content-file <path>  snippet body, read from a file instead of --content
+  -h, --help             display help for command
+
+### project work-item attachment delete
+Usage: pingcode project work-item attachment delete [options] <ref> <attachment-id>
+
+delete an attachment for good — no soft delete, no undo
+
+Arguments:
+  ref                the work item this applies to, in any form its own read commands accept
+                     (resolved to an id first)
+  attachment-id      attachment id, as printed by list
+
+Options:
+  --comment-id <id>  scope to one comment — mandatory for a snippet, which is invisible without it
+  --yes              confirm the deletion — required, and there is no undo on this API
+  -h, --help         display help for command
+
+### project work-item activity
+Usage: pingcode project work-item activity [options] [command]
+
+活动记录 audit trail of a work item (principal_type=work_item)
+
+Options:
+  -h, --help                         display help for command
+
+Commands:
+  list [options] <ref>               list what happened to one object, as the API orders it
+  get [options] <ref> <activity-id>  show one audit row, with its free-form content object
+  help [command]                     display help for command
+
+Read-only, and per-object: this API has no webhooks and no global change feed,
+so polling one object here is the only change stream there is.
+EVENT is the machine-readable name; SUMMARY is Chinese prose and not a contract.
+
+
+### project work-item activity list
+Usage: pingcode project work-item activity list [options] <ref>
+
+list what happened to one object, as the API orders it
+
+Arguments:
+  ref              the work item this applies to, in any form its own read commands accept
+                   (resolved to an id first)
+
+Options:
+  --page <n>       page index, 0-based (default: "0")
+  --page-size <n>  rows per page, 1-100 (default: "30")
+  --all            walk every page (best effort: the API guarantees no ordering)
+  --limit <n>      stop after this many rows with --all (default: "500")
+  -h, --help       display help for command
+
+### project work-item activity get
+Usage: pingcode project work-item activity get [options] <ref> <activity-id>
+
+show one audit row, with its free-form content object
+
+Arguments:
+  ref          the work item this applies to, in any form its own read commands accept (resolved to
+               an id first)
+  activity-id  activity id, as printed by list
+
+Options:
+  -h, --help   display help for command
+"
+`;

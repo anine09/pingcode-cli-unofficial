@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CROSSCUTTING_FAMILIES } from '../../src/cli/commands/_shared/crosscutting';
 import { GROUPS } from '../../src/cli/registry';
 import { containerPaths, groupNames, helpFor, leafPaths, program } from './tree';
 
@@ -26,16 +27,32 @@ describe('command tree root', () => {
     expect(groupNames()).toEqual(GROUPS.map(([name]) => name));
   });
 
-  it('nests exactly two levels below the root', () => {
-    // The shape assertion that replaces the old leaf-count arithmetic: a leaf is
-    // `group leaf` or `group subgroup leaf`, never deeper. This holds however many
-    // leaves exist, so it never needs revisiting.
+  it('nests two levels below the root, plus the injected cross-object families', () => {
+    // The shape assertion that replaces the old leaf-count arithmetic. It used to read
+    // "never deeper than `group subgroup leaf`", which was true until F5: design D5.2
+    // mounts the four cross-object families *under* an entity subgroup, so
+    // `project work-item comment add` is a legitimate fourth segment.
+    //
+    // The rule is tightened rather than loosened. Instead of allowing any depth, it
+    // names the only third-level containers the CLI is allowed to have — the four
+    // families, and only under an entity that mounts them. Anything else nesting that
+    // deep is still a failure, and this stays a traversal: mounting the families on a
+    // sixth entity does not touch this file.
     const roots = program().commands.filter((command) => command.name() !== 'help');
     const containers = roots.flatMap((command) => containerPaths(command));
     const leaves = roots.flatMap((command) => leafPaths(command));
 
-    expect(containers.filter((parts) => parts.length > 2)).toEqual([]);
-    expect(leaves.every((parts) => parts.length === 2 || parts.length === 3)).toBe(true);
+    const families: readonly string[] = CROSSCUTTING_FAMILIES;
+    const deep = containers.filter((parts) => parts.length > 2);
+    expect(deep.every((parts) => families.includes(parts[2] ?? ''))).toBe(true);
+    expect(containers.filter((parts) => parts.length > 3)).toEqual([]);
+    expect(
+      leaves.every((parts) =>
+        parts.length === 4
+          ? families.includes(parts[2] ?? '')
+          : parts.length === 2 || parts.length === 3,
+      ),
+    ).toBe(true);
   });
 
   it('accepts the global flags after the subcommand too', () => {

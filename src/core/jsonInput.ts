@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { UsageError } from './errors';
 
 /**
- * Reading a JSON document the caller pointed at — a file path or stdin.
+ * Reading a document the caller pointed at — a file path or stdin, JSON or plain text.
  *
  * **Why this lives in `core/` rather than in the command that needs it.** The
  * layering rule (design §2, asserted by `test/layering.test.ts`) is that `cli/`
@@ -33,17 +33,29 @@ export function parseJsonDocument(text: string, source: string): unknown {
   }
 }
 
-/** Read and parse a JSON file. A missing/unreadable file is a usage error, not a crash. */
-export async function readJsonFile(filePath: string): Promise<unknown> {
-  let text: string;
+/**
+ * Read a UTF-8 text file the caller pointed at. A missing/unreadable file is a usage
+ * error (exit 2) naming the flag, not a crash.
+ *
+ * `flag` is a parameter because two flags now point at files and the message has to
+ * name the one the user actually typed: `pingcode api … --body-file` wants JSON,
+ * `… attachment add-snippet --content-file` wants the file verbatim. Not parsing here
+ * is the whole point of the split — a code snippet is not JSON.
+ */
+export async function readTextFile(filePath: string, flag = '--body-file'): Promise<string> {
   try {
-    text = await readFile(filePath, 'utf8');
+    return await readFile(filePath, 'utf8');
   } catch (error) {
     throw new UsageError(
-      `--body-file ${filePath} could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      `${flag} ${filePath} could not be read: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }
+}
+
+/** Read and parse a JSON file. A missing/unreadable file is a usage error, not a crash. */
+export async function readJsonFile(filePath: string): Promise<unknown> {
+  const text = await readTextFile(filePath);
   return parseJsonDocument(text, `--body-file ${filePath}`);
 }
 

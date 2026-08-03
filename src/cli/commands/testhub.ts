@@ -67,6 +67,7 @@ import type {
 } from '../../types/api';
 import { addGlobalOptions } from '../globals';
 import { errLine, paint, type Column } from '../output';
+import { addCrosscutting } from './_shared/crosscutting';
 import {
   addPagingOptions,
   collectValue,
@@ -696,6 +697,14 @@ function registerCaseCommands(parent: Command): void {
       await runCaseUpdate(target, flags, command);
     },
   );
+
+  // All four families accept `principal_type=test_case` — **spelled `test_case`, not
+  // `case`**, which is the segment trap of [th#2] showing up again in a vocabulary
+  // (live-verified 2026-08-03). `relation` here is the case↔work-item traceability
+  // link the whole DevOps loop depends on (design D5.2).
+  addCrosscutting(group, 'test_case', {
+    resolveId: async (ctx, ref) => (await getCase(ctx, ref)).id,
+  });
 }
 
 async function runCaseList(flags: CaseListFlags, command: Command): Promise<void> {
@@ -1237,6 +1246,17 @@ function registerRunCommands(parent: Command): void {
       await runRunBulk(flags, command);
     },
   );
+
+  // `principal_type=test_run`, all four families live-verified 2026-08-03.
+  //
+  // **This is where design D5.2's list was wrong and live evidence corrected it**: it
+  // named `testhub plans` as the fifth mount, but a test *plan* is not a principal in
+  // any of the four families — `comments`/`attachments` reject it and `activities`
+  // answers HTTP 500. A run is, so the mount moved here. Its relation matrix is also
+  // the narrowest of the five: a run links to a work item and to nothing else.
+  addCrosscutting(group, 'test_run', {
+    resolveId: async (ctx, ref) => (await getRun(ctx, ref)).id,
+  });
 }
 
 async function runRunList(flags: RunListFlags, command: Command): Promise<void> {

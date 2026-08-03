@@ -28,6 +28,7 @@ import { collect } from '../../core/paginate';
 import type { WorkItem } from '../../types/api';
 import { addGlobalOptions } from '../globals';
 import { errLine, paint, type Column } from '../output';
+import { addCrosscutting } from './_shared/crosscutting';
 import {
   addPagingOptions,
   addStateOptions,
@@ -218,6 +219,14 @@ export function registerWorkItemCommands(parent: Command): void {
       });
     }
     await runUpdate(target, flags, command);
+  });
+
+  // The four cross-object families, injected rather than written here (design D5.2).
+  // All four accept `principal_type=work_item`, live-verified 2026-08-03. `relation`
+  // is the cross-*kind* linker: work-item↔work-item links are the separate typed
+  // family `/v1/pjm/work_items/{id}/relations`, which is not this.
+  addCrosscutting(group, 'work_item', {
+    resolveId: async (ctx, ref) => (await resolveWorkItem(ctx, ref)).id,
   });
 }
 

@@ -83,6 +83,16 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['runs', /pingcode testhub runs (list|patch|bulk)/],
   ['testhub id lookups', /pingcode testhub meta /],
   ['organisation members', /pingcode settings users/],
+  // F5 — the four cross-object families. Five rows, because each family has a trap that
+  // is invisible from `--help` alone and an agent that does not know it will loop:
+  // a relation needs a target *kind* and refuses same-kind work-item pairs, a comment
+  // delete does not delete, an attachment can only be a snippet and only under a
+  // comment, and an activity feed is the only change stream this API has.
+  ['cross-object comments', /pingcode project work-item comment (add|list|get|delete)/],
+  ['cross-object relations', /pingcode (product idea|testhub cases) relation (add|list)/],
+  ['cross-object attachments', /pingcode project work-item attachment add-snippet/],
+  ['cross-object activities', /pingcode testhub runs activity list/],
+  ['no top-level comment group', /no top-level `?comment`? group/i],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {
@@ -226,14 +236,39 @@ describe('the module documents carry the per-module rules (design D6.4)', () => 
   });
 
   it('the reserved modules promise nothing that does not exist yet', () => {
-    // `api.md` left this list when F3 landed the `api` group: it is now real
-    // documentation for real commands, and the forward assertion below is what keeps it
-    // honest. The remaining three still describe unbuilt surface.
-    for (const name of ['scm.md', 'cicd.md', 'crosscutting.md']) {
+    // `api.md` left this list when F3 landed the `api` group and `crosscutting.md` when
+    // F5 landed the four injected families: both are now real documentation for real
+    // commands, and the forward assertion below is what keeps them honest. The remaining
+    // two still describe unbuilt surface.
+    for (const name of ['scm.md', 'cicd.md']) {
       const body = modules[name] ?? '';
       expect(body, name).toMatch(/do not exist yet/i);
       expect(body, name).toMatch(/Reserved/i);
     }
+  });
+
+  it('crosscutting keeps the mount table and the four traps it exists to record', () => {
+    const cross = modules['crosscutting.md'] ?? '';
+    // the mount table, including the entity that is deliberately absent
+    expect(cross).toMatch(/principal_type/);
+    expect(cross).toMatch(/test_run/);
+    expect(cross).toMatch(/test plan is not an object these families accept/i);
+    // relations: no type, cross-kind only, asymmetric, mirrored
+    expect(cross).toMatch(/takes no relation type/i);
+    expect(cross).toMatch(/work item ↔ work item is a different family/i);
+    expect(cross).toMatch(/relation_types/);
+    expect(cross).toMatch(/mirrored pair/i);
+    expect(cross).toMatch(/mandatory on `?relation list`?/i);
+    // comments: the soft delete
+    expect(cross).toMatch(/does not remove the row/i);
+    // attachments: no file upload, and the undocumented comment_id requirement
+    expect(cross).toMatch(/multipart\/form-data/);
+    expect(cross).toMatch(/`?--comment-id`? is required/i);
+    expect(cross).toMatch(/100039/);
+    // activities: no webhooks
+    expect(cross).toMatch(/no webhook API and no global activity stream/i);
+    // and it must not tell the agent this file is still a placeholder
+    expect(cross).not.toMatch(/do not exist yet/i);
   });
 
   it('the api module carries the generic layer\'s own rules', () => {
