@@ -18,6 +18,7 @@ Options:
 Commands:
   auth            authenticate against PingCode (Client Credentials app)
   api             通用逃生舱: call any documented v1 endpoint directly (catalog-checked passthrough)
+  resolve         name → id: resolve a name, alias or id for any of the CLI's lookup kinds
   product         产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)
   project         项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
   testhub         测试管理 testhub: libraries 测试库, cases 用例, plans 测试计划, runs 执行用例 (scopes

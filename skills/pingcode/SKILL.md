@@ -194,6 +194,30 @@ pingcode settings users --keywords wang --json
 The organisation directory (`/v1/directory/users`, scope `pcp:read:global:team`) belongs to no
 business module, which is why it sits here rather than under `product` or `project`. It is the
 candidate set for pjm's `--assignee`; ship's `--assignee` uses `product meta members` instead.
+
+### Name → id resolution
+
+`pingcode api` takes **ids only** — it understands no business names on purpose. `resolve` is the
+missing half: one lookup, one id on stdout, nothing else.
+
+```bash
+pingcode resolve list --json                                   # every kind and the parent it needs
+pingcode resolve project "移动端 App" --json                     # {"kind":"project","id":"5f2a…",…}
+pingcode resolve ship-product SLC --json                       # identifier works as an alias
+pingcode resolve ship-idea-state 已评审 --parent <product_id> --json
+pingcode resolve testhub-library "研发测试库" --json
+```
+
+- stdout under `--json` is the resolution itself, so it composes:
+  `pingcode api GET /v1/ship/idea/states --query product_id=$(pingcode resolve ship-product "智能客服" --json | jq -r .id)`.
+- An **id is passed through** after being verified; a **name must match exactly** (case-insensitively)
+  and exactly once. Zero or several matches is exit 2 listing the candidates — it never picks one.
+- `--parent` takes an **id**, not a name: chain a second `resolve` if you only have the name.
+- Answers are cached for 24 h per (host, `client_id`, parent, kind); `--no-cache` bypasses it.
+- Ticket state plans and their flows are absent from `resolve list`, because no name addresses them.
+
+The refined commands (`project meta …`, `product meta …`, `testhub meta …`) already accept names
+directly, so `resolve` is mainly for feeding the generic layer.
 ## 4. Rules that will bite you
 
 1. **Resolve ids per project.** Run `pingcode project meta types` / `project meta states` for the project you are

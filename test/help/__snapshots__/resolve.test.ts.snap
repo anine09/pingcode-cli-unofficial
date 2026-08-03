@@ -1,0 +1,152 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`resolve --help > resolve (the generated kind list) 1`] = `
+"Usage: pingcode resolve [options] [command]
+
+name → id: resolve a name, alias or id for any of the CLI's lookup kinds
+
+Options:
+  -h, --help                                              display help for command
+
+Commands:
+  list [options]                                          enumerate every resolvable kind, its
+                                                          parent scope and its list endpoint
+  project [options] <name>                                project → id (/v1/pjm/projects)
+  work_item_type|work-item-type [options] <name>          work item type → id
+                                                          (/v1/pjm/work_item/types)
+  work_item_state|work-item-state [options] <name>        state → id (/v1/pjm/work_item/states)
+  work_item_priority|work-item-priority [options] <name>  priority → id
+                                                          (/v1/pjm/work_item/priorities)
+  sprint [options] <name>                                 sprint → id
+                                                          (/v1/pjm/projects/{parent}/sprints)
+  user [options] <name>                                   user → id (/v1/directory/users)
+  ship-product [options] <name>                           product → id (/v1/ship/products)
+  ship-product-member [options] <name>                    product member → id
+                                                          (/v1/ship/products/{parent}/members)
+  ship-idea-state [options] <name>                        idea state → id (/v1/ship/idea/states)
+  ship-idea-priority [options] <name>                     idea priority → id
+                                                          (/v1/ship/idea/priorities)
+  ship-idea-suite [options] <name>                        suite → id (/v1/ship/idea/suites)
+  ship-idea-property [options] <name>                     idea property → id
+                                                          (/v1/ship/idea/properties)
+  ship-ticket-state [options] <name>                      ticket state → id
+                                                          (/v1/ship/ticket/states)
+  ship-ticket-priority [options] <name>                   ticket priority → id
+                                                          (/v1/ship/ticket/priorities)
+  ship-ticket-type [options] <name>                       ticket type → id (/v1/ship/ticket/types)
+  ship-ticket-channel [options] <name>                    ticket channel → id
+                                                          (/v1/ship/ticket/channels)
+  ship-ticket-property [options] <name>                   ticket property → id
+                                                          (/v1/ship/ticket/properties)
+  testhub-library [options] <name>                        test library → id (/v1/testhub/libraries)
+  testhub-suite [options] <name>                          suite → id
+                                                          (/v1/testhub/libraries/{parent}/suites)
+  testhub-case-state [options] <name>                     case state → id (/v1/testhub/case/states)
+  testhub-case-type [options] <name>                      case type → id (/v1/testhub/case/types)
+  testhub-case-important-level [options] <name>           important level → id
+                                                          (/v1/testhub/case_important_levels)
+  testhub-run-status [options] <name>                     run status → id
+                                                          (/v1/testhub/run/statuses)
+  testhub-plan [options] <name>                           test plan → id
+                                                          (/v1/testhub/libraries/{parent}/plans)
+  testhub-plan-type [options] <name>                      plan type → id
+                                                          (/v1/testhub/libraries/{parent}/plan_types)
+  help [command]                                          display help for command
+
+Every lookup follows the same rules as the refined commands, because it is the same
+engine: an id is passed through untouched, a name must match **exactly** (case-
+insensitively) and exactly once, and the answer is cached for 24h under
+(host, client_id, parent, kind) — bypass it with --no-cache.
+Start with \`pingcode resolve list\`, which prints every kind and the parent it needs.
+--parent takes an **id**, so the group composes with itself as well as with \`api\`:
+  pingcode resolve ship-idea-state 已评审 \\
+    --parent "$(pingcode resolve ship-product 智能客服 --json | jq -r .id)"
+  pingcode api GET /v1/ship/idea/states \\
+    --query product_id=$(pingcode resolve ship-product "智能客服" --json | jq -r .id)
+Kinds that a name cannot address at all (ticket state plans and their flows) are
+absent on purpose: nothing names them, so there is nothing to resolve.
+
+"
+`;
+
+exports[`resolve --help > resolve list 1`] = `
+"Usage: pingcode resolve list [options]
+
+enumerate every resolvable kind, its parent scope and its list endpoint
+
+Options:
+  -h, --help  display help for command
+
+Local: this prints the resolver table, never the network. The KIND column is the
+subcommand name and the \`kind\` field of a resolution; PARENT is the kind whose id
+--parent takes.
+--json prints {"values":[…],"count":N}, each row carrying the failure hint too.
+
+"
+`;
+
+exports[`resolve --help > resolve project (a root lookup: no --parent) 1`] = `
+"Usage: pingcode resolve project [options] <name>
+
+project → id (/v1/pjm/projects)
+
+Arguments:
+  name        project name, alias or id (an id is verified, then passed through)
+
+Options:
+  -h, --help  display help for command
+"
+`;
+
+exports[`resolve --help > resolve ship-idea-state (product-scoped, with the row hint) 1`] = `
+"Usage: pingcode resolve ship-idea-state [options] <name>
+
+idea state → id (/v1/ship/idea/states)
+
+Arguments:
+  name           idea state name, alias or id (an id is verified, then passed through)
+
+Options:
+  --parent <id>  the product id this idea state is scoped by (\`resolve ship-product\` turns a name
+                 into one)
+  -h, --help     display help for command
+
+idea states are scoped to the product; unlike tickets, ship exposes no idea state-flow
+endpoint, so a transition can only be validated by the server
+
+"
+`;
+
+exports[`resolve --help > resolve testhub-plan (parent in the path, short_id alias) 1`] = `
+"Usage: pingcode resolve testhub-plan [options] <name>
+
+test plan → id (/v1/testhub/libraries/{parent}/plans)
+
+Arguments:
+  name           test plan name, alias or id (an id is verified, then passed through)
+
+Options:
+  --parent <id>  the test library id this test plan is scoped by (\`resolve testhub-library\` turns a
+                 name into one)
+  -h, --help     display help for command
+"
+`;
+
+exports[`resolve --help > resolve work_item_state (the only two-key lookup) 1`] = `
+"Usage: pingcode resolve work_item_state|work-item-state [options] <name>
+
+state → id (/v1/pjm/work_item/states)
+
+Arguments:
+  name           state name, alias or id (an id is verified, then passed through)
+
+Options:
+  --parent <id>  the project id this state is scoped by (\`resolve project\` turns a name into one)
+  --type <id>    the work item type id this lookup also needs (\`resolve work_item_type\` turns a
+                 name into one)
+  -h, --help     display help for command
+
+state changes are workflow-validated: the state must belong to this type's state scheme
+
+"
+`;

@@ -67,6 +67,10 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['generic executor discovery', /pingcode api list --(search|module|token|method) /],
   ['generic executor describe', /pingcode api describe /],
   ['generic executor contract', /`?--json`? is a no-op on the five verbs/],
+  // F4 — the other half of the generic layer: `api` takes ids only, so the docs have to
+  // say where an id comes from. Two rows, for the lookup and for its discovery command.
+  ['name resolution', /pingcode resolve (project|ship-product|testhub-library|ship-idea-state) /],
+  ['name resolution discovery', /pingcode resolve list/],
   ['work items', /pingcode project work-item (get|create|update)/],
   ['work-item state transition', /pingcode project work-item transition/],
   ['project id lookups', /pingcode project meta (types|states|priorities|sprints)/],

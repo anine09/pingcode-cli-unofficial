@@ -1,0 +1,375 @@
+import { ENDPOINTS } from '../endpoints';
+
+/**
+ * The resolver registry: **one row per resolvable kind**, and the only place a new
+ * name→id lookup is declared (design D4.2).
+ *
+ * Before this table the same six facts — label, list endpoint, parent scope, the
+ * query parameter the parent rides in, the alias keys and the failure hint — were
+ * spelled out in ~700 lines of near-identical resolver bodies, and `MetaKind` was a
+ * hand-written union that had to be kept in step by hand. Here the union is
+ * *derived* (`keyof typeof RESOLVERS`), so the two can no longer disagree: adding a
+ * row adds a kind, and deleting one makes every call site that named it a compile
+ * error.
+ *
+ * **This file is data.** It imports `core/endpoints.ts` and nothing else — no `Ctx`,
+ * no `http`, no cache. The engine that reads it lives in `./resolve.ts`.
+ *
+ * Two rules the rows encode and every resolver inherits from that engine:
+ *
+ *  - **ids are never shape-validated.** 24-hex for most resources, 32-hex for users,
+ *    8-char base62 for testhub `short_id`s and bare slugs for system work-item types
+ *    and ship properties (research §6.8, ship GOTCHA #4) — so resolution tries an
+ *    exact id match first and only then matches names.
+ *  - **most ids are parent-scoped** (research §6.13): a project for pjm, a product
+ *    for ship, a library for testhub. `parent` names the upstream kind whose id
+ *    scopes this one and therefore keys its cache, so an id from another parent is
+ *    never reachable through a cached list — even though ship's ids frequently
+ *    *look* org-global (ship GOTCHA #26).
+ */
+
+/** The three scoping families, named once. Nothing else in the table repeats them. */
+const PROJECT_SCOPED = { parent: 'project', parentQuery: 'project_id' } as const;
+const PRODUCT_SCOPED = { parent: 'ship-product', parentQuery: 'product_id' } as const;
+const LIBRARY_SCOPED = { parent: 'testhub-library', parentQuery: 'library_id' } as const;
+
+/**
+ * `case/states` and `run/statuses` need `pcp:read:testhub:configuration` while
+ * `case/types`, right beside them, needs only `testcase` (testhub GOTCHA #2) — and a
+ * token without it can write no run at all, which the server's bare 403 never says.
+ */
+const CONFIGURATION_SCOPE_HINT =
+  'this lookup needs the pcp:read:testhub:configuration scope — a token granted only ' +
+  'testcase+testplan cannot resolve state or status ids, and therefore cannot write a run at all';
+
+/** Names are unique among siblings only, so the computed path is the typeable spelling. */
+const SUITE_AMBIGUITY_HINT =
+  'two modules in different branches may share a name — pass the full path ("Parent / Child") or the id';
+
+/**
+ * The table. Deliberately un-annotated so `MetaKind` can be derived from its keys;
+ * `RESOLVERS` below re-exports it `satisfies Record<MetaKind, ResolverSpec>`, which
+ * type-checks every row — including that each `parent` names a real kind — without
+ * making the two declarations circular.
+ */
+const TABLE = {
+  // ---- pjm (项目管理) ----------------------------------------------------------
+
+  /** `GET /v1/pjm/projects` has no exact-name filter (research §4), hence the whole-list load. */
+  project: { label: 'project', path: ENDPOINTS.projects, aliases: ['identifier'] },
+  work_item_type: { label: 'work item type', path: ENDPOINTS.workItemTypes, ...PROJECT_SCOPED },
+
+  /**
+   * The one two-key lookup: `GET /v1/pjm/work_item/states` requires **both**
+   * `project_id` and `work_item_type_id` (research §4), so the type rides in
+   * `scopeQuery` and also discriminates the cache key. A state name without a type is
+   * therefore unresolvable — exit 2, never a guess (see `resolveWorkItemState`).
+   */
+  work_item_state: {
+    label: 'state',
+    path: ENDPOINTS.workItemStates,
+    ...PROJECT_SCOPED,
+    scopeQuery: 'work_item_type_id',
+    scopeKind: 'work_item_type',
+    scopeFlag: 'type',
+    hint: "state changes are workflow-validated: the state must belong to this type's state scheme",
+  },
+
+  work_item_priority: { label: 'priority', path: ENDPOINTS.workItemPriorities, ...PROJECT_SCOPED },
+
+  /** The project id rides in the **path** here, so there is no `parentQuery`. */
+  sprint: {
+    label: 'sprint',
+    path: ENDPOINTS.projectSprints,
+    parent: 'project',
+    hint: 'sprints only exist for scrum/hybrid projects (research §6.14)',
+  },
+
+  /**
+   * Users are an unbounded set, so the candidate list is a `keywords` **search over
+   * the input itself** (`inputQuery`), and those keywords discriminate the cache key.
+   * An empty result is then not proof of a typo, so the input is passed through as an
+   * id — which is what `passThroughWhenEmpty` means.
+   */
+  user: {
+    label: 'user',
+    path: ENDPOINTS.users,
+    inputQuery: 'keywords',
+    aliases: ['display_name', 'username', 'email'],
+    passThroughWhenEmpty: true,
+  },
+
+  // ---- ship (产品管理): the parent is a product --------------------------------
+
+  /**
+   * `GET /v1/ship/products` searches **names only** — `identifier` is not a `keywords`
+   * target (ship §5) — so the whole (small) list is loaded and the identifier is
+   * matched client-side as an alias. That is what makes `--product SLC` work.
+   */
+  'ship-product': { label: 'product', path: ENDPOINTS.shipProducts, aliases: ['identifier'] },
+
+  /**
+   * `GET /v1/ship/products/{id}/members` returns membership rows whose `id` **is** the
+   * user or group id, with no top-level `name` — the display name lives inside `user` /
+   * `user_group` (ship §3.6). Hence its own loader.
+   */
+  'ship-product-member': {
+    label: 'product member',
+    path: ENDPOINTS.shipProductMembers,
+    parent: 'ship-product',
+    load: 'productMembers',
+    hint: 'only members of this product can be assigned; add them in PingCode first',
+  },
+
+  'ship-idea-state': {
+    label: 'idea state',
+    path: ENDPOINTS.shipIdeaStates,
+    ...PRODUCT_SCOPED,
+    hint:
+      'idea states are scoped to the product; unlike tickets, ship exposes no idea state-flow ' +
+      'endpoint, so a transition can only be validated by the server',
+  },
+  'ship-idea-priority': { label: 'idea priority', path: ENDPOINTS.shipIdeaPriorities, ...PRODUCT_SCOPED },
+  'ship-idea-suite': {
+    label: 'suite',
+    path: ENDPOINTS.shipIdeaSuites,
+    ...PRODUCT_SCOPED,
+    load: 'suiteTree',
+    hint: SUITE_AMBIGUITY_HINT,
+  },
+  'ship-idea-property': {
+    label: 'idea property',
+    path: ENDPOINTS.shipIdeaProperties,
+    ...PRODUCT_SCOPED,
+    hint:
+      'property ids are often slugs (backlog_type, identifier), never 24-hex — list them with ' +
+      '`pingcode product meta idea-properties --product <p>`',
+  },
+
+  'ship-ticket-state': { label: 'ticket state', path: ENDPOINTS.shipTicketStates, ...PRODUCT_SCOPED },
+  'ship-ticket-priority': { label: 'ticket priority', path: ENDPOINTS.shipTicketPriorities, ...PRODUCT_SCOPED },
+  'ship-ticket-type': {
+    label: 'ticket type',
+    path: ENDPOINTS.shipTicketTypes,
+    ...PRODUCT_SCOPED,
+    hint:
+      'type_id is required to create a ticket — list the types with ' +
+      '`pingcode product meta ticket-types --product <p>`',
+  },
+  'ship-ticket-channel': {
+    label: 'ticket channel',
+    path: ENDPOINTS.shipTicketChannels,
+    ...PRODUCT_SCOPED,
+    hint: 'the channel can only be set when the ticket is created, never patched afterwards',
+  },
+  'ship-ticket-property': {
+    label: 'ticket property',
+    path: ENDPOINTS.shipTicketProperties,
+    ...PRODUCT_SCOPED,
+    hint:
+      'property ids are often slugs (solution, identifier), never 24-hex — list them with ' +
+      '`pingcode product meta ticket-properties --product <p>`',
+  },
+
+  /**
+   * `cacheOnly`: which plan a product uses is found by scanning every plan for the
+   * embedded `product.id` — the list has **no `?product_id=` filter** (ship GOTCHA
+   * #23) — so there is no name to resolve, only an answer to cache under the product.
+   */
+  'ship-ticket-state-plan': {
+    label: 'ticket state plan',
+    path: ENDPOINTS.shipTicketStatePlans,
+    parent: 'ship-product',
+    cacheOnly: true,
+  },
+
+  /**
+   * `cacheOnly`, and parented by the **state plan** rather than the product (design
+   * §13.3): two products sharing a plan share the answer, and a product whose plan
+   * changes gets a different key for free. The rows are transition edges, not
+   * candidates, so `loadTicketStateFlows` owns the encoding.
+   */
+  'ship-ticket-state-flow': {
+    label: 'ticket state flow',
+    path: ENDPOINTS.shipTicketStateFlows,
+    parent: 'ship-ticket-state-plan',
+    cacheOnly: true,
+  },
+
+  // ---- testhub (测试管理): the parent is a library ------------------------------
+  //
+  // Same substitution as ship, plus one split that is load-bearing: the lookups live
+  // at three URL shapes. `case/states`, `case/types` and `run/statuses` are
+  // *singular*-segment config views taking `?library_id=`; `case_important_levels` is
+  // an *underscored* org-level list taking nothing; suites, plans and plan types live
+  // *under* `/libraries/{id}/…` and so carry the parent in the path instead.
+
+  /**
+   * The bootstrap hop: nothing else in testhub is reachable without a `library_id`, so
+   * it has **no parent** and its cache key carries none. Names-only search ([th#12]),
+   * exactly as ship products, hence the client-side `identifier` alias behind `--library LIB`.
+   */
+  'testhub-library': { label: 'test library', path: ENDPOINTS.testhubLibraries, aliases: ['identifier'] },
+
+  /**
+   * Case modules (模块) — a tree served flat, joined by a **`parent` reference object**
+   * ([th#9], [th#11]). The whole tree is loaded (there is a `?parent_id=` filter, and
+   * using it would hide the branches a collision has to be detected across).
+   */
+  'testhub-suite': {
+    label: 'suite',
+    path: ENDPOINTS.testhubLibrarySuites,
+    parent: 'testhub-library',
+    load: 'suiteTree',
+    hint: SUITE_AMBIGUITY_HINT,
+  },
+
+  /** `state_id` — the only route to changing a case's state ([th#25], [th#28]). */
+  'testhub-case-state': {
+    label: 'case state',
+    path: ENDPOINTS.testhubCaseStates,
+    ...LIBRARY_SCOPED,
+    hint: `${CONFIGURATION_SCOPE_HINT}. A case's state can only be changed through PATCH /cases/{id}`,
+  },
+
+  /** `type_id`. The one config view in this group that needs no `configuration` scope. */
+  'testhub-case-type': { label: 'case type', path: ENDPOINTS.testhubCaseTypes, ...LIBRARY_SCOPED },
+
+  /**
+   * `important_level_id`, and **deliberately not library-scoped**: the one lookup in
+   * the module with no `?library_id=` variant anywhere ([th#40], testhub §5). Keying
+   * it per library would shard one identical list into N entries and imply a scoping
+   * the API does not have.
+   */
+  'testhub-case-important-level': {
+    label: 'important level',
+    path: ENDPOINTS.testhubCaseImportantLevels,
+    hint: 'importance levels are organisation-wide in testhub — there is no per-library variant',
+  },
+
+  /**
+   * `status_id` — the hard prerequisite for every run write ([th#57], GOTCHA #5/#10).
+   * These items carry **no slug**: the English slug a run reports (`pass`) and the id
+   * a write needs are joined only through the localized `name` (通过), a correspondence
+   * the docs never state, and a tenant may add its own. Which is exactly why this is
+   * name resolution against the live list rather than a hardcoded map.
+   */
+  'testhub-run-status': {
+    label: 'run status',
+    path: ENDPOINTS.testhubRunStatuses,
+    ...LIBRARY_SCOPED,
+    hint:
+      `${CONFIGURATION_SCOPE_HINT}. Run statuses have no slug field, so they resolve by their ` +
+      'localized name (通过 / 受阻 / 失败 / 跳过 / 未测), and a tenant may have added its own',
+  },
+
+  /**
+   * `short_id` is an alias on purpose: `GET …/plans/{plan_id}` accepts one ([th#53])
+   * but `bulkRuns` needs the real id in its path and PATCH is id-only (GOTCHA #19), so
+   * resolving a short_id here is what lets one reference work on a read and a write.
+   * Plan names are unique per library ([th#47]), so a collision means two libraries —
+   * which the library-scoped cache key already keeps apart.
+   */
+  'testhub-plan': {
+    label: 'test plan',
+    path: ENDPOINTS.testhubLibraryPlans,
+    parent: 'testhub-library',
+    aliases: ['short_id'],
+  },
+
+  /**
+   * The `type_id` plan creation requires ([th#47], [th#60]). Scope is
+   * `pcp:read:testhub:testplan`, **not** `configuration`, so this row carries no
+   * configuration-scope hint — a misplaced one would send a 403 investigation down the
+   * wrong path. A plan type has no `kind` discriminator (testhub §10.7), so nothing
+   * here can warn that the named type demands a `sprint_id`.
+   */
+  'testhub-plan-type': {
+    label: 'plan type',
+    path: ENDPOINTS.testhubLibraryPlanTypes,
+    parent: 'testhub-library',
+    hint: 'list the types configured for this library with `pingcode testhub meta plan-types --library <library>`',
+  },
+} as const;
+
+/**
+ * Every metadata kind, **derived from the table** rather than written twice. The
+ * failure mode this removes — a resolver added and the union not, or the reverse —
+ * type-checked perfectly and only showed up as a cache key nobody ever read.
+ */
+export type MetaKind = keyof typeof TABLE;
+
+/** What one row declares. Every field is read by `./resolve.ts` and nothing else. */
+export type ResolverSpec = {
+  /** Human label in error messages: `no ${label} matches "…"`. */
+  label: string;
+  /**
+   * The list endpoint. A **function** means the parent id goes in the path
+   * (`/libraries/{id}/plans`), in which case there is no `parentQuery`.
+   */
+  path: string | ((parentId: string) => string);
+  /** The upstream kind whose id scopes this one, and therefore keys its cache. */
+  parent?: MetaKind;
+  /** The query parameter the parent id rides in, when it is not in the path. */
+  parentQuery?: string;
+  /**
+   * A second scoping parameter, which also discriminates the cache key. Exactly one
+   * kind needs it: work-item states are scoped by `(project, work item type)`.
+   */
+  scopeQuery?: string;
+  /**
+   * Which kind produces the `scopeQuery` value, and the flag `pingcode resolve` takes
+   * it on. Declared here rather than special-cased in the command, so the CLI needs no
+   * `if (kind === 'work_item_state')` branch; the flag name is a literal union so that
+   * reading it off commander's options stays typed.
+   */
+  scopeKind?: MetaKind;
+  scopeFlag?: 'type';
+  /**
+   * The query parameter the **user's own input** rides in, for unbounded sets that
+   * cannot be listed whole. Implies the cache key is keyed by that input.
+   */
+  inputQuery?: string;
+  /** Extra row keys a user may reasonably type (identifier, username, short_id, …). */
+  aliases?: readonly string[];
+  /** Guidance appended to the candidate list on a failed lookup. */
+  hint?: string;
+  /** An empty candidate list means "unbounded set, assume an id" rather than a typo. */
+  passThroughWhenEmpty?: boolean;
+  /** Non-default candidate loader; `undefined` is the plain paged list. */
+  load?: 'suiteTree' | 'productMembers';
+  /**
+   * This kind is a **cache namespace, not a name lookup**: something else (a scan, a
+   * transition graph) produces its ids, so `pingcode resolve` does not offer it and
+   * `resolveKind` refuses it.
+   */
+  cacheOnly?: boolean;
+};
+
+/** The table, type-checked row by row while keeping the literal keys `MetaKind` needs. */
+export const RESOLVERS = TABLE satisfies Record<MetaKind, ResolverSpec>;
+
+/** Registration order, which is the order `pingcode resolve list` prints. */
+export const META_KINDS = Object.keys(RESOLVERS) as MetaKind[];
+
+/**
+ * The rows a caller can resolve a name against. `pingcode resolve` enumerates exactly
+ * this, so its command surface follows the table by construction (design D4.4).
+ */
+export const RESOLVABLE_KINDS: readonly MetaKind[] = META_KINDS.filter(
+  (kind) => specOf(kind).cacheOnly !== true,
+);
+
+/**
+ * Read one row, widened to `ResolverSpec`. Not decoration: `RESOLVERS` keeps its
+ * literal type (that is where `MetaKind` comes from), and reading `.hint` off the
+ * resulting union of row types would not compile for the rows that omit it.
+ */
+export function specOf(kind: MetaKind): ResolverSpec {
+  return RESOLVERS[kind];
+}
+
+/** The list path for one lookup: from the parent id when the row's `path` is a function. */
+export function pathOf(spec: ResolverSpec, parentId: string | undefined): string {
+  return typeof spec.path === 'string' ? spec.path : spec.path(parentId ?? '');
+}

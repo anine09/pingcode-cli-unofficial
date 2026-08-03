@@ -3,6 +3,7 @@ import { registerApiCommands } from './commands/api';
 import { registerAuthCommands } from './commands/auth';
 import { registerProductCommands } from './commands/product';
 import { registerProjectCommands } from './commands/project';
+import { registerResolveCommands } from './commands/resolve';
 import { registerSettingsCommands } from './commands/settings';
 import { registerTesthubCommands } from './commands/testhub';
 
@@ -34,6 +35,7 @@ import { registerTesthubCommands } from './commands/testhub';
 export const GROUPS: readonly (readonly [string, (program: Command) => void])[] = [
   ['auth', registerAuthCommands],
   ['api', registerApiCommands],
+  ['resolve', registerResolveCommands],
   ['product', registerProductCommands],
   ['project', registerProjectCommands],
   ['testhub', registerTesthubCommands],
