@@ -93,6 +93,12 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['cross-object attachments', /pingcode project work-item attachment add-snippet/],
   ['cross-object activities', /pingcode testhub runs activity list/],
   ['no top-level comment group', /no top-level `?comment`? group/i],
+  // S1a — the scm foundation. Three rows: the platform hop every other scm command
+  // starts from, the git identity commit attribution matches by name, and the
+  // repository whose unique key is the full_name rather than the name.
+  ['scm platforms', /pingcode scm platform (list|get|create|update)/],
+  ['scm git identities', /pingcode scm platform-user (list|get|create|update)/],
+  ['scm repositories', /pingcode scm repo (list|get|create|update)/],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {
@@ -131,6 +137,8 @@ describe('SKILL.md records the contract that does not scale with the surface (PR
       'pcp:read:testhub:testplan',
       'pcp:write:testhub:testplan',
       'pcp:read:testhub:configuration',
+      'pcp:read:devops:code',
+      'pcp:write:devops:code',
     ]) {
       expect(skill, scope).toContain(scope);
     }
@@ -235,15 +243,42 @@ describe('the module documents carry the per-module rules (design D6.4)', () => 
     expect(testhub).toMatch(/milliseconds/i);
   });
 
+  it('scm keeps the platform hop, the identity-is-not-a-member rule and the PUT exclusion', () => {
+    const scm = modules['scm.md'] ?? '';
+    // the bootstrap hop and the token type, neither discoverable by trial and error
+    expect(scm).toMatch(/企业令牌/);
+    expect(scm).toMatch(/pcp:(read|write):devops:code/);
+    // the trap the URL sets up: /v1/scm/products is not a ship product
+    expect(scm).toMatch(/\*?not\*?\s+a ship product/i);
+    // what a platform user actually is — the single most misleading name in the module
+    expect(scm).toMatch(/git author identity, not a PingCode member/i);
+    expect(scm).toMatch(/no\s+`?user_id`?/i);
+    // full_name is the unique key, and ?name= is ignored upstream
+    expect(scm).toMatch(/`?full_name`?\s+\(`?owner\/name`?\) is the unique key/i);
+    expect(scm).toMatch(/only list filter/i);
+    // owner_name upserts — the live finding that turns a typo into an undeletable row
+    expect(scm).toMatch(/creates the identity if it does not exist/i);
+    // three-state booleans, and why
+    expect(scm).toMatch(/true`? \/ `?false/);
+    // no delete anywhere, and PUT only through the escape hatch
+    expect(scm).toMatch(/No DELETE exists upstream/i);
+    expect(scm).toMatch(/pingcode api PUT \/v1\/scm\/products/);
+  });
+
   it('the reserved modules promise nothing that does not exist yet', () => {
-    // `api.md` left this list when F3 landed the `api` group and `crosscutting.md` when
-    // F5 landed the four injected families: both are now real documentation for real
-    // commands, and the forward assertion below is what keeps them honest. The remaining
-    // two still describe unbuilt surface.
-    for (const name of ['scm.md', 'cicd.md']) {
+    // `api.md` left this list when F3 landed the `api` group, `crosscutting.md` when F5
+    // landed the four injected families, and `scm.md` when S1a landed the platform /
+    // platform-user / repo surface: all three are now real documentation for real
+    // commands, and the forward assertion below is what keeps them honest. `cicd.md`
+    // still describes unbuilt surface.
+    for (const name of ['cicd.md']) {
       const body = modules[name] ?? '';
       expect(body, name).toMatch(/do not exist yet/i);
       expect(body, name).toMatch(/Reserved/i);
+    }
+    // …and the built ones must not still claim otherwise.
+    for (const name of ['scm.md', 'api.md', 'crosscutting.md']) {
+      expect(modules[name] ?? '', name).not.toMatch(/do not exist yet/i);
     }
   });
 

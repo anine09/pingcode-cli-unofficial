@@ -4,6 +4,7 @@ import { registerAuthCommands } from './commands/auth';
 import { registerProductCommands } from './commands/product';
 import { registerProjectCommands } from './commands/project';
 import { registerResolveCommands } from './commands/resolve';
+import { registerScmCommands } from './commands/scm';
 import { registerSettingsCommands } from './commands/settings';
 import { registerTesthubCommands } from './commands/testhub';
 
@@ -24,10 +25,10 @@ import { registerTesthubCommands } from './commands/testhub';
  *
  * **Order is the user-visible `--help` order** and it is deliberate: `auth` first
  * because nothing works without credentials, then the business groups in the GUI's
- * own module order (产品管理 → 项目管理 → 测试管理), then `settings` last. Later tasks
- * add the infrastructure meta-groups (`api`, `resolve`) near the front and the DevOps
- * groups (`scm`, `build`, `release`) after `testhub`; inserting a row here is the
- * whole change, and it is a one-line rebase for whoever lands second.
+ * own module order (产品管理 → 项目管理 → 测试管理 → 源码管理), then `settings` last.
+ * Later tasks add the remaining DevOps groups (`build`, `release`) after `scm`;
+ * inserting a row here is the whole change, and it is a one-line rebase for whoever
+ * lands second.
  *
  * The `name` column is not decoration: it is what root's assertion compares against,
  * so it must match the name the `register*` function gives its top-level command.
@@ -39,5 +40,6 @@ export const GROUPS: readonly (readonly [string, (program: Command) => void])[] 
   ['product', registerProductCommands],
   ['project', registerProjectCommands],
   ['testhub', registerTesthubCommands],
+  ['scm', registerScmCommands],
   ['settings', registerSettingsCommands],
 ];

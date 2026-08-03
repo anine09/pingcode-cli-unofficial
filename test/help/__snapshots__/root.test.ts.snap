@@ -23,6 +23,8 @@ Commands:
   project         项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
   testhub         测试管理 testhub: libraries 测试库, cases 用例, plans 测试计划, runs 执行用例 (scopes
                   pcp:read:testhub:testcase / :testplan / :configuration)
+  scm             源码管理 scm: hosting platforms, git identities, repositories (企业令牌 only, scopes
+                  pcp:read:devops:code / pcp:write:devops:code)
   settings        后台设置: organisation-wide directory data
   help [command]  display help for command
 "

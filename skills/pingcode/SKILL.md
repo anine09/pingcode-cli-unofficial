@@ -33,6 +33,7 @@ auth      login status logout
 product   list get · idea … · ticket … · meta …
 project   list get · work-item … · meta …
 testhub   libraries … · cases … · plans … · runs … · meta …
+scm       platform … · platform-user … · repo …
 settings  users
 ```
 
@@ -90,6 +91,14 @@ Credentials come from a PingCode application, not from a user account:
 
    `--executor` on a run and `--assignee` on a plan both resolve through the organisation
    directory, so they also need `pcp:read:global:team`.
+
+   For the scm (源码管理) commands, add:
+   - `pcp:read:devops:code` — `pingcode scm platform|platform-user|repo list` / `get`, and every
+     platform/repository name lookup
+   - `pcp:write:devops:code` — `scm platform|platform-user|repo create` / `update`
+
+   The whole scm area is **企业令牌 only**, which is what `client_credentials` gives you, so no
+   extra grant type is needed — only the two scopes above.
 4. Copy the `client_id` and `client_secret`.
 
 Then:
@@ -165,7 +174,7 @@ one file per module, so a module can be revised without touching this one:
 | 项目管理 pjm | [`modules/pjm.md`](modules/pjm.md) | `project list/get`, `project meta …`, `project work-item …` |
 | 产品管理 ship | [`modules/ship.md`](modules/ship.md) | `product list/get`, `product meta …`, `product idea …`, `product ticket …`, and the ship-only traps |
 | 测试管理 testhub | [`modules/testhub.md`](modules/testhub.md) | `testhub libraries/cases/plans/runs/meta …`, and the testhub-only traps |
-| 源码管理 scm | [`modules/scm.md`](modules/scm.md) | **not built yet** — reserved |
+| 源码管理 scm | [`modules/scm.md`](modules/scm.md) | `scm platform …`, `scm platform-user …`, `scm repo …` — the DevOps write-back surface, 企业令牌 only |
 | 构建与部署 | [`modules/cicd.md`](modules/cicd.md) | **not built yet** — reserved |
 | 跨对象资源 | [`modules/crosscutting.md`](modules/crosscutting.md) | `relation` / `comment` / `attachment` / `activity`, mounted under work items, ideas, tickets, cases and runs |
 | 通用逃生舱 | [`modules/api.md`](modules/api.md) | `api GET/POST/PATCH/PUT/DELETE <path>` for every documented endpoint, plus `api list` / `api describe` |

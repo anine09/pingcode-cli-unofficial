@@ -1,0 +1,124 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`scm --help > scm 1`] = `
+"Usage: pingcode scm [options] [command]
+
+源码管理 scm: hosting platforms, git identities, repositories (企业令牌 only, scopes pcp:read:devops:code /
+pcp:write:devops:code)
+
+Options:
+  -h, --help      display help for command
+
+Commands:
+  platform        hosting platforms 托管平台 — the parent of every other scm resource
+  platform-user   git author identities 托管平台用户 — what commit attribution matches by name
+  repo            code repositories 代码仓库 — full_name (owner/name) is the unique key
+  help [command]  display help for command
+"
+`;
+
+exports[`scm --help > scm platform 1`] = `
+"Usage: pingcode scm platform [options] [command]
+
+hosting platforms 托管平台 — the parent of every other scm resource
+
+Options:
+  -h, --help                   display help for command
+
+Commands:
+  list [options]               list hosting platforms
+  get [options] <platform>     show one hosting platform
+  create [options]             register a hosting platform (the name must be unique in the
+                               organisation)
+  update [options] <platform>  patch a hosting platform — only the fields you pass are sent
+  help [command]               display help for command
+"
+`;
+
+exports[`scm --help > scm platform create 1`] = `
+"Usage: pingcode scm platform create [options]
+
+register a hosting platform (the name must be unique in the organisation)
+
+Options:
+  --name <name>         platform name, unique per organisation
+  --type <type>         platform type, one of: github | gitlab | bitbucket | coding.net | gogs |
+                        git | svn | gerrit | other
+  --description <text>  description
+  -h, --help            display help for command
+"
+`;
+
+exports[`scm --help > scm platform-user 1`] = `
+"Usage: pingcode scm platform-user [options] [command]
+
+git author identities 托管平台用户 — what commit attribution matches by name
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           list the git identities known to a platform
+  get [options] <user>     show one git identity
+  create [options]         register a git identity (the username must be unique on the platform)
+  update [options] <user>  patch a git identity — only the fields you pass are sent
+  help [command]           display help for command
+"
+`;
+
+exports[`scm --help > scm platform-user create 1`] = `
+"Usage: pingcode scm platform-user create [options]
+
+register a git identity (the username must be unique on the platform)
+
+Options:
+  --name <name>          git username — the string commits are attributed by
+  --display-name <text>  display name shown in PingCode
+  --html-url <url>       profile page on the hosting platform
+  --avatar-url <url>     avatar image on the hosting platform
+  --platform <name|id>   hosting platform 托管平台 name or id
+  --platform-id <id>     hosting platform 托管平台 name or id (an id, sent unchanged with no lookup)
+  -h, --help             display help for command
+"
+`;
+
+exports[`scm --help > scm repo 1`] = `
+"Usage: pingcode scm repo [options] [command]
+
+code repositories 代码仓库 — full_name (owner/name) is the unique key
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           list the repositories of a platform
+  get [options] <repo>     show one repository
+  create [options]         register a repository (full_name must be unique on the platform)
+  update [options] <repo>  patch a repository — only the fields you pass are sent
+  help [command]           display help for command
+"
+`;
+
+exports[`scm --help > scm repo create 1`] = `
+"Usage: pingcode scm repo create [options]
+
+register a repository (full_name must be unique on the platform)
+
+Options:
+  --name <name>             repository name, e.g. pingcode-cli
+  --full-name <owner/name>  unique full name, e.g. acme/pingcode-cli
+  --platform <name|id>      hosting platform 托管平台 name or id
+  --platform-id <id>        hosting platform 托管平台 name or id (an id, sent unchanged with no lookup)
+  --description <text>      description (replaces the old one)
+  --owner-name <name>       owner git username — an unknown name is CREATED as a platform user, not
+                            rejected
+  --private <bool>          is the repository private (true|false)
+  --fork <bool>             is the repository a fork (true|false)
+  --html-url <url>          repository page on the hosting platform
+  --branches-url <url>      branch link template, using {branch}
+  --commits-url <url>       commit link template, using {sha}
+  --compare-url <url>       compare link template, using {base} and {head}
+  --pulls-url <url>         pull request link template, using {number}
+  -h, --help                display help for command
+"
+`;
