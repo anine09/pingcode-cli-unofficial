@@ -13,7 +13,130 @@ Commands:
   platform        hosting platforms 托管平台 — the parent of every other scm resource
   platform-user   git author identities 托管平台用户 — what commit attribution matches by name
   repo            code repositories 代码仓库 — full_name (owner/name) is the unique key
+  branch          code branches 代码分支 — the one scm family with a delete and no replace
+  commit          commits 提交 — organisation-level, so these take no --platform
+  ref             commit refs 提交引用 — the link from a commit to a branch
   help [command]  display help for command
+"
+`;
+
+exports[`scm --help > scm branch 1`] = `
+"Usage: pingcode scm branch [options] [command]
+
+code branches 代码分支 — the one scm family with a delete and no replace
+
+Options:
+  -h, --help                 display help for command
+
+Commands:
+  list [options]             list the branches of a repository
+  get [options] <branch>     show one branch
+  create [options]           record a branch (the name must be unique in the repository)
+  update [options] <branch>  patch a branch — only the fields you pass are sent
+  delete [options] <branch>  delete a branch — irreversible, and it orphans the branch’s commit
+                             refs
+  help [command]             display help for command
+"
+`;
+
+exports[`scm --help > scm branch create 1`] = `
+"Usage: pingcode scm branch create [options]
+
+record a branch (the name must be unique in the repository)
+
+Options:
+  --name <name>               branch name, e.g. feature/PLM-001-login
+  --sender <git-username>     branch creator git username — an UNKNOWN name is CREATED as a
+                              platform user, and platform users cannot be deleted
+  --default                   make this the default branch (clears the flag on the branch that
+                              holds it)
+  --work-item <identifier>    work item identifier such as PLM-001, repeatable — an unknown one is
+                              silently ignored by the API
+  --platform <name|id>        hosting platform 托管平台 name or id
+  --platform-id <id>          hosting platform 托管平台 name or id (an id, sent unchanged with no
+                              lookup)
+  --repo <name|full_name|id>  repository name, full_name (owner/name) or id
+  --repo-id <id>              repository id, sent unchanged with no lookup
+  -h, --help                  display help for command
+"
+`;
+
+exports[`scm --help > scm branch delete 1`] = `
+"Usage: pingcode scm branch delete [options] <branch>
+
+delete a branch — irreversible, and it orphans the branch’s commit refs
+
+Arguments:
+  branch                      branch name or id
+
+Options:
+  --yes                       confirm the deletion — required, and there is no undo on this API
+  --platform <name|id>        hosting platform 托管平台 name or id
+  --platform-id <id>          hosting platform 托管平台 name or id (an id, sent unchanged with no
+                              lookup)
+  --repo <name|full_name|id>  repository name, full_name (owner/name) or id
+  --repo-id <id>              repository id, sent unchanged with no lookup
+  -h, --help                  display help for command
+"
+`;
+
+exports[`scm --help > scm branch update 1`] = `
+"Usage: pingcode scm branch update [options] <branch>
+
+patch a branch — only the fields you pass are sent
+
+Arguments:
+  branch                      branch name or id
+
+Options:
+  --default                   make this the default branch — there is no --default false: the API
+                              refuses it
+  --work-item <identifier>    work item identifier such as PLM-001, repeatable — an unknown one is
+                              silently ignored by the API; REPLACES the existing links
+  --platform <name|id>        hosting platform 托管平台 name or id
+  --platform-id <id>          hosting platform 托管平台 name or id (an id, sent unchanged with no
+                              lookup)
+  --repo <name|full_name|id>  repository name, full_name (owner/name) or id
+  --repo-id <id>              repository id, sent unchanged with no lookup
+  -h, --help                  display help for command
+"
+`;
+
+exports[`scm --help > scm commit 1`] = `
+"Usage: pingcode scm commit [options] [command]
+
+commits 提交 — organisation-level, so these take no --platform
+
+Options:
+  -h, --help              display help for command
+
+Commands:
+  list [options]          list commits across the whole organisation — filter, or this scans
+                          everything
+  get [options] <commit>  show one commit, by id or SHA
+  create [options]        record a commit — link it to a branch afterwards with \`scm ref create\`
+  help [command]          display help for command
+"
+`;
+
+exports[`scm --help > scm commit create 1`] = `
+"Usage: pingcode scm commit create [options]
+
+record a commit — link it to a branch afterwards with \`scm ref create\`
+
+Options:
+  --sha <sha>                 full 40-character SHA (the server validates this one)
+  --message <text>            commit message
+  --committer <git-username>  committer git username — unlike branch --sender this creates no
+                              platform user
+  --committed-at <when>       commit time: unix seconds or a date like 2026-08-03T09:00:00Z
+  --tree-id <sha>             the commit tree SHA
+  --added <path>              added file path, repeatable
+  --removed <path>            removed file path, repeatable
+  --modified <path>           modified file path, repeatable
+  --work-item <identifier>    work item identifier such as PLM-001, repeatable — an unknown one is
+                              silently ignored
+  -h, --help                  display help for command
 "
 `;
 
@@ -79,6 +202,39 @@ Options:
   --platform <name|id>   hosting platform 托管平台 name or id
   --platform-id <id>     hosting platform 托管平台 name or id (an id, sent unchanged with no lookup)
   -h, --help             display help for command
+"
+`;
+
+exports[`scm --help > scm ref 1`] = `
+"Usage: pingcode scm ref [options] [command]
+
+commit refs 提交引用 — the link from a commit to a branch
+
+Options:
+  -h, --help           display help for command
+
+Commands:
+  list [options]       list the commit refs of ONE branch — the API offers no repository-wide list
+  get [options] <ref>  show one commit ref
+  create [options]     link an existing commit to a branch (create the commit first)
+  help [command]       display help for command
+"
+`;
+
+exports[`scm --help > scm ref create 1`] = `
+"Usage: pingcode scm ref create [options]
+
+link an existing commit to a branch (create the commit first)
+
+Options:
+  --sha <sha>                 full SHA of a commit that already exists in PingCode
+  --branch-id <id>            branch id — the referenced entity (from \`scm branch list|get\`)
+  --platform <name|id>        hosting platform 托管平台 name or id
+  --platform-id <id>          hosting platform 托管平台 name or id (an id, sent unchanged with no
+                              lookup)
+  --repo <name|full_name|id>  repository name, full_name (owner/name) or id
+  --repo-id <id>              repository id, sent unchanged with no lookup
+  -h, --help                  display help for command
 "
 `;
 

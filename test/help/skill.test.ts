@@ -99,6 +99,13 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['scm platforms', /pingcode scm platform (list|get|create|update)/],
   ['scm git identities', /pingcode scm platform-user (list|get|create|update)/],
   ['scm repositories', /pingcode scm repo (list|get|create|update)/],
+  // S1b — the CI write-back path. Four rows: the three resources, plus one for the
+  // delete, because it is the module's only destructive verb and the thing an agent
+  // most needs warned about (it orphans refs and cannot touch the default branch).
+  ['scm branches', /pingcode scm branch (list|get|create|update)/],
+  ['scm branch deletion', /pingcode scm branch delete .*--yes/],
+  ['scm commits', /pingcode scm commit (list|get|create)/],
+  ['scm commit refs', /pingcode scm ref (list|get|create)/],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {

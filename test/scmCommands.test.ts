@@ -354,3 +354,407 @@ describe('scm repo commands', () => {
     expect(run.calls).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S1b: branches / commits / refs
+// ---------------------------------------------------------------------------
+
+const BRANCH = '6a706a6d39cbed1cf7126c22';
+const COMMIT = '6a706a9a919cce9794f011a3';
+const REF = '6a706ac439cbed1cf7126c2d';
+/** A real 40-hex SHA — the one identifier this API shape-validates (design D12.2). */
+const SHA = 'e35cc1ed300bfe85da6d6b8108ddb33d28b26ae5';
+
+/** The response `resolveBranchRef` reads: `?name=` is exact, so a hit is one row. */
+const branchesPage = (values: unknown[] = [{ id: BRANCH, name: 'feature/x', is_default: false }]) =>
+  jsonResponse({ page_index: 0, page_size: 30, total: values.length, values });
+
+describe('scm branch commands', () => {
+  it('resolves --repo under --platform, then lists that repository’s branches', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'list', '--platform', 'Github', '--repo', 'code-interpreter', '--json'],
+      [platformsPage, reposPage, () => branchesPage()],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[0]?.url).toContain('/v1/scm/products?');
+    expect(run.calls[1]?.url).toContain(`/v1/scm/products/${PLATFORM}/repositories?`);
+    expect(run.calls[2]?.url).toContain(`/repositories/${REPO}/branches?`);
+  });
+
+  it('requires --repo, and says where to find one, before any request', async () => {
+    const run = await runCli(['scm', 'branch', 'list', '--platform-id', PLATFORM], [platformsPage]);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('--repo <name|full_name|id> is required');
+  });
+
+  it('rejects --repo together with --repo-id', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'list', '--platform-id', PLATFORM, '--repo', 'x', '--repo-id', REPO],
+      [platformsPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('mutually exclusive');
+  });
+
+  it('sends --repo-id verbatim, with no repository lookup at all', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'list', '--platform-id', PLATFORM, '--repo-id', REPO, '--json'],
+      [() => branchesPage()],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls).toHaveLength(1);
+    expect(run.calls[0]?.url).toContain(`/v1/scm/products/${PLATFORM}/repositories/${REPO}/branches?`);
+  });
+
+  it('resolves a branch NAME through the exact ?name= filter, in one request', async () => {
+    // Design D12.7: no metadata kind, no cache — one filtered list is the whole lookup,
+    // because `?name=` is exact and branch names are unique per repository.
+    const run = await runCli(
+      ['scm', 'branch', 'get', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO, '--json'],
+      [() => branchesPage(), () => jsonResponse({ id: BRANCH, name: 'feature/x' })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls).toHaveLength(2);
+    expect(run.calls[0]?.url).toContain('name=feature%2Fx');
+    expect(run.calls[1]?.url).toContain(`/branches/${BRANCH}`);
+  });
+
+  it('passes an unmatched reference through as an id without validating its shape', async () => {
+    // A miss is not an error: the server answers 100201 → exit 5 if it is not an id.
+    const run = await runCli(
+      ['scm', 'branch', 'get', 'not-a-branch-name', '--platform-id', PLATFORM, '--repo-id', REPO, '--json'],
+      [() => branchesPage([]), () => jsonResponse({ id: 'not-a-branch-name' })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[1]?.url).toContain('/branches/not-a-branch-name');
+  });
+
+  it('prints the request plan and sends nothing on a dry-run create', async () => {
+    const run = await runCli(
+      [
+        'scm', 'branch', 'create',
+        '--platform-id', PLATFORM, '--repo-id', REPO,
+        '--name', 'feature/x', '--sender', 'bot',
+        '--dry-run', '--json',
+      ],
+      [() => jsonResponse({ id: BRANCH })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes).toEqual([]);
+    const plan = JSON.parse(run.stdout) as { request: { method: string; body: unknown } };
+    expect(plan.request.method).toBe('POST');
+    expect(plan.request.body).toEqual({ name: 'feature/x', sender_name: 'bot' });
+  });
+
+  it('only sends is_default when --default was passed', async () => {
+    const bare = await runCli(
+      ['scm', 'branch', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--name', 'a', '--sender', 'bot', '--json'],
+      [() => jsonResponse({ id: BRANCH })],
+    );
+    expect(bare.writes[0]?.body).toEqual({ name: 'a', sender_name: 'bot' });
+
+    const flagged = await runCli(
+      ['scm', 'branch', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--name', 'a', '--sender', 'bot', '--default', '--json'],
+      [() => jsonResponse({ id: BRANCH })],
+    );
+    expect(flagged.writes[0]?.body).toEqual({ name: 'a', sender_name: 'bot', is_default: true });
+  });
+
+  it('refuses `--default false`, which commander would otherwise read as --default', async () => {
+    // Found live: commander silently discards an excess positional, so `--default false`
+    // meant `--default true` — the exact inverse of the request. `--private true|false`
+    // in the neighbouring `scm repo` subgroup is why a user would try this spelling.
+    const run = await runCli(
+      ['scm', 'branch', 'update', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--default', 'false'],
+      [() => branchesPage()],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toEqual([]);
+    expect(run.stderr).toContain('too many arguments');
+  });
+
+  it('refuses `--yes false` on delete, so a bad spelling cannot delete anything', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'delete', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--yes', 'false'],
+      [() => branchesPage()],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toEqual([]);
+  });
+
+  it('warns when the API silently dropped a work-item link, and still exits 0', async () => {
+    // Design D12.4: an unknown identifier is ignored with a 200, so the response's
+    // `work_items` is the only evidence. stdout must stay JSON-only.
+    const run = await runCli(
+      ['scm', 'branch', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--name', 'a', '--sender', 'bot',
+       '--work-item', 'YYHC-10', '--work-item', 'NOSUCH-99999', '--json'],
+      [() => jsonResponse({ id: BRANCH, work_items: [{ id: 'w1', identifier: 'YYHC-10' }] })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes[0]?.body).toEqual({
+      name: 'a',
+      sender_name: 'bot',
+      work_item_identifiers: ['YYHC-10', 'NOSUCH-99999'],
+    });
+    expect(run.stderr).toContain('NOSUCH-99999');
+    expect(run.stderr).not.toContain('YYHC-10');
+    JSON.parse(run.stdout);
+  });
+
+  it('says nothing when every requested work item came back linked', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--name', 'a', '--sender', 'bot', '--work-item', 'YYHC-10', '--json'],
+      [() => jsonResponse({ id: BRANCH, work_items: [{ id: 'w1', identifier: 'YYHC-10' }] })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stderr).toBe('');
+  });
+
+  it('refuses an empty branch patch before any request (exit 2)', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'update', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO],
+      [() => branchesPage()],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('nothing to update');
+  });
+
+  it('names the resolved branch in the --yes refusal, not just the id (AC2)', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'delete', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO],
+      [() => branchesPage()],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toEqual([]);
+    expect(run.stderr).toContain('refusing to delete the branch "feature/x"');
+    // And it warns about the consequence that is specific to this endpoint.
+    expect(run.stderr).toContain('commit refs');
+  });
+
+  it('warns in the gate when the target is the undeletable default branch', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'delete', 'main', '--platform-id', PLATFORM, '--repo-id', REPO],
+      [() => branchesPage([{ id: BRANCH, name: 'main', is_default: true }])],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('default branch');
+  });
+
+  it('reads the branch to name it when the caller passed an id', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'delete', BRANCH, '--platform-id', PLATFORM, '--repo-id', REPO],
+      [() => branchesPage([]), () => jsonResponse({ id: BRANCH, name: 'feature/from-id' })],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toEqual([]);
+    expect(run.stderr).toContain('"feature/from-id"');
+  });
+
+  it('deletes with --yes and sends exactly one DELETE', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'delete', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--yes', '--json'],
+      [() => branchesPage(), () => jsonResponse({ id: BRANCH, name: 'feature/x' })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes).toHaveLength(1);
+    expect(run.writes[0]?.method).toBe('DELETE');
+    expect(run.writes[0]?.url).toContain(`/branches/${BRANCH}`);
+  });
+
+  it('appends the way out when the server refuses to delete the default branch', async () => {
+    // `100223` stays exit 7 (it is not an absence), but the message has to carry the
+    // remedy: a `--json` error drops the hint, so an agent could not otherwise learn it.
+    const run = await runCli(
+      ['scm', 'branch', 'delete', 'main', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--yes', '--json'],
+      [
+        () => branchesPage([{ id: BRANCH, name: 'main', is_default: true }]),
+        () => jsonResponse({ code: '100223', message: '默认分支不能被删除' }, { status: 400 }),
+      ],
+    );
+    expect(run.exit).toBe(7);
+    const error = JSON.parse(run.stderr) as { error: { message: string; code: string } };
+    expect(error.error.code).toBe('100223');
+    expect(error.error.message).toContain('scm branch update');
+    expect(error.error.message).toContain('default');
+  });
+
+  it('has no --all on delete, so a bulk deletion cannot be spelled', async () => {
+    const run = await runCli(
+      ['scm', 'branch', 'delete', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--yes', '--all'],
+      [() => branchesPage()],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+  });
+});
+
+describe('scm commit commands', () => {
+  it('takes no --platform: the endpoint is organisation-level', async () => {
+    const run = await runCli(
+      ['scm', 'commit', 'list', '--platform', 'Github'],
+      [() => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] })],
+    );
+    // commander rejects the unknown option; nothing is sent.
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+  });
+
+  it('lists commits with no platform segment in the URL', async () => {
+    const run = await runCli(
+      ['scm', 'commit', 'list', '--sha', SHA, '--json'],
+      [() => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [{ id: COMMIT, sha: SHA }] })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[0]?.url).toContain('/v1/scm/commits?');
+    expect(run.calls[0]?.url).not.toContain('/products/');
+  });
+
+  it('gets a commit by SHA, sending it verbatim and resolving nothing first (AC1)', async () => {
+    const run = await runCli(
+      ['scm', 'commit', 'get', SHA, '--json'],
+      [() => jsonResponse({ id: COMMIT, sha: SHA })],
+    );
+    expect(run.exit).toBe(0);
+    // Exactly one request: no lookup, no shape check, no id resolution.
+    expect(run.calls).toHaveLength(1);
+    expect(run.calls[0]?.url).toMatch(new RegExp(`/v1/scm/commits/${SHA}$`));
+  });
+
+  it('accepts a date for --committed-at and sends unix seconds', async () => {
+    const run = await runCli(
+      ['scm', 'commit', 'create', '--sha', SHA, '--message', 'feat: x', '--committer', 'bot',
+       '--committed-at', '2026-08-03T10:00:00Z', '--json'],
+      [() => jsonResponse({ id: COMMIT })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes[0]?.body).toEqual({
+      sha: SHA,
+      message: 'feat: x',
+      committer_name: 'bot',
+      committed_at: 1785751200,
+      files_added: [],
+      files_removed: [],
+      files_modified: [],
+    });
+  });
+
+  it('collects repeatable file flags into the three arrays', async () => {
+    const run = await runCli(
+      ['scm', 'commit', 'create', '--sha', SHA, '--message', 'm', '--committer', 'bot',
+       '--committed-at', '1785751200',
+       '--added', 'a.ts', '--added', 'b.ts', '--removed', 'c.ts', '--modified', 'd.ts', '--json'],
+      [() => jsonResponse({ id: COMMIT })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes[0]?.body).toMatchObject({
+      files_added: ['a.ts', 'b.ts'],
+      files_removed: ['c.ts'],
+      files_modified: ['d.ts'],
+    });
+  });
+
+  it('refuses a non-date --committed-at before any request', async () => {
+    const run = await runCli(
+      ['scm', 'commit', 'create', '--sha', SHA, '--message', 'm', '--committer', 'bot',
+       '--committed-at', 'yesterday'],
+      [() => jsonResponse({ id: COMMIT })],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+  });
+
+  it('warns about a dropped work-item link here too', async () => {
+    const run = await runCli(
+      ['scm', 'commit', 'create', '--sha', SHA, '--message', 'm', '--committer', 'bot',
+       '--committed-at', '1785751200', '--work-item', 'NOSUCH-1', '--json'],
+      [() => jsonResponse({ id: COMMIT, work_items: [] })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stderr).toContain('NOSUCH-1');
+  });
+
+  it('offers no update and no delete leaf, because upstream has neither', async () => {
+    for (const verb of ['update', 'delete']) {
+      const run = await runCli(['scm', 'commit', verb, COMMIT], []);
+      expect(run.exit, verb).toBe(2);
+      expect(run.calls, verb).toEqual([]);
+    }
+  });
+});
+
+describe('scm ref commands', () => {
+  it('requires --branch-id on list, because the API requires meta_id', async () => {
+    const run = await runCli(
+      ['scm', 'ref', 'list', '--platform-id', PLATFORM, '--repo-id', REPO],
+      [() => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] })],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('--branch-id');
+  });
+
+  it('always sends meta_type=branch, the only value the API accepts', async () => {
+    const run = await runCli(
+      ['scm', 'ref', 'list', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--branch-id', BRANCH, '--json'],
+      [() => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[0]?.url).toContain('meta_type=branch');
+    expect(run.calls[0]?.url).toContain(`meta_id=${BRANCH}`);
+  });
+
+  it('creates a ref from --sha plus --branch-id', async () => {
+    const run = await runCli(
+      ['scm', 'ref', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--sha', SHA, '--branch-id', BRANCH, '--json'],
+      [() => jsonResponse({ id: REF, meta: { id: BRANCH, name: 'feature/x', type: 'branch' } })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes).toHaveLength(1);
+    expect(run.writes[0]?.body).toEqual({ sha: SHA, meta_type: 'branch', meta_id: BRANCH });
+  });
+
+  it('sends nothing on a dry-run ref create', async () => {
+    const run = await runCli(
+      ['scm', 'ref', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--sha', SHA, '--branch-id', BRANCH, '--dry-run', '--json'],
+      [() => jsonResponse({ id: REF })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.writes).toEqual([]);
+    expect(JSON.parse(run.stdout)).toMatchObject({ dry_run: true });
+  });
+
+  it('surfaces a missing commit on ref create as exit 5, naming the absent row', async () => {
+    const run = await runCli(
+      ['scm', 'ref', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--sha', SHA, '--branch-id', BRANCH, '--json'],
+      [() => jsonResponse({ code: '100206', message: "'commit'资源不存在" }, { status: 400 })],
+    );
+    expect(run.exit).toBe(5);
+    expect(run.stdout).toBe('');
+    const error = JSON.parse(run.stderr) as { error: { kind: string; code: string } };
+    expect(error.error).toMatchObject({ kind: 'not_found', code: '100206' });
+  });
+
+  it('offers no ref update and no ref delete leaf', async () => {
+    for (const verb of ['update', 'delete']) {
+      const run = await runCli(['scm', 'ref', verb, REF, '--platform-id', PLATFORM], []);
+      expect(run.exit, verb).toBe(2);
+      expect(run.calls, verb).toEqual([]);
+    }
+  });
+});
