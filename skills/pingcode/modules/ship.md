@@ -84,6 +84,8 @@ pingcode product ticket transition SLC-7 --state 处理中 --json
 place ship demands a lookup (`pingcode product meta ticket-types --product SLC`) before a write can even be
 attempted. `--channel` can only be set at create time; there is no way to change it afterwards.
 
+## 4b. Ship rules that will bite you
+
 These are on top of §4, which still applies. Ship is a different module with the same machinery, and
 almost every difference is a trap.
 

@@ -102,6 +102,8 @@ pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" --remove-run 7h
 name-resolvable flag has an `--x-id` twin (`--status-id`, `--executor-id`, `--plan-id`,
 `--library-id`, …) that is sent verbatim with no lookup; the two forms are mutually exclusive.
 
+## 4c. Testhub rules that will bite you
+
 These are on top of §4. Testhub is the same machinery again, with a different parent scope and a
 sharper write path.
 
