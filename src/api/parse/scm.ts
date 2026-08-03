@@ -17,9 +17,17 @@
  * booleans today (live 2026-08-03), but the docs type them `Boolean` while every
  * other flag in this API arrives as `0/1` (research §6.10), so they go through
  * `asBooleanFlag` and call sites never have to care which it was.
+ *
+ * build and release need even less: not one boolean, not one server-assigned
+ * timestamp, and the same `work_items[]` array scm already normalises — which is why
+ * S1d's three parsers share `parseScmWorkItemRefs` instead of introducing a second
+ * copy of the one field in this area whose contents are load-bearing.
  */
 
 import type {
+  BuildRecord,
+  Deployment,
+  ReleaseEnvironment,
   ScmBranch,
   ScmCodeReview,
   ScmCommit,
@@ -304,5 +312,84 @@ export function parseScmCodeReview(raw: unknown): ScmCodeReview {
     description: asString(record.description),
     submitted_at: asNumber(record.submitted_at),
     html_url: asString(record.html_url),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 构建记录 / 环境 / 部署 (S1d) — live-verified 2026-08-04, design D14
+// ---------------------------------------------------------------------------
+
+/**
+ * 构建记录.
+ *
+ * The plainest parser in the file, and that is the finding rather than an omission:
+ * a build record carries **no boolean flags, no archive/delete pair and no
+ * server-assigned timestamp**, so there is no `0/1` quirk to normalise here and
+ * nothing to default beyond `work_items`.
+ *
+ * `start_at` / `end_at` / `duration` go through `asNumber` so a value the wire ever
+ * sends as a string still lands as a number, while a genuinely absent one stays
+ * `undefined` rather than becoming `0` — "not reported" and "zero seconds" are
+ * different answers, and the caller owns all three fields anyway.
+ *
+ * `work_items` reuses the scm normalisation above because it is the same array
+ * field-for-field (verified live), and for the same load-bearing reason: it is the
+ * **only** evidence that a `work_item_identifiers` link actually landed, so it must
+ * be an array unconditionally and `identifier` must survive as a real field.
+ */
+export function parseBuildRecord(raw: unknown): BuildRecord {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    url: asString(record.url),
+    name: asString(record.name),
+    identifier: asString(record.identifier),
+    provider: asString(record.provider),
+    status: asString(record.status),
+    job_url: asString(record.job_url),
+    result_overview: asString(record.result_overview),
+    result_url: asString(record.result_url),
+    start_at: asNumber(record.start_at),
+    end_at: asNumber(record.end_at),
+    duration: asNumber(record.duration),
+    work_items: parseScmWorkItemRefs(record.work_items),
+  };
+}
+
+/** 环境 — four fields, no references, nothing to normalise. */
+export function parseReleaseEnvironment(raw: unknown): ReleaseEnvironment {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    url: asString(record.url),
+    name: asString(record.name),
+    html_url: asString(record.html_url),
+  };
+}
+
+/**
+ * 部署.
+ *
+ * `environment` is parsed as a `Ref` because that is what reads return, even though
+ * writes send an `env_id` string — the same read-object/write-scalar split as a
+ * branch's `sender` or a repository's `owner`. The embedded form carries
+ * `{id, url, name}` and nothing more, so a `Ref` promises exactly what is there.
+ */
+export function parseDeployment(raw: unknown): Deployment {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    url: asString(record.url),
+    status: asString(record.status),
+    release_name: asString(record.release_name),
+    environment: parseRef(record.environment),
+    release_url: asString(record.release_url),
+    start_at: asNumber(record.start_at),
+    end_at: asNumber(record.end_at),
+    duration: asNumber(record.duration),
+    work_items: parseScmWorkItemRefs(record.work_items),
   };
 }

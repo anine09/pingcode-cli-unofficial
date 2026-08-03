@@ -347,6 +347,52 @@ const TABLE = {
       'repository names are unique only per platform, so pass the full_name (owner/name) or the id ' +
       'when two collide — list them with `pingcode scm repo list --platform <platform>`',
   },
+
+  // ---- release (部署) -----------------------------------------------------------
+  //
+  // **The only row S1d adds, and the only one it should.** The other two DevOps
+  // collections it landed are deliberately absent, for reasons that are the mirror
+  // image of this row's:
+  //
+  //  - **构建记录 gets no row.** Its `identifier` is not unique (two builds may both be
+  //    `"9001"`, live 2026-08-04), its list honours **no filter at all**, and a new
+  //    record appears on every CI run — so there is no name to resolve, and a 24 h
+  //    cached list of build records would be a stale-answer generator rather than an
+  //    optimisation. Same judgement S1b made for branches (D12.7 reason 2), only
+  //    stronger: branches at least have unique names.
+  //  - **部署 gets no row.** A deploy has no name whatsoever — `release_name` is free
+  //    text and not unique — so `resolve` would have nothing to match on.
+
+  /**
+   * 环境, and the bootstrap hop of the `release` group: `POST /v1/release/deploys`
+   * takes an `env_id`, and the caller of a deploy write is a pipeline that knows it is
+   * shipping to "production", not to a 24-hex id. Without this row the only route from
+   * that name to that id would be `release env list --json | jq`, which is exactly the
+   * gap `pingcode resolve` exists to close.
+   *
+   * It fits the table exactly as it stands — **no parent** (environments are
+   * organisation-level, like `scm-platform` and `ship-product`), so no engine change
+   * and no second parent slot. That is the difference from the kinds S1b/S1c declined:
+   * a branch, a pull request and a review each needed two or three parent ids, which
+   * `ResolverSpec` cannot express.
+   *
+   * Caching is right here, unlike for the two collections above: environments are
+   * standing configuration — a handful of named deploy targets an organisation edits
+   * rarely — not per-run records.
+   *
+   * The list is loaded whole rather than filtered server-side, the same call
+   * `scm-platform` makes and for the same reason: `?name=` is an **exact,
+   * case-insensitive** match (live 2026-08-04), so it cannot answer "which
+   * environments are there", and loading the list means a failed lookup prints the
+   * real candidates instead of an unhelpful zero-row silence.
+   */
+  'release-env': {
+    label: 'environment',
+    path: ENDPOINTS.releaseEnvironments,
+    hint:
+      'environment names are unique per organisation — list them with ' +
+      '`pingcode release env list`, or create one with `pingcode release env create --name <name>`',
+  },
 } as const;
 
 /**

@@ -100,6 +100,14 @@ export const resolveCaseImportantLevel: RootResolver = root('testhub-case-import
 export const resolvePlatform: RootResolver = root('scm-platform');
 export const resolveRepository: ScopedResolver = scoped('scm-repo');
 
+/**
+ * release (部署) — organisation-level, so a root lookup. The one DevOps collection
+ * outside scm that a name can address: environment names are unique per organisation
+ * and stable, while build records and deploys have no usable name at all (see the
+ * registry's `release-env` row).
+ */
+export const resolveEnvironment: RootResolver = root('release-env');
+
 export type ResolveStateOptions = {
   projectId: string;
   /** Required to resolve a **name**; states live in the type's state scheme. */

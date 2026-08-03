@@ -54,6 +54,8 @@ Commands:
   scm-platform [options] <name>                           hosting platform → id (/v1/scm/products)
   scm-repo [options] <name>                               repo → id
                                                           (/v1/scm/products/{parent}/repositories)
+  release-env [options] <name>                            environment → id
+                                                          (/v1/release/environments)
   help [command]                                          display help for command
 
 Every lookup follows the same rules as the refined commands, because it is the same

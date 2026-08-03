@@ -118,8 +118,13 @@ export type ScmRepository = {
 };
 
 /**
- * A work item as the scm families embed it — the `work_items[]` on a branch and on
- * a commit ([S§3.12.4], [S§3.12.7]).
+ * A work item as the DevOps families embed it — the `work_items[]` on a branch, a
+ * commit and a pull request ([S§3.12.4], [S§3.12.7]), and, verified live 2026-08-04,
+ * the byte-identical array on a **build record** and a **deploy** ([S§3.12.8-10]).
+ *
+ * One type for all five on purpose: the wire shape is the same field-for-field, and
+ * so is the contract around it (`work_item_identifiers` in, silently-dropped unknowns
+ * out). A second name for the same object would only invite the two to drift.
  *
  * Richer than a plain `Ref` (it carries `identifier`, `title`, `type`, `short_id`,
  * `html_url` and the custom `properties` bag), and worth its own type for one
@@ -386,5 +391,144 @@ export type ScmCodeReview = {
   /** Unix seconds, caller-supplied and required on create. */
   submitted_at?: number | undefined;
   html_url?: string | undefined;
+  [key: string]: unknown;
+};
+
+// ---------------------------------------------------------------------------
+// build (构建记录) + release (环境 / 部署) — S1d, live-verified 2026-08-04
+// ---------------------------------------------------------------------------
+//
+// Three flat resources, and the flattest corner of the whole API: no `identifier`
+// beyond the caller's own build number, no `short_id`, no `is_archived` /
+// `is_deleted`, **and not one timestamp the server assigns** — every time on these
+// records is a value the CI job supplied. Consequently there is nothing here to
+// normalise except numbers, and the parsers in `api/parse/scm.ts` are three lines of
+// field mapping each.
+
+/**
+ * `GET /v1/build/builds[/{build_id}]` — 构建记录 ([S§3.12.8]), one recorded CI build.
+ *
+ * Organisation-level: there is no platform, repository or project in the path, and no
+ * reference to one in the body. A build is joined to work items **only** through
+ * `work_item_identifiers`, which is why `work_items` is the resource's only link to
+ * anything else in PingCode.
+ *
+ * Four things the field list encodes, all verified live 2026-08-04:
+ *
+ *  - **`identifier` is the caller's build number and is NOT unique** — two builds may
+ *    carry `"9001"` and the API accepts both. So it is not a lookup key, and since
+ *    `GET /v1/build/builds` honours no filter at all, the id from the create response
+ *    (or a page walk) is the only way back to a build.
+ *  - **`provider` and `status` are closed enums** — `bamboo|bitbucket|jenkins|other`
+ *    and `success|failure` — typed as plain `string`s for the module's usual reason:
+ *    a value the server later accepts must not be refused by a CLI that shipped
+ *    before it. A wrong one is 400 `100003`.
+ *  - **`duration` is not derived.** The API requires it alongside `start_at` /
+ *    `end_at` and never recomputes it, so a caller reporting CPU seconds rather than
+ *    wall-clock is free to; the CLI does not compute one either.
+ *  - **the three timestamps are range-checked** (400 `100004` for `0` or for
+ *    milliseconds), which is unusual on this API — they are unix **seconds**.
+ *
+ * There is a `DELETE` (rare in this API, and unique to this family within DevOps),
+ * and it is a hard delete: the record is gone and a subsequent `GET` is 400 `100203`.
+ */
+export type BuildRecord = {
+  id: string;
+  url?: string | undefined;
+  name?: string | undefined;
+  /** The caller's build number. **Not unique**, and not a lookup key. */
+  identifier?: string | undefined;
+  /** One of `bamboo` / `bitbucket` / `jenkins` / `other`; not validated client-side. */
+  provider?: string | undefined;
+  /** One of `success` / `failure`; not validated client-side. */
+  status?: string | undefined;
+  /** The CI job page. PingCode renders no jump link when it is absent. */
+  job_url?: string | undefined;
+  result_overview?: string | undefined;
+  result_url?: string | undefined;
+  /** Unix seconds, caller-supplied and required on create. */
+  start_at?: number | undefined;
+  /** Unix seconds, caller-supplied and required on create. */
+  end_at?: number | undefined;
+  /** Seconds. Caller-supplied and required; the server never derives it from the pair above. */
+  duration?: number | undefined;
+  /** Linked work items. `[]` when none — never `undefined`, so call sites do not branch. */
+  work_items: ScmWorkItemRef[];
+  [key: string]: unknown;
+};
+
+/**
+ * `GET /v1/release/environments[/{env_id}]` — 环境 ([S§3.12.9]): a named deploy target.
+ *
+ * The smallest resource in the CLI — `{id, url, name, html_url}` and nothing else. Two
+ * live-verified facts make it the one *resolvable* kind this child adds:
+ *
+ *  - **`name` is unique per organisation** (a duplicate create is 400 `100105`
+ *    `'<name>'环境已经存在`), and
+ *  - **`?name=` on the list is an exact, case-insensitive filter that is honoured**
+ *    (unlike the repository list's, which upstream ignores).
+ *
+ * So a name is a complete address for an environment, which is exactly what a deploy
+ * write needs: a pipeline knows it is deploying to "production", not to
+ * `6a70…f01ac6`. See the `release-env` row in `core/metadata/registry.ts`.
+ *
+ * `html_url` must be a URL and **cannot be cleared**: `""` is refused (400 `100003`,
+ * `不是URL格式`), so once set it can only be replaced.
+ *
+ * Upstream has a `DELETE`, which this CLI deliberately does not wrap (PRD out of
+ * scope, pending the parent task's ruling) — `pingcode api DELETE
+ * /v1/release/environments/<id>` reaches it. Worth knowing before you do: the server
+ * **refuses** to delete an environment a deploy still references (400 `100106`), so
+ * unlike an scm branch this parent cannot be orphaned.
+ */
+export type ReleaseEnvironment = {
+  id: string;
+  url?: string | undefined;
+  /** Unique per organisation, and an exact-match key on the list endpoint. */
+  name?: string | undefined;
+  /** Must be a valid URL; an empty string is refused, so it cannot be cleared. */
+  html_url?: string | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * `GET /v1/release/deploys[/{deploy_id}]` — 部署 ([S§3.12.10]), one deployment record.
+ *
+ * The read/write asymmetry of the rest of the area applies once more: reads carry an
+ * `environment` **reference**, writes send an `env_id` **scalar**, and the two never
+ * appear in one payload.
+ *
+ * Three further facts, live 2026-08-04:
+ *
+ *  - **`release_name` is free text and is not unique**, so — exactly like a build's
+ *    `identifier` — it is not a lookup key. The only filter the list honours is
+ *    `?env_id=`, so a deploy is addressed by id and *found* by environment.
+ *  - **`env_id` is shape-validated** (400 `100003` for a non-ObjectId) and its
+ *    existence is checked (400 `100205`, the environment's own not-found code, which
+ *    maps to exit 5 — the named row really is absent).
+ *  - **`status` is a two-value enum**, `not_deployed|deployed`. There is no
+ *    "failed" or "rolled back" state to record; a rollback is a new deploy.
+ *
+ * Upstream has a `DELETE` here too, and it is *not* wrapped for the same reason as the
+ * environment's. It works, and it is what frees an environment for deletion.
+ */
+export type Deployment = {
+  id: string;
+  url?: string | undefined;
+  /** One of `not_deployed` / `deployed`; not validated client-side. */
+  status?: string | undefined;
+  /** Free text (a version, a tag). Not unique, and not a lookup key. */
+  release_name?: string | undefined;
+  /** The 环境 this deploy went to; embedded on reads, written as the `env_id` scalar. */
+  environment?: Ref | undefined;
+  release_url?: string | undefined;
+  /** Unix seconds, caller-supplied and required on create. */
+  start_at?: number | undefined;
+  /** Unix seconds, caller-supplied and required on create. */
+  end_at?: number | undefined;
+  /** Seconds. Caller-supplied and required; never derived from the pair above. */
+  duration?: number | undefined;
+  /** Linked work items. `[]` when none — never `undefined`, so call sites do not branch. */
+  work_items: ScmWorkItemRef[];
   [key: string]: unknown;
 };

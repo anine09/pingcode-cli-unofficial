@@ -487,4 +487,104 @@ export const ENDPOINTS = {
     reviewId: string,
   ): string =>
     `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/pull_requests/${encodeURIComponent(pullRequestId)}/reviews/${encodeURIComponent(reviewId)}`,
+
+  // -------------------------------------------------------------------------
+  // build (构建记录) + release (环境 / 部署) — the other two DevOps areas,
+  // research §3.12.8-10, live-verified 2026-08-04 (design D14)
+  // -------------------------------------------------------------------------
+  //
+  // Same area, same token type as scm: **企业令牌 only**, because these are the
+  // write-back endpoints a CI system calls. Different scopes though —
+  // `pcp:read:devops:build` / `pcp:write:devops:build` for builds and
+  // `pcp:read:devops:deploy` / `pcp:write:devops:deploy` for **both** environments
+  // and deploys (there is no separate `release` scope).
+  //
+  // Three structural facts, before the surprises:
+  //
+  //  1. **Everything here is organisation-level.** No platform, no repository, no
+  //     project appears in any of these six paths — a build record and a deploy are
+  //     free-standing facts joined to work items by `work_item_identifiers` and
+  //     nothing else. So these two groups take no parent flag at all, the way
+  //     `scm commit` does not (D12.6), and unlike every other scm leaf.
+  //  2. **A deploy is the one resource here with a parent**, and it is an
+  //     environment (`env_id` in the body, `environment` on reads).
+  //  3. **`PUT` stays out of the refined layer** (D8.4): `PUT /v1/build/builds/{id}`,
+  //     `…/environments/{id}` and `…/deploys/{id}` are reachable only as
+  //     `pingcode api PUT <path>`.
+  //
+  // Live findings (2026-08-04, public cloud) — the docs state none of these:
+  //
+  //  - **`GET /v1/release/environments?name=` is NOT required**, though both the
+  //    vendor docs and therefore the catalog mark it `required: true`. An unfiltered
+  //    list returns every environment (HTTP 200). The refined `release env list`
+  //    consequently never sends it unless asked; the generic layer needed a
+  //    correction row (`PARAM_REQUIRED_OVERRIDES` in `core/catalog/index.ts`), or
+  //    `pingcode api GET /v1/release/environments` would refuse a call the API
+  //    accepts. When it *is* sent it is an **exact, case-insensitive** filter —
+  //    `name=cli-smoke-prod` and `name=CLI-SMOKE-PROD` both match, `name=cli-smoke`
+  //    matches nothing — the same shape as a platform's or a branch's `?name=`.
+  //  - **`GET /v1/build/builds` honours no filter whatsoever.** It documents none,
+  //    and `?identifier=`, `?name=`, `?status=`, `?provider=` and `?work_item_id=`
+  //    were each probed live and **silently ignored** (all four rows came back every
+  //    time). So `build list` offers paging only and is always a whole-organisation
+  //    scan; a silently-dead filter is worse than no filter (D11.2).
+  //  - **`GET /v1/release/deploys?env_id=` does filter**, exactly, and an unknown but
+  //    well-formed id yields 200 with zero rows rather than an error. `?status=`,
+  //    `?release_name=` and `?work_item_id=` are ignored, so only the documented one
+  //    is exposed.
+  //  - **A build `identifier` is not unique.** Two builds were created with
+  //    `identifier: "9001"` and both were accepted, so an identifier can never be a
+  //    lookup key here — and since the list has no filter either, the only way to
+  //    reach a build is the id from `build create` or a page walk.
+  //  - **An environment name IS unique per organisation** (`100105
+  //    '<name>'环境已经存在`), which together with the exact `?name=` filter is what
+  //    makes `release-env` a resolvable metadata kind.
+  //  - **`env_id` and the three timestamps are shape-validated server-side**, which
+  //    is rare on this API (`sha` was the only known case, D12.2): a non-ObjectId
+  //    `env_id` is 400 `100003` (`不是有效的id`) and an out-of-range `start_at` — `0`,
+  //    or milliseconds instead of seconds — is 400 `100004`
+  //    (`数值不是有效的时间戳`). The CLI still validates no id shape; it converts
+  //    date input to unix **seconds** and lets the server judge the rest.
+  //  - **`html_url` must be a URL and cannot be cleared**: `html_url: ""` is 400
+  //    `100003` (`不是URL格式`), so there is no way to remove one once set.
+  //  - **`work_item_identifiers` silently drops unknown identifiers** on both
+  //    families, exactly as in scm (D12.4): a mixed `["YYHC-10","NOSUCH-99999"]`
+  //    returned 200 with only the real one linked, and `[""]` is rejected
+  //    (`100006`). PATCH **replaces** the whole set and `[]` clears it. The commands
+  //    therefore compare what was asked for against the response's `work_items`.
+  //  - **Nothing here takes a `*_name` reference field**, so — unlike scm's
+  //    `sender_name` / `owner_name` / `creator_name` — no flag in these two groups can
+  //    upsert a ghost identity. Probed for, and deliberately not warned about
+  //    (asserting a hazard that does not exist is as wrong as omitting one that does,
+  //    D12.1).
+  //  - **Deleting an environment that a deploy references is refused**, 400 `100106`
+  //    (`'environment'正在使用，不能被删除`) — and once the referencing deploys are
+  //    gone the delete succeeds. This is the **opposite** of the scm branch/ref
+  //    hazard (D12.5), where deleting a parent orphaned children and left a permanent
+  //    HTTP 500: the release family enforces referential integrity server-side, so
+  //    nothing here can be orphaned.
+  //  - Absence is HTTP **400** with one stable code per resource, as everywhere else:
+  //    `100203` build (on `GET`, `PATCH` **and** `DELETE`), `100204` deploy
+  //    (`GET`/`PATCH`), `100205` environment (`GET`/`PATCH`, and on
+  //    `POST /v1/release/deploys` when `env_id` names no environment). All three are
+  //    in `ERROR_CODE_OVERRIDES` (exit 5). A path segment that is not an ObjectId is
+  //    a real 404 + `100002`, which the status-first mapping already handles.
+  //  - Deliberately left on exit 7: `100105` (duplicate environment name — a
+  //    uniqueness conflict), `100106` (the in-use refusal — the environment plainly
+  //    exists), and `100003` / `100004` / `100006` / `100008` (input validation,
+  //    `100008` being the cross-module "missing required field" code).
+
+  /** 构建记录 — org-level, and **no filter of any kind** on the list (live 2026-08-04). */
+  buildRecords: '/v1/build/builds',
+  buildRecord: (buildId: string): string => `/v1/build/builds/${encodeURIComponent(buildId)}`,
+
+  /** 环境 — org-level. `?name=` is exact, case-insensitive and **optional**, despite the docs. */
+  releaseEnvironments: '/v1/release/environments',
+  releaseEnvironment: (environmentId: string): string =>
+    `/v1/release/environments/${encodeURIComponent(environmentId)}`,
+
+  /** 部署 — org-level, scoped to an environment by `env_id`, which is also its only filter. */
+  releaseDeploys: '/v1/release/deploys',
+  releaseDeploy: (deployId: string): string =>
+    `/v1/release/deploys/${encodeURIComponent(deployId)}`,
 } as const;

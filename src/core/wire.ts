@@ -361,6 +361,42 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   // `scm/review.ts` and modules/scm.md rather than papered over here).
   '100208': 'not_found',
   '100222': 'not_found',
+  // S1d (08-02-full-api-coverage) build + release smoke, 2026-08-04, live tenant
+  // (design D14.4). The last three DevOps families, and the same shape a fourth time —
+  // one stable per-resource code, HTTP **400**, identical across every verb that can
+  // name a missing row:
+  //   100203 "'build'资源不存在"        — GET, PATCH **and DELETE**
+  //     /v1/build/builds/{unknown 24-hex}, and again on the GET that follows a
+  //     successful delete. Three verbs, one code. This is the only family in the area
+  //     whose delete path can report an absence at all, since it is the only one with
+  //     a delete.
+  //   100204 "'deploy'资源不存在"       — GET and PATCH /v1/release/deploys/{unknown}
+  //   100205 "'environment'资源不存在"  — GET and PATCH
+  //     /v1/release/environments/{unknown}, and on **POST /v1/release/deploys** when
+  //     `env_id` names no environment. As with S1b's `100201` on `POST …/refs`, exit 5
+  //     is precise rather than incidental there: the row the request *named* does not
+  //     exist, which is a different failure from "the create was rejected".
+  // Without these rows a missing build exited 7 while a missing branch exited 5, for
+  // the same mistake — the inconsistency S1a..S1c already closed for scm.
+  //
+  // Deliberately **not** mapped, from the same smoke:
+  //  - `100105` (`'<name>'环境已经存在`) — a uniqueness conflict on the environment name,
+  //    judged exactly as `100220`/`100217`/`100214`/`100215` were.
+  //  - `100106` (`'environment'正在使用，不能被删除`) — a **business-rule refusal**: the
+  //    environment plainly exists, and the server is protecting the deploys that
+  //    reference it. Same judgement as `100223` (默认分支不能被删除). Note this refusal is
+  //    good news, not a limitation — it is why the release families cannot be orphaned
+  //    the way a branch's commit refs can (D12.5).
+  //  - `100003` (`'env_id'不是有效的字符串(不是有效的id)`, `'status'/'provider'不是有效的枚举值`,
+  //    `'html_url'不是URL格式`), `100004` (`'start_at'…数值不是有效的时间戳`, returned for `0`
+  //    and for milliseconds-instead-of-seconds) and `100006`
+  //    (`'work_item_identifiers[0]'…值不能为空`) — all input validation.
+  //  - `100008` (`'start_at'是必填字段`) — the **cross-module** missing-required-field
+  //    code (testhub answers it for `'start_at'` too, S1c saw it for `'status'`).
+  //    Mapping it would pollute every module with a wrong `not_found`.
+  '100203': 'not_found',
+  '100204': 'not_found',
+  '100205': 'not_found',
 };
 
 const NOT_FOUND_HINT =

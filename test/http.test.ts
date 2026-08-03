@@ -505,6 +505,15 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       // Behaviour is asserted through the wrappers in `test/scm.test.ts`.
       '100208': 'not_found',
       '100222': 'not_found',
+      // S1d: 构建记录 / 环境 / 部署, the last three DevOps families (S1d smoke,
+      // 2026-08-04, design D14.4). `100203` was observed on GET, PATCH **and DELETE**
+      // (the only delete in the area); `100204` on GET/PATCH; `100205` on GET/PATCH and
+      // on a POST /v1/release/deploys whose `env_id` names no environment.
+      // Behaviour is asserted through the wrappers in `test/build.test.ts` and
+      // `test/release.test.ts`.
+      '100203': 'not_found',
+      '100204': 'not_found',
+      '100205': 'not_found',
     });
   });
 

@@ -66,10 +66,54 @@ function overrideKey(entry: CatalogEntry): string {
   return `${entry.method} ${entry.path}`;
 }
 
-export const CATALOG: readonly CatalogEntry[] = GENERATED.map((entry) => {
+/**
+ * Corrections to the generated **`required`** flags, for parameters the vendor docs
+ * mark mandatory and the live API does not (design D9 risk 2, PRD R2: when the docs
+ * and the running API disagree, the API wins and the correction lives here rather
+ * than in the generated file).
+ *
+ * This matters more than the `paged` table does, because `missingRequired` refuses the
+ * call **before** anything is sent: a wrongly-required parameter does not degrade the
+ * generic layer, it makes an endpoint unreachable through it. Same key shape as
+ * `PAGED_OVERRIDES` (`METHOD path`), value = the parameter names that are in fact
+ * optional.
+ *
+ * One row so far, and it must stay that way: only add a name after actually observing
+ * the endpoint answer 200 without it, and say where.
+ */
+const OPTIONAL_QUERY_OVERRIDES = new Map<string, readonly string[]>([
+  // S1d smoke, 2026-08-04, live tenant. `GET /v1/release/environments` documents
+  // `name` as a required query parameter (获取环境列表 → 查询参数 name, and the generator
+  // faithfully copied it). Live, the unfiltered list returns every environment with
+  // HTTP 200 — verified against a tenant with four of them. Without this row
+  // `pingcode api GET /v1/release/environments` exits 2 with "missing required
+  // field(s): name (query)" and never sends a request the API would have answered.
+  ['GET /v1/release/environments', ['name']],
+]);
+
+/** Every `required` flag the loader hands out came from the generator or from the table above. */
+export const OPTIONAL_QUERY_OVERRIDE_KEYS: readonly string[] = [
+  ...OPTIONAL_QUERY_OVERRIDES.keys(),
+];
+
+function withOverrides(entry: CatalogEntry): CatalogEntry {
   const paged = PAGED_OVERRIDES.get(overrideKey(entry));
-  return paged === undefined ? entry : { ...entry, paged };
-});
+  const optional = OPTIONAL_QUERY_OVERRIDES.get(overrideKey(entry));
+  if (paged === undefined && optional === undefined) return entry;
+  return {
+    ...entry,
+    ...(paged === undefined ? {} : { paged }),
+    ...(optional === undefined
+      ? {}
+      : {
+          query: entry.query.map((param) =>
+            optional.includes(param.name) ? { ...param, required: false } : param,
+          ),
+        }),
+  };
+}
+
+export const CATALOG: readonly CatalogEntry[] = GENERATED.map(withOverrides);
 
 /** Every `paged` value the loader hands out came from the generator or from `PAGED_OVERRIDES`. */
 export const PAGED_OVERRIDE_KEYS: readonly string[] = [...PAGED_OVERRIDES.keys()];
