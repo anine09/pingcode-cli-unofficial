@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { registerApiCommands } from './commands/api';
 import { registerAuthCommands } from './commands/auth';
 import { registerProductCommands } from './commands/product';
 import { registerProjectCommands } from './commands/project';
@@ -32,6 +33,7 @@ import { registerTesthubCommands } from './commands/testhub';
  */
 export const GROUPS: readonly (readonly [string, (program: Command) => void])[] = [
   ['auth', registerAuthCommands],
+  ['api', registerApiCommands],
   ['product', registerProductCommands],
   ['project', registerProjectCommands],
   ['testhub', registerTesthubCommands],

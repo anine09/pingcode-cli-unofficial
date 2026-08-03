@@ -1,0 +1,180 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`api --help > api 1`] = `
+"Usage: pingcode api [options] [command]
+
+通用逃生舱: call any documented v1 endpoint directly (catalog-checked passthrough)
+
+Options:
+  -h, --help                                display help for command
+
+Commands:
+  GET|get [options] <path>                  read any documented endpoint (paged endpoints accept
+                                            --page/--all)
+  POST|post [options] <path>                create, or run one of the five POST …/search reads
+  PATCH|patch [options] <path>              partial update — the verb to prefer for every update
+  PUT|put [options] <path>                  full replacement — omitted fields may be cleared (see
+                                            the note below)
+  DELETE|delete [options] <path>            delete — requires --yes
+  list [options]                            search the catalog of 459 documented endpoints (local,
+                                            no request)
+  describe [options] <id-or-method> [path]  one endpoint in full: fields, scope, token type, paging
+                                            flavour (local)
+  help [command]                            display help for command
+
+stdout is the API response, verbatim JSON — so --json is a no-op on the five verbs
+(it does apply to \`api list\` / \`api describe\`, which render the local catalog).
+The path is checked against the endpoint catalog before anything is sent, so an
+unknown path, a wrong method, a missing required field or a user-token-only
+endpoint fails with exit 2 and no request.
+Start with \`pingcode api list --search <text>\` and \`pingcode api describe <id>\`.
+
+"
+`;
+
+exports[`api --help > api DELETE (the --yes gate) 1`] = `
+"Usage: pingcode api DELETE|delete [options] <path>
+
+delete — requires --yes
+
+Arguments:
+  path                 endpoint path with ids substituted, e.g. /v1/scm/commits/9f3c1ab (no query
+                       string)
+
+Options:
+  --query <key=value>  query parameter, repeatable, value sent verbatim
+  --body-file <path>   request body, read as JSON from a file
+  --body <json|->      request body as inline JSON, or - to read stdin
+  --set <key=value>    one top-level body field, repeatable, value verbatim
+  --yes                confirm the deletion — required, this API has no undo for most rows
+  -h, --help           display help for command
+
+stdout is the API response, verbatim JSON; --json is a no-op here.
+The catalog is consulted first: unknown path, wrong method, missing required field
+or a user-token-only endpoint ⇒ exit 2 with nothing sent.
+--yes is mandatory. \`pingcode api list --method DELETE\` enumerates the 49 deletable
+endpoints; a wiki page and a code branch are the two with no recovery path at all.
+
+"
+`;
+
+exports[`api --help > api GET (the read verb, with paging) 1`] = `
+"Usage: pingcode api GET|get [options] <path>
+
+read any documented endpoint (paged endpoints accept --page/--all)
+
+Arguments:
+  path                 endpoint path with ids substituted, e.g. /v1/scm/commits/9f3c1ab (no query
+                       string)
+
+Options:
+  --query <key=value>  query parameter, repeatable, value sent verbatim
+  --page <n>           page index, 0-based (paged endpoints only)
+  --page-size <n>      rows per page, 1-100 (paged endpoints only)
+  --all                walk every page (best effort: the API guarantees no ordering)
+  --limit <n>          stop after this many rows with --all (default 500)
+  -h, --help           display help for command
+
+stdout is the API response, verbatim JSON; --json is a no-op here.
+The catalog is consulted first: unknown path, wrong method, missing required field
+or a user-token-only endpoint ⇒ exit 2 with nothing sent.
+--page/--page-size are forwarded as page_index/page_size only when you pass them;
+--all walks the pages and prints {"values":[…],"count":N,"all":true}.
+
+"
+`;
+
+exports[`api --help > api POST (body flags plus search paging) 1`] = `
+"Usage: pingcode api POST|post [options] <path>
+
+create, or run one of the five POST …/search reads
+
+Arguments:
+  path                 endpoint path with ids substituted, e.g. /v1/scm/commits/9f3c1ab (no query
+                       string)
+
+Options:
+  --query <key=value>  query parameter, repeatable, value sent verbatim
+  --body-file <path>   request body, read as JSON from a file
+  --body <json|->      request body as inline JSON, or - to read stdin
+  --set <key=value>    one top-level body field, repeatable, value verbatim
+  --page <n>           page index, 0-based (paged endpoints only)
+  --page-size <n>      rows per page, 1-100 (paged endpoints only)
+  --all                walk every page (best effort: the API guarantees no ordering)
+  --limit <n>          stop after this many rows with --all (default 500)
+  -h, --help           display help for command
+
+stdout is the API response, verbatim JSON; --json is a no-op here.
+The catalog is consulted first: unknown path, wrong method, missing required field
+or a user-token-only endpoint ⇒ exit 2 with nothing sent.
+The five POST …/search endpoints are reads that use a mutating verb: they run even
+under --dry-run, take a {"mode":"query","payload":{…}} body, and page inside payload.
+
+"
+`;
+
+exports[`api --help > api PUT (the full-replacement warning) 1`] = `
+"Usage: pingcode api PUT|put [options] <path>
+
+full replacement — omitted fields may be cleared (see the note below)
+
+Arguments:
+  path                 endpoint path with ids substituted, e.g. /v1/scm/commits/9f3c1ab (no query
+                       string)
+
+Options:
+  --query <key=value>  query parameter, repeatable, value sent verbatim
+  --body-file <path>   request body, read as JSON from a file
+  --body <json|->      request body as inline JSON, or - to read stdin
+  --set <key=value>    one top-level body field, repeatable, value verbatim
+  -h, --help           display help for command
+
+stdout is the API response, verbatim JSON; --json is a no-op here.
+The catalog is consulted first: unknown path, wrong method, missing required field
+or a user-token-only endpoint ⇒ exit 2 with nothing sent.
+PUT replaces the whole object and this API never documents what an omitted field
+does — one module was measured clearing a field its PATCH sibling preserves. Use
+PATCH unless you really mean to replace everything. No refined command uses PUT.
+
+"
+`;
+
+exports[`api --help > api describe 1`] = `
+"Usage: pingcode api describe [options] <id-or-method> [path]
+
+one endpoint in full: fields, scope, token type, paging flavour (local)
+
+Arguments:
+  id-or-method  catalog id such as scm.commits.get, or an HTTP method
+  path          endpoint path, when the first argument is a method
+
+Options:
+  -h, --help    display help for command
+
+An id is exact; a method + path is matched through the same wildcard rules the
+executor uses. GET /v1/auth/token is the one path three entries share (the three
+grants), so address those by id.
+--json prints the catalog entry verbatim.
+
+"
+`;
+
+exports[`api --help > api list 1`] = `
+"Usage: pingcode api list [options]
+
+search the catalog of 459 documented endpoints (local, no request)
+
+Options:
+  --module <name>  module: pjm, ship, testhub, scm, build, release, directory, wiki, …
+  --search <text>  substring match over path, title and group
+  --token <type>   token type: APP | ENT | USER | NONE (NONE = needs no token)
+  --method <verb>  GET | POST | PATCH | PUT | DELETE
+  -h, --help       display help for command
+
+This reads the bundled catalog, never the network. \`--token ENT\` is the 61 endpoints
+only a machine identity can call (the CLI holds exactly that token); \`--method DELETE\`
+is the auditable danger surface.
+--json prints {"values":[…],"count":N} with each catalog entry verbatim.
+
+"
+`;

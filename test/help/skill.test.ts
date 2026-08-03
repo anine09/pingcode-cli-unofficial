@@ -55,12 +55,18 @@ const allDocs = [skill, ...Object.values(modules)].join('\n');
  * reintroduce the exhaustive reverse assertion this file exists to remove.
  *
  * F3/F4/S1–S4 add their rows here as they land (`api`, `resolve`, `scm`, `build`,
- * `release`, the crosscutting subgroups). They are absent today because the commands
- * are absent today, and documenting a command that does not exist is the one failure
- * mode the forward assertion below is designed to catch.
+ * `release`, the crosscutting subgroups). `api` landed with F3; the rest are absent
+ * because those commands are absent, and documenting a command that does not exist is
+ * the one failure mode the forward assertion below is designed to catch.
  */
 const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['auth', /pingcode auth status/],
+  // F3 — the generic escape hatch. Three rows, because the executor is useless to an
+  // agent without the two discovery commands that tell it which path to hand over.
+  ['generic executor', /pingcode api (GET|POST|PATCH|PUT|DELETE) \/v1\//],
+  ['generic executor discovery', /pingcode api list --(search|module|token|method) /],
+  ['generic executor describe', /pingcode api describe /],
+  ['generic executor contract', /`?--json`? is a no-op on the five verbs/],
   ['work items', /pingcode project work-item (get|create|update)/],
   ['work-item state transition', /pingcode project work-item transition/],
   ['project id lookups', /pingcode project meta (types|states|priorities|sprints)/],
@@ -216,11 +222,32 @@ describe('the module documents carry the per-module rules (design D6.4)', () => 
   });
 
   it('the reserved modules promise nothing that does not exist yet', () => {
-    for (const name of ['scm.md', 'cicd.md', 'crosscutting.md', 'api.md']) {
+    // `api.md` left this list when F3 landed the `api` group: it is now real
+    // documentation for real commands, and the forward assertion below is what keeps it
+    // honest. The remaining three still describe unbuilt surface.
+    for (const name of ['scm.md', 'cicd.md', 'crosscutting.md']) {
       const body = modules[name] ?? '';
       expect(body, name).toMatch(/do not exist yet/i);
       expect(body, name).toMatch(/Reserved/i);
     }
+  });
+
+  it('the api module carries the generic layer\'s own rules', () => {
+    const api = modules['api.md'] ?? '';
+    // The two rules that surprise people, and the reason the module exists at all.
+    expect(api).toMatch(/`?--json`? is a no-op on the five verbs/);
+    expect(api).toMatch(/`?DELETE`? requires `?--yes`?/i);
+    expect(api).toMatch(/459/);
+    // the pre-flight refusals, so an agent expects exit 2 rather than a 4xx
+    expect(api).toMatch(/did you mean/i);
+    expect(api).toMatch(/browser authorization page/i);
+    // the seven unreachable endpoints and the 61 reachable machine-only ones
+    expect(api).toMatch(/\/v1\/myself/);
+    expect(api).toMatch(/61/);
+    // PUT is generic-layer-only on purpose
+    expect(api).toMatch(/prefer `?PATCH`?/i);
+    // and it must not tell the agent this file is still a placeholder
+    expect(api).not.toMatch(/do not exist yet/i);
   });
 });
 

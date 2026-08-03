@@ -168,7 +168,7 @@ one file per module, so a module can be revised without touching this one:
 | 源码管理 scm | [`modules/scm.md`](modules/scm.md) | **not built yet** — reserved |
 | 构建与部署 | [`modules/cicd.md`](modules/cicd.md) | **not built yet** — reserved |
 | 跨对象资源 | [`modules/crosscutting.md`](modules/crosscutting.md) | **not built yet** — reserved |
-| 通用逃生舱 | [`modules/api.md`](modules/api.md) | **not built yet** — reserved |
+| 通用逃生舱 | [`modules/api.md`](modules/api.md) | `api GET/POST/PATCH/PUT/DELETE <path>` for every documented endpoint, plus `api list` / `api describe` |
 
 A file marked *reserved* describes commands that **do not exist yet**. Do not suggest them; run
 `pingcode --help` if you need to know what is actually installed.
