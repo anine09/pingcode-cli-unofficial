@@ -275,32 +275,6 @@ function workItemIdentifiers(values: string[] | undefined): string[] | undefined
   return identifiers;
 }
 
-/**
- * Refuse an argument this command has no slot for.
- *
- * commander's default is to **silently discard** excess positionals, and combined
- * with a bare boolean switch that is a meaning-inverting trap: `--default false`
- * parses as `--default` (i.e. `true`) with `false` thrown away, and — found live while
- * smoke-testing this child — **`--yes false` parses as `--yes` and really does delete
- * the branch.** A user has every reason to try the value form here, because
- * `scm repo` takes `--private true|false` in the next subgroup along.
- *
- * Applied only to the three leaves that own such a switch (`--default` on create and
- * update, `--yes` on delete). It is deliberately **not** applied to `get`/`list`: an
- * excess argument there is harmless noise, and quietly tightening the whole group's
- * argument parsing is not this child's call to make.
- *
- * ⚠️ **The underlying laxity is program-wide, not local** — `scm platform get X EXTRA`
- * and every other leaf in the CLI ignore excess arguments too. Fixing that properly
- * means one `allowExcessArguments(false)` where the tree is built, which changes
- * behaviour for every group at once and would touch every group's tests. That is a
- * separate, coordinated commit; this guard just keeps S1b's destructive verbs from
- * being reachable by accident in the meantime.
- */
-function strictArguments(command: Command): Command {
-  return command.allowExcessArguments(false);
-}
-
 // ---------------------------------------------------------------------------
 // registration
 // ---------------------------------------------------------------------------
@@ -339,7 +313,8 @@ export function registerBranchCommands(parent: Command): void {
 
   addGlobalOptions(
     addRepoOptions(
-      strictArguments(group.command('create'))
+      group
+        .command('create')
         .description('record a branch (the name must be unique in the repository)')
         .requiredOption('--name <name>', 'branch name, e.g. feature/PLM-001-login')
         .requiredOption(
@@ -360,7 +335,8 @@ export function registerBranchCommands(parent: Command): void {
 
   addGlobalOptions(
     addRepoOptions(
-      strictArguments(group.command('update'))
+      group
+        .command('update')
         .description('patch a branch — only the fields you pass are sent')
         .argument('<branch>', BRANCH_HELP)
         .option(
@@ -378,7 +354,8 @@ export function registerBranchCommands(parent: Command): void {
   // option (design D8.2) — asserted in `test/help/scm.test.ts`.
   addGlobalOptions(
     addRepoOptions(
-      strictArguments(group.command('delete'))
+      group
+        .command('delete')
         .description('delete a branch — irreversible, and it orphans the branch\u2019s commit refs')
         .argument('<branch>', BRANCH_HELP)
         .option('--yes', 'confirm the deletion — required, and there is no undo on this API'),

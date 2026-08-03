@@ -25,6 +25,21 @@ export const HELP_WIDTH = 100;
  * `process.exit()`, so `bin/pingcode.ts` owns every exit code (design §5.2).
  * The setting is inherited by subcommands via commander's `copyInheritedSettings`.
  *
+ * `allowExcessArguments(false)` rides the same inheritance, and it is here rather
+ * than on individual leaves because the laxity it closes is program-wide. commander's
+ * default is to **silently discard** excess positionals, and next to a bare boolean
+ * switch that inverts meaning: `--yes false` parses as `--yes` with the `false`
+ * thrown away, so — observed live while smoke-testing S1b — `scm branch delete <ref>
+ * --yes false` really did delete the branch, and `--default false` really did set the
+ * branch default. The same shape reaches every cross-cutting `delete` leaf and all 49
+ * documented DELETE endpoints through `pingcode api DELETE … --yes`. A user has every
+ * reason to try the value form, because neighbouring flags (`scm repo --private
+ * true|false`) do take one.
+ *
+ * Rejection surfaces as a `CommanderError`, which `bin/pingcode.ts` maps to exit 2
+ * (usage) — the same exit the equivalent `UsageError` would produce, so the exit-code
+ * table is unchanged.
+ *
  * The group list itself lives in `cli/registry.ts` and is iterated here, so adding a
  * command group is one row in that file and touches nothing else (design D6.2).
  * Registration order is `GROUPS` order, and it is the order `--help` prints.
@@ -38,6 +53,7 @@ export function buildProgram(): Command {
     .version(VERSION, '--version', 'output the CLI version')
     .configureHelp({ helpWidth: HELP_WIDTH })
     .showHelpAfterError()
+    .allowExcessArguments(false)
     .exitOverride();
 
   addGlobalOptions(program);

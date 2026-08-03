@@ -71,6 +71,11 @@ function buildApiProgram(): Command {
     .name('pingcode')
     .configureHelp({ helpWidth: HELP_WIDTH })
     .showHelpAfterError()
+    // Mirrors `buildProgram()`. Root settings reach every leaf through commander's
+    // `copyInheritedSettings`, so a root this harness builds by hand has to carry the
+    // same ones or it tests a tree the CLI never runs — `api DELETE <path> --yes false`
+    // passed here while the real program refused it.
+    .allowExcessArguments(false)
     .exitOverride();
   addGlobalOptions(program);
   registerApiCommands(program);
@@ -241,6 +246,18 @@ describe('the catalog answers before anything is sent (design D3.2)', () => {
     expect(run.calls).toHaveLength(0);
     expect(run.stderr).toContain('without --yes');
     expect(run.stderr).toContain('/v1/comments/c1?principal_type=work_item');
+  });
+
+  it('refuses `--yes false` on a DELETE, so a bad spelling cannot delete anything', async () => {
+    // `api DELETE` is the single door onto all 49 documented DELETE endpoints, so the
+    // `--yes` gate here is the danger surface of the whole passthrough. commander used
+    // to discard the excess `false` and read the switch as set, which inverted the
+    // user's meaning and sent the request. `<path>` is this leaf's only positional, so
+    // `allowExcessArguments(false)` on the root program refuses the second one.
+    const run = await runCli(['api', 'DELETE', '/v1/comments/c1', '--yes', 'false']);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+    expect(run.stderr).toContain('too many arguments');
   });
 
   it('refuses a path that still carries a placeholder or a query string', async () => {

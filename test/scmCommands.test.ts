@@ -468,6 +468,7 @@ describe('scm branch commands', () => {
     // Found live: commander silently discards an excess positional, so `--default false`
     // meant `--default true` — the exact inverse of the request. `--private true|false`
     // in the neighbouring `scm repo` subgroup is why a user would try this spelling.
+    // Now enforced program-wide from `cli/program.ts`, not per leaf.
     const run = await runCli(
       ['scm', 'branch', 'update', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO,
        '--default', 'false'],
@@ -479,6 +480,7 @@ describe('scm branch commands', () => {
   });
 
   it('refuses `--yes false` on delete, so a bad spelling cannot delete anything', async () => {
+    // The bug this closes was reproduced against a live tenant: the branch was deleted.
     const run = await runCli(
       ['scm', 'branch', 'delete', 'feature/x', '--platform-id', PLATFORM, '--repo-id', REPO,
        '--yes', 'false'],
@@ -486,6 +488,23 @@ describe('scm branch commands', () => {
     );
     expect(run.exit).toBe(2);
     expect(run.writes).toEqual([]);
+    // Nothing at all is sent: the parse fails before the reference is even resolved.
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('too many arguments');
+  });
+
+  it('refuses an excess argument on a read leaf too, not just the dangerous ones', async () => {
+    // S1b could only afford to guard its own three write leaves and left a note that the
+    // laxity was program-wide; `scm platform get X EXTRA` was its example. Asserting a
+    // read leaf here is what proves the fix moved to the tree-building site rather than
+    // being re-scattered over the verbs that happen to own a bare boolean switch.
+    const run = await runCli(
+      ['scm', 'platform', 'get', 'Github', 'EXTRA'],
+      [() => platformsPage()],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('too many arguments');
   });
 
   it('warns when the API silently dropped a work-item link, and still exits 0', async () => {

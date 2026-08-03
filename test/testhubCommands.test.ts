@@ -67,6 +67,9 @@ function buildTesthubProgram(): Command {
     .name('pingcode')
     .configureHelp({ helpWidth: HELP_WIDTH })
     .showHelpAfterError()
+    // Mirrors `buildProgram()`, whose root settings every leaf inherits — a hand-built
+    // root without them tests a tree the CLI never runs.
+    .allowExcessArguments(false)
     .exitOverride();
   addGlobalOptions(program);
   registerTesthubCommands(program);

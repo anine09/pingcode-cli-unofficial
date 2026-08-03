@@ -815,6 +815,20 @@ describe('the --yes gate (design D8.1)', () => {
     }
   });
 
+  it('refuses `--yes false`, which commander would otherwise read as --yes', async () => {
+    // The gate is only as strong as the parse in front of it. commander's default is to
+    // silently discard an excess positional, so `--yes false` used to mean `--yes true`
+    // — the exact inverse of the request — and the delete really went out. Closed
+    // program-wide by `allowExcessArguments(false)` in `cli/program.ts`, which every one
+    // of these mounts inherits even though `addCrosscutting` builds them after the fact.
+    for (const argv of deletes) {
+      const run = await runCli([...argv, '--yes', 'false']);
+      expect(run.exit, argv.join(' ')).toBe(2);
+      expect(run.calls, argv.join(' ')).toHaveLength(0);
+      expect(run.stderr, argv.join(' ')).toContain('too many arguments');
+    }
+  });
+
   it('sends the delete once --yes is given', async () => {
     const run = await runCli(
       ['project', 'work-item', 'comment', 'delete', WORK_ITEM_ID, 'c1', '--yes', '--json'],
