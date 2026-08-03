@@ -22,8 +22,13 @@ description: >-
 `pingcode` is a command-line client for the PingCode Open API. Its top level mirrors PingCode's own
 GUI modules: **`product`** (产品管理 / ship — products, requirements/需求, tickets/工单),
 **`project`** (项目管理 / pjm — projects and work items), **`testhub`** (测试管理 — test libraries,
-cases, plans and runs), **`settings`** (后台设置 — the organisation directory) and **`auth`** (the
-CLI's own local credentials).
+cases, plans and runs), **`scm`** (源码管理 — code hosting data), **`build`** and **`release`**
+(构建与部署 — CI build and deployment records), **`settings`** (后台设置 — the organisation
+directory) and **`auth`** (the CLI's own local credentials).
+
+`scm`, `build` and `release` are the DevOps **write-back** surface: a CI/CD job tells PingCode what
+happened, and PingCode links it to work items. None of the three reads your git server or your
+pipeline.
 
 Each business module owns its resources *and* its id lookups, so a module's whole surface is one
 `--help` away:
@@ -33,7 +38,9 @@ auth      login status logout
 product   list get · idea … · ticket … · meta …
 project   list get · work-item … · meta …
 testhub   libraries … · cases … · plans … · runs … · meta …
-scm       platform … · platform-user … · repo …
+scm       platform … · platform-user … · repo … · branch … · commit … · ref … · pr … · review …
+build     list get create update delete
+release   env … · deploy …
 settings  users
 ```
 
@@ -99,6 +106,16 @@ Credentials come from a PingCode application, not from a user account:
 
    The whole scm area is **企业令牌 only**, which is what `client_credentials` gives you, so no
    extra grant type is needed — only the two scopes above.
+
+   For the build and deploy write-back commands, add:
+   - `pcp:read:devops:build` / `pcp:write:devops:build` — `pingcode build list|get` and
+     `build create|update|delete`. **Separate from `devops:code`**: a token that can write
+     commits cannot write builds, and the only symptom is exit 4
+   - `pcp:read:devops:deploy` / `pcp:write:devops:deploy` — `pingcode release env …` **and**
+     `pingcode release deploy …`; one pair covers both subgroups, there is no separate
+     environment scope
+
+   These two areas are 企业令牌 only as well, so again no extra grant type.
 4. Copy the `client_id` and `client_secret`.
 
 Then:
@@ -175,12 +192,13 @@ one file per module, so a module can be revised without touching this one:
 | 产品管理 ship | [`modules/ship.md`](modules/ship.md) | `product list/get`, `product meta …`, `product idea …`, `product ticket …`, and the ship-only traps |
 | 测试管理 testhub | [`modules/testhub.md`](modules/testhub.md) | `testhub libraries/cases/plans/runs/meta …`, and the testhub-only traps |
 | 源码管理 scm | [`modules/scm.md`](modules/scm.md) | `scm platform …`, `scm platform-user …`, `scm repo …` — the DevOps write-back surface, 企业令牌 only |
-| 构建与部署 | [`modules/cicd.md`](modules/cicd.md) | **not built yet** — reserved |
+| 构建与部署 | [`modules/cicd.md`](modules/cicd.md) | `build …` (CI build records) and `release env …` / `release deploy …` (deploy targets and deployments), 企业令牌 only |
 | 跨对象资源 | [`modules/crosscutting.md`](modules/crosscutting.md) | `relation` / `comment` / `attachment` / `activity`, mounted under work items, ideas, tickets, cases and runs |
 | 通用逃生舱 | [`modules/api.md`](modules/api.md) | `api GET/POST/PATCH/PUT/DELETE <path>` for every documented endpoint, plus `api list` / `api describe` |
 
-A file marked *reserved* describes commands that **do not exist yet**. Do not suggest them; run
-`pingcode --help` if you need to know what is actually installed.
+A file marked *reserved* describes commands that **do not exist yet** — there are none at the
+moment, every module document above is real. Do not suggest a command you have not seen in
+`pingcode --help`; run it if you need to know what is actually installed.
 
 `auth` and `settings` are documented here rather than in a module file: they are the CLI's own
 credentials and a single directory lookup, not a business module.

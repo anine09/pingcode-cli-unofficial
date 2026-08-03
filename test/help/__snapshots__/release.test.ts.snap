@@ -1,0 +1,171 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`release --help > release 1`] = `
+"Usage: pingcode release [options] [command]
+
+构建与部署 release: deploy targets 环境 and deployment records 部署 (企业令牌 only, scopes
+pcp:read:devops:deploy / pcp:write:devops:deploy)
+
+Options:
+  -h, --help      display help for command
+
+Commands:
+  env             deploy environments 环境 — names are unique per organisation
+  deploy          deployment records 部署 — filterable by environment and nothing else
+  help [command]  display help for command
+
+Both families are organisation-level: no --project and no --product anywhere. A deploy
+names its environment with --env, and reaches work items only through --work-item.
+Neither subgroup has \`replace\` or \`delete\`, for different reasons:
+  · PUT is excluded on purpose — it blanks every field it is not sent. Use
+    \`pingcode api PUT /v1/release/{environments,deploys}/<id>\` if you mean it.
+  · DELETE, by contrast, EXISTS upstream and works; it is simply not wrapped yet.
+    \`pingcode api DELETE /v1/release/deploys/<id> --yes\` removes a deploy, and
+    \`… /v1/release/environments/<id> --yes\` an environment — which the server
+    refuses while any deploy still references it, so nothing here can be orphaned.
+
+"
+`;
+
+exports[`release --help > release deploy 1`] = `
+"Usage: pingcode release deploy [options] [command]
+
+deployment records 部署 — filterable by environment and nothing else
+
+Options:
+  -h, --help                 display help for command
+
+Commands:
+  list [options]             list deployment records — an unknown --env-id yields an EMPTY LIST,
+                             not an error
+  get [options] <deploy>     show one deployment record
+  create [options]           record a deployment — six fields are required by the API, none are
+                             derived
+  update [options] <deploy>  patch a deployment record — only the fields you pass are sent; the
+                             environment CANNOT be changed (the API accepts env_id here and
+                             silently ignores it)
+  help [command]             display help for command
+"
+`;
+
+exports[`release --help > release deploy create 1`] = `
+"Usage: pingcode release deploy create [options]
+
+record a deployment — six fields are required by the API, none are derived
+
+Options:
+  --status <status>         deploy state, one of: not_deployed | deployed
+  --release-name <name>     what was deployed, e.g. 1.4.0 (free text)
+  --start-at <when>         deploy start time: unix seconds or a date like 2026-08-04T09:00:00Z
+  --end-at <when>           deploy end time: unix seconds or a date like 2026-08-04T09:00:00Z
+  --duration <seconds>      deploy duration in seconds — required by the API and never derived from
+                            --start-at/--end-at
+  --release-url <url>       release page; without it PingCode renders no jump link
+  --work-item <identifier>  work item identifier such as PLM-001, repeatable — an unknown one is
+                            silently ignored by the API
+  --env <name|id>           environment 环境 name or id
+  --env-id <id>             environment id, sent unchanged with no lookup
+  -h, --help                display help for command
+"
+`;
+
+exports[`release --help > release deploy list 1`] = `
+"Usage: pingcode release deploy list [options]
+
+list deployment records — an unknown --env-id yields an EMPTY LIST, not an error
+
+Options:
+  --env <name|id>  environment 环境 name or id
+  --env-id <id>    environment id, sent unchanged with no lookup
+  --page <n>       page index, 0-based (default: "0")
+  --page-size <n>  rows per page, 1-100 (default: "30")
+  --all            walk every page (best effort: the API guarantees no ordering)
+  --limit <n>      stop after this many rows with --all (default: "500")
+  -h, --help       display help for command
+"
+`;
+
+exports[`release --help > release deploy update 1`] = `
+"Usage: pingcode release deploy update [options] <deploy>
+
+patch a deployment record — only the fields you pass are sent; the environment CANNOT be changed
+(the API accepts env_id here and silently ignores it)
+
+Arguments:
+  deploy                    deploy record id (release_name is free text and not a key)
+
+Options:
+  --status <status>         new state, one of: not_deployed | deployed
+  --release-name <name>     new release name
+  --start-at <when>         new start time: unix seconds or a date like 2026-08-04T09:00:00Z —
+                            moving the window forward needs --end-at FIRST, in its own call: a new
+                            start is validated against the STORED end
+  --end-at <when>           new end time: unix seconds or a date like 2026-08-04T09:00:00Z
+  --duration <seconds>      new duration in seconds
+  --release-url <url>       new release page
+  --work-item <identifier>  work item identifier such as PLM-001, repeatable — an unknown one is
+                            silently ignored by the API; REPLACES the existing links
+  -h, --help                display help for command
+"
+`;
+
+exports[`release --help > release env 1`] = `
+"Usage: pingcode release env [options] [command]
+
+deploy environments 环境 — names are unique per organisation
+
+Options:
+  -h, --help                      display help for command
+
+Commands:
+  list [options]                  list deploy environments
+  get [options] <environment>     show one environment
+  create [options]                create an environment (the name must be unique in the
+                                  organisation)
+  update [options] <environment>  patch an environment — only the fields you pass are sent
+  help [command]                  display help for command
+"
+`;
+
+exports[`release --help > release env create 1`] = `
+"Usage: pingcode release env create [options]
+
+create an environment (the name must be unique in the organisation)
+
+Options:
+  --name <name>     environment name, e.g. production
+  --html-url <url>  environment page; without it PingCode renders no jump link
+  -h, --help        display help for command
+"
+`;
+
+exports[`release --help > release env list 1`] = `
+"Usage: pingcode release env list [options]
+
+list deploy environments
+
+Options:
+  --name <name>    exact (case-insensitive) environment name — a real filter, but not a search
+  --page <n>       page index, 0-based (default: "0")
+  --page-size <n>  rows per page, 1-100 (default: "30")
+  --all            walk every page (best effort: the API guarantees no ordering)
+  --limit <n>      stop after this many rows with --all (default: "500")
+  -h, --help       display help for command
+"
+`;
+
+exports[`release --help > release env update 1`] = `
+"Usage: pingcode release env update [options] <environment>
+
+patch an environment — only the fields you pass are sent
+
+Arguments:
+  environment       environment 环境 name or id
+
+Options:
+  --name <name>     new name, unique per organisation
+  --html-url <url>  new environment page — must be a URL, and cannot be cleared: the API rejects an
+                    empty value
+  -h, --help        display help for command
+"
+`;

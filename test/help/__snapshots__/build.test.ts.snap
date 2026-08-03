@@ -1,0 +1,107 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`build --help > build 1`] = `
+"Usage: pingcode build [options] [command]
+
+构建与部署 build: CI build records 构建记录 written back onto work items (企业令牌 only, scopes
+pcp:read:devops:build / pcp:write:devops:build)
+
+Options:
+  -h, --help                display help for command
+
+Commands:
+  list [options]            list build records — the API offers NO filters here, so this always
+                            scans the whole organisation
+  get [options] <build>     show one build record
+  create [options]          record a build — seven fields are required by the API, none are derived
+  update [options] <build>  patch a build record — only the fields you pass are sent
+  delete [options] <build>  delete a build record — irreversible, but a pipeline can simply record
+                            it again
+  help [command]            display help for command
+
+Build records are organisation-level: no --platform, no --project, and no filters on
+list — a build reaches a work item only through --work-item.
+There is no \`replace\`: PUT /v1/build/builds/{id} would blank every field it is not
+sent, so a full replacement is \`pingcode api PUT /v1/build/builds/<id>\` and nothing
+else. \`delete\` does exist here — the only delete in the DevOps surface besides
+\`scm branch delete\` — because a pipeline can simply record the build again.
+
+"
+`;
+
+exports[`build --help > build create 1`] = `
+"Usage: pingcode build create [options]
+
+record a build — seven fields are required by the API, none are derived
+
+Options:
+  --name <name>             build name, e.g. unit-test
+  --identifier <number>     the build number from your CI system — NOT unique, so it cannot be
+                            looked up later
+  --provider <tool>         CI tool, one of: bamboo | bitbucket | jenkins | other
+  --status <status>         build result, one of: success | failure
+  --start-at <when>         build start time: unix seconds or a date like 2026-08-04T09:00:00Z
+  --end-at <when>           build end time: unix seconds or a date like 2026-08-04T09:00:00Z
+  --duration <seconds>      build duration in seconds — required by the API and never derived from
+                            --start-at/--end-at, so report whatever your pipeline measured
+  --job-url <url>           CI job page; without it PingCode renders no jump link
+  --result-overview <text>  short result summary, e.g. "1000 test cases pass"
+  --result-url <url>        CI result/report page
+  --work-item <identifier>  work item identifier such as PLM-001, repeatable — an unknown one is
+                            silently ignored by the API
+  -h, --help                display help for command
+"
+`;
+
+exports[`build --help > build delete 1`] = `
+"Usage: pingcode build delete [options] <build>
+
+delete a build record — irreversible, but a pipeline can simply record it again
+
+Arguments:
+  build       build record id (not the build number — that is not unique)
+
+Options:
+  --yes       confirm the deletion — required, and there is no undo on this API
+  -h, --help  display help for command
+"
+`;
+
+exports[`build --help > build list 1`] = `
+"Usage: pingcode build list [options]
+
+list build records — the API offers NO filters here, so this always scans the whole organisation
+
+Options:
+  --page <n>       page index, 0-based (default: "0")
+  --page-size <n>  rows per page, 1-100 (default: "30")
+  --all            walk every page (best effort: the API guarantees no ordering)
+  --limit <n>      stop after this many rows with --all (default: "500")
+  -h, --help       display help for command
+"
+`;
+
+exports[`build --help > build update 1`] = `
+"Usage: pingcode build update [options] <build>
+
+patch a build record — only the fields you pass are sent
+
+Arguments:
+  build                     build record id (not the build number — that is not unique)
+
+Options:
+  --name <name>             new build name
+  --identifier <number>     new build number
+  --provider <tool>         new CI tool, one of: bamboo | bitbucket | jenkins | other
+  --status <status>         new result, one of: success | failure — this is the mid-run update
+  --start-at <when>         new start time: unix seconds or a date like 2026-08-04T09:00:00Z
+  --end-at <when>           new end time: unix seconds or a date like 2026-08-04T09:00:00Z
+  --duration <seconds>      new duration in seconds
+  --job-url <url>           new CI job page
+  --result-overview <text>  new result summary (replaces the old one)
+  --result-url <url>        new CI result page
+  --work-item <identifier>  work item identifier such as PLM-001, repeatable — an unknown one is
+                            silently ignored by the API; REPLACES the existing links
+  -h, --help                display help for command
+"
+`;

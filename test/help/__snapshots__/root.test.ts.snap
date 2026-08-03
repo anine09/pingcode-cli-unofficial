@@ -25,6 +25,10 @@ Commands:
                   pcp:read:testhub:testcase / :testplan / :configuration)
   scm             源码管理 scm: the DevOps write-back surface for code hosting data (企业令牌 only, scopes
                   pcp:read:devops:code / pcp:write:devops:code)
+  build           构建与部署 build: CI build records 构建记录 written back onto work items (企业令牌 only,
+                  scopes pcp:read:devops:build / pcp:write:devops:build)
+  release         构建与部署 release: deploy targets 环境 and deployment records 部署 (企业令牌 only, scopes
+                  pcp:read:devops:deploy / pcp:write:devops:deploy)
   settings        后台设置: organisation-wide directory data
   help [command]  display help for command
 "

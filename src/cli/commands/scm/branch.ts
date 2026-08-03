@@ -14,7 +14,7 @@ import type { Ctx } from '../../../core/context';
 import { PingcodeError, UsageError } from '../../../core/errors';
 import { resolveRepository, type ResolveResult } from '../../../core/metadata';
 import { collect } from '../../../core/paginate';
-import type { ScmBranch, ScmWorkItemRef } from '../../../types/api';
+import type { ScmBranch } from '../../../types/api';
 import { addGlobalOptions } from '../../globals';
 import { errLine, paint, type Column } from '../../output';
 import {
@@ -33,6 +33,11 @@ import {
   type PagingFlags,
   type ResolvedWrite,
 } from '../common';
+import {
+  identifiersOf,
+  warnUnlinkedWorkItems,
+  workItemIdentifiers,
+} from '../_shared/workItems';
 import { addPlatformOptions, present, requirePlatformFlag, type PlatformFlags } from './platform';
 
 /**
@@ -226,74 +231,28 @@ async function resolveBranchRef(
 // ---------------------------------------------------------------------------
 
 /**
- * The identifiers of an embedded `work_items[]`.
+ * The work-item link contract — `identifiersOf` / `oneLine` / `warnUnlinkedWorkItems` /
+ * `workItemIdentifiers` — **re-exported, not defined here any more.**
  *
- * Exported because three scm families carry the array (branch, commit, pull request)
- * and each renders it the same way. `branch.ts` is the group's de-facto shared module
- * for the work-item-link contract — `warnUnlinkedWorkItems` already lives here and
- * `commit.ts` / `ref.ts` already import from here — so the helpers stay together
- * rather than being copied a third time or promoted into `cli/commands/common.ts`,
- * which every parallel child edits (the same call S1a made for `addPairOptions`).
+ * S1b put them in this file and S1c kept them here, deliberately: scm was the only
+ * consumer, `branch.ts` was already the group's shared module, and promoting them into
+ * `cli/commands/common.ts` would have made a merge point out of a file every parallel
+ * child edits (design D13.6). S1d changed the input to that decision rather than the
+ * reasoning: `build` and `release` carry the identical field pair with the identical
+ * silent-drop behaviour (verified live 2026-08-04), and a build record importing from
+ * `scm/branch.ts` would imply a relationship to code branches that does not exist.
+ *
+ * So the implementation moved to `_shared/workItems.ts` — beside `_shared/crosscutting.ts`,
+ * which already owns command code belonging to no single group — and this re-export keeps
+ * `commit.ts`, `ref.ts`, `pullRequest.ts` and `review.ts` importing from where they always
+ * did. One implementation, no import churn in files this child does not own.
  */
-export function identifiersOf(workItems: ScmWorkItemRef[]): string[] {
-  const out: string[] = [];
-  for (const item of workItems) {
-    const identifier = item.identifier ?? item.name;
-    if (identifier !== undefined && identifier !== '') out.push(identifier);
-  }
-  return out;
-}
-
-/** A table cell must stay on one line; the API's text fields frequently do not. */
-export function oneLine(text: string | undefined): string {
-  return (text ?? '').replace(/\s+/g, ' ').trim();
-}
-
-/**
- * Report the work-item links the API accepted-and-ignored.
- *
- * The API returns **200** for an identifier that does not exist and simply omits it
- * from `work_items` (live 2026-08-03: `["YYHC-10", "NOSUCH-99999"]` linked only the
- * first). So the status code cannot distinguish a full link from a partial one, and
- * an agent that trusts exit 0 believes a link happened that did not.
- *
- * This is not inference about server semantics — the response body contains the
- * answer, it was simply never compared against the request. Exit stays **0**: the
- * write did succeed, the warning goes to stderr, and under `--json` the authoritative
- * `work_items` array is already on stdout.
- */
-export function warnUnlinkedWorkItems(
-  ctx: Ctx,
-  requested: string[] | undefined,
-  linked: ScmWorkItemRef[],
-): void {
-  if (requested === undefined || requested.length === 0) return;
-  const got = new Set(identifiersOf(linked).map((value) => value.toLowerCase()));
-  const missing = requested.filter((identifier) => !got.has(identifier.trim().toLowerCase()));
-  if (missing.length === 0) return;
-  ctx.logger.warn(
-    `the API accepted the request but linked no work item for: ${missing.join(', ')} — ` +
-      'an unknown identifier is silently ignored rather than rejected, so check the spelling ' +
-      '(identifiers look like PLM-001, and they are not ids)',
-  );
-}
-
-/**
- * `--work-item` values, trimmed and rejected when blank (the API rejects `""` too).
- *
- * Exported alongside `warnUnlinkedWorkItems` and `identifiersOf`: the three are one
- * contract — validate what you send, then check what came back.
- */
-export function workItemIdentifiers(values: string[] | undefined): string[] | undefined {
-  if (values === undefined) return undefined;
-  const identifiers = values.map((value) => value.trim());
-  if (identifiers.some((identifier) => identifier === '')) {
-    throw new UsageError('--work-item must not be empty', {
-      hint: 'pass a work item identifier such as PLM-001, or omit the flag',
-    });
-  }
-  return identifiers;
-}
+export {
+  identifiersOf,
+  oneLine,
+  warnUnlinkedWorkItems,
+  workItemIdentifiers,
+} from '../_shared/workItems';
 
 // ---------------------------------------------------------------------------
 // registration

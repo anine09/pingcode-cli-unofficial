@@ -171,9 +171,22 @@ export type CreateDeployInput = {
 };
 
 /**
- * Any subset — including `env_id`, so a deploy can be moved to another environment.
- * Verified live as a genuine partial update: patching only `status` left
- * `release_name`, `release_url`, the timestamps and `work_items` intact.
+ * Any subset. Verified live as a genuine partial update: patching only `status` left
+ * `release_name`, `release_url`, the timestamps and `work_items` intact, and every field
+ * below was confirmed to persist by reading the record back — **except `env_id`.**
+ *
+ * ⚠️ **`env_id` is accepted and then ignored.** The docs list it as updatable, and the
+ * server answers 200 *and echoes the new environment in the response body*, but a
+ * following `GET` still shows the original one (live 2026-08-04, reproduced through raw
+ * HTTP with and without a `status` alongside it). It stays in this type because it is what
+ * the endpoint documents and `pingcode api PATCH` can still send it — but the refined
+ * `release deploy update` deliberately offers no `--env`, because a write that reports
+ * success and changes nothing is worse than a missing feature, and here the echoed
+ * response defeats even a careful caller's read-back.
+ *
+ * One more upstream rule the type cannot express: a new `start_at` is validated against
+ * the **stored** `end_at`, not against an `end_at` in the same payload, so moving a window
+ * forward takes two calls (end first) — 400 `100102` otherwise.
  */
 export type UpdateDeployInput = {
   status?: string | undefined;

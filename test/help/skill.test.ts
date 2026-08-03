@@ -113,6 +113,16 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['scm pull requests', /pingcode scm pr (list|get|create|update)/],
   ['scm code reviews', /pingcode scm review (list|get|create|update)/],
   ['scm review is not /v1\/reviews', /`?scm review`? is not `?pingcode api . \/v1\/reviews`?/i],
+  // S1d — the last two DevOps groups. Five rows, because four of the five things an agent
+  // gets wrong here are *absences* it cannot see in `--help` alone: `build list` has no
+  // filters at all, a build number is not a key, `release deploy list` hides an unknown
+  // environment behind an empty list, and the two DELETEs exist upstream but are only
+  // reachable through the generic layer. The fifth is the one link both groups have.
+  ['build records', /pingcode build (list|get|create|update)/],
+  ['build deletion', /pingcode build delete .*--yes/],
+  ['deploy environments', /pingcode release env (list|get|create|update)/],
+  ['deployment records', /pingcode release deploy (list|get|create|update)/],
+  ['devops release delete is generic-layer only', /pingcode api DELETE \/v1\/release\//],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {
@@ -153,6 +163,10 @@ describe('SKILL.md records the contract that does not scale with the surface (PR
       'pcp:read:testhub:configuration',
       'pcp:read:devops:code',
       'pcp:write:devops:code',
+      'pcp:read:devops:build',
+      'pcp:write:devops:build',
+      'pcp:read:devops:deploy',
+      'pcp:write:devops:deploy',
     ]) {
       expect(skill, scope).toContain(scope);
     }
@@ -289,20 +303,19 @@ describe('the module documents carry the per-module rules (design D6.4)', () => 
     expect(scm).toMatch(/cannot be withdrawn/i);
   });
 
-  it('the reserved modules promise nothing that does not exist yet', () => {
-    // `api.md` left this list when F3 landed the `api` group, `crosscutting.md` when F5
-    // landed the four injected families, and `scm.md` when S1a landed the platform /
-    // platform-user / repo surface: all three are now real documentation for real
-    // commands, and the forward assertion below is what keeps them honest. `cicd.md`
-    // still describes unbuilt surface.
-    for (const name of ['cicd.md']) {
-      const body = modules[name] ?? '';
-      expect(body, name).toMatch(/do not exist yet/i);
-      expect(body, name).toMatch(/Reserved/i);
-    }
-    // …and the built ones must not still claim otherwise.
-    for (const name of ['scm.md', 'api.md', 'crosscutting.md']) {
-      expect(modules[name] ?? '', name).not.toMatch(/do not exist yet/i);
+  it('has no reserved module left: every document describes real commands', () => {
+    // `api.md` left the reserved list when F3 landed the `api` group, `crosscutting.md`
+    // when F5 landed the four injected families, `scm.md` when S1a landed the platform /
+    // platform-user / repo surface, and `cicd.md` when S1d landed `build` + `release` —
+    // which empties the list entirely. The assertion is inverted rather than deleted:
+    // **no** module may claim to describe unbuilt surface, and if a future task adds a
+    // placeholder again it has to say so here deliberately.
+    //
+    // The forward assertion below is what keeps this honest in the other direction: a
+    // document that mentions a command the tree does not have fails the suite.
+    for (const [name, body] of Object.entries(modules)) {
+      expect(body, name).not.toMatch(/do not exist yet/i);
+      expect(body, name).not.toMatch(/^\*\*Reserved/im);
     }
   });
 

@@ -552,6 +552,21 @@ export const ENDPOINTS = {
   //    returned 200 with only the real one linked, and `[""]` is rejected
   //    (`100006`). PATCH **replaces** the whole set and `[]` clears it. The commands
   //    therefore compare what was asked for against the response's `work_items`.
+  //  - **`env_id` is NOT patchable on a deploy, though the docs list it as updatable.**
+  //    `PATCH /v1/release/deploys/{id}` with an `env_id` answers 200 **and echoes the new
+  //    environment in the response body**, but a following `GET` still returns the old one.
+  //    Reproduced twice through raw HTTP (with and without a `status` in the same request)
+  //    after the CLI smoke first surfaced it. This is the worst shape a silent failure can
+  //    take — the response confirms a change that did not happen — so `release deploy
+  //    update` offers no `--env` at all and there is no way to move a deploy between
+  //    environments. Every *other* PATCH field on both families was verified to persist by
+  //    reading the record back.
+  //  - **A deploy's time window can only be moved end-first.** A new `start_at` is
+  //    validated against the **stored** `end_at`, not against an `end_at` sent in the same
+  //    request: moving a window forward in one PATCH is 400 `100102`
+  //    (`开始时间必须小于等于已存在的结束时间`). Two calls in a fixed order work. On a create the
+  //    equivalent check is 400 `100041` (`开始时间必须小于等于结束时间`) — a different code for
+  //    the same class of rule.
   //  - **Nothing here takes a `*_name` reference field**, so — unlike scm's
   //    `sender_name` / `owner_name` / `creator_name` — no flag in these two groups can
   //    upsert a ghost identity. Probed for, and deliberately not warned about
@@ -572,7 +587,9 @@ export const ENDPOINTS = {
   //  - Deliberately left on exit 7: `100105` (duplicate environment name — a
   //    uniqueness conflict), `100106` (the in-use refusal — the environment plainly
   //    exists), and `100003` / `100004` / `100006` / `100008` (input validation,
-  //    `100008` being the cross-module "missing required field" code).
+  //    `100008` being the cross-module "missing required field" code), plus `100102` /
+  //    `100041` (the two time-window rules above — both are validation, and both concern a
+  //    record that plainly exists).
 
   /** 构建记录 — org-level, and **no filter of any kind** on the list (live 2026-08-04). */
   buildRecords: '/v1/build/builds',

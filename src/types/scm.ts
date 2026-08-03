@@ -505,7 +505,9 @@ export type ReleaseEnvironment = {
  *    `?env_id=`, so a deploy is addressed by id and *found* by environment.
  *  - **`env_id` is shape-validated** (400 `100003` for a non-ObjectId) and its
  *    existence is checked (400 `100205`, the environment's own not-found code, which
- *    maps to exit 5 — the named row really is absent).
+ *    maps to exit 5 — the named row really is absent). It is also **write-once**: a
+ *    PATCH carrying `env_id` returns 200 and *echoes the new environment*, yet the
+ *    record keeps the old one, so `environment` is effectively immutable after create.
  *  - **`status` is a two-value enum**, `not_deployed|deployed`. There is no
  *    "failed" or "rolled back" state to record; a rollback is a new deploy.
  *
