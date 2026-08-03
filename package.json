@@ -21,6 +21,8 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "catalog:sync": "node --experimental-strip-types scripts/catalog-sync.ts",
+    "catalog:check": "node --experimental-strip-types scripts/catalog-sync.ts --check",
     "skill:install": "node --experimental-strip-types scripts/install-skill.ts",
     "scan:secrets": "node --experimental-strip-types scripts/scan-secrets.ts",
     "check:commits": "node --experimental-strip-types scripts/check-commits.ts"
