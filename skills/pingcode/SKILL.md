@@ -155,6 +155,27 @@ codes onto exits 5 and 3 rather than trusting the status. Unknown codes stay on 
 
 ## 3. Commands
 
+### Where each module's commands are documented
+
+The per-module surface — every flag, every id lookup, and the traps specific to that module — lives
+one file per module, so a module can be revised without touching this one:
+
+| Module | File | Covers |
+|---|---|---|
+| 项目管理 pjm | [`modules/pjm.md`](modules/pjm.md) | `project list/get`, `project meta …`, `project work-item …` |
+| 产品管理 ship | [`modules/ship.md`](modules/ship.md) | `product list/get`, `product meta …`, `product idea …`, `product ticket …`, and the ship-only traps |
+| 测试管理 testhub | [`modules/testhub.md`](modules/testhub.md) | `testhub libraries/cases/plans/runs/meta …`, and the testhub-only traps |
+| 源码管理 scm | [`modules/scm.md`](modules/scm.md) | **not built yet** — reserved |
+| 构建与部署 | [`modules/cicd.md`](modules/cicd.md) | **not built yet** — reserved |
+| 跨对象资源 | [`modules/crosscutting.md`](modules/crosscutting.md) | **not built yet** — reserved |
+| 通用逃生舱 | [`modules/api.md`](modules/api.md) | **not built yet** — reserved |
+
+A file marked *reserved* describes commands that **do not exist yet**. Do not suggest them; run
+`pingcode --help` if you need to know what is actually installed.
+
+`auth` and `settings` are documented here rather than in a module file: they are the CLI's own
+credentials and a single directory lookup, not a business module.
+
 ### Auth
 
 ```bash
@@ -163,33 +184,6 @@ pingcode auth status
 pingcode auth status --check      # adds one live API call: GET /v1/pjm/projects?page_size=1
 pingcode auth logout
 ```
-
-### Projects — 项目管理
-
-```bash
-pingcode project list --json
-pingcode project list --keywords mobile --type scrum
-pingcode project get "Mobile App" --json
-```
-
-### `project meta` — mandatory before creating or updating a work item
-
-`type_id`, `state_id` and `priority_id` are **project-scoped**: the same state name has a different id
-in another project, and system work-item types use slugs (`task`, `story`, `bug`) while custom types
-use hex ids. Never reuse an id across projects, and never guess one.
-
-```bash
-pingcode project meta types --project "Mobile App" --json
-pingcode project meta states --project "Mobile App" --type task --json
-pingcode project meta priorities --project "Mobile App" --json
-pingcode project meta sprints --project "Mobile App" --json
-```
-
-`pingcode project meta states` requires **both** a project and a type — that is an API constraint, not a CLI
-choice.
-
-Lookups are cached under `~/.pingcode/cache/` for 24 hours. Use `--no-cache` if a project was
-reconfigured and an id looks stale.
 
 ### Settings — 后台设置
 
@@ -200,214 +194,6 @@ pingcode settings users --keywords wang --json
 The organisation directory (`/v1/directory/users`, scope `pcp:read:global:team`) belongs to no
 business module, which is why it sits here rather than under `product` or `project`. It is the
 candidate set for pjm's `--assignee`; ship's `--assignee` uses `product meta members` instead.
-
-### Work items — `project work-item`
-
-```bash
-pingcode project work-item list --project "Mobile App" --json
-pingcode project work-item list --project "Mobile App" --type task --state "In Progress" --json
-pingcode project work-item list --project "Mobile App" --assignee wangxiao --page-size 20 --page 0
-pingcode project work-item list --project "Mobile App" --all --limit 200 --json
-
-pingcode project work-item get SCR-5 --json
-pingcode project work-item get 1bAqLmTG --json
-pingcode project work-item get https://example.pingcode.com/pjm/work_items/1bAqLmTG --json
-
-pingcode project work-item create --project "Mobile App" --type task --title "Fix login retry" --dry-run --json
-pingcode project work-item create --project "Mobile App" --type task --title "Fix login retry" \
-  --assignee wangxiao --priority High --end-at 2026-02-15 --json
-
-pingcode project work-item update SCR-5 --title "Fix login retry (v2)" --json
-pingcode project work-item update SCR-5 --type task --state "In Progress" --json
-pingcode project work-item transition SCR-5 --type task --state Done --json
-pingcode project work-item transition SCR-5 --state-id 5eb623f6a70571487ea47000 --json
-```
-
-`project work-item get` accepts an id, a `short_id`, an identifier such as `SCR-5`, or a pasted work-item URL.
-`update` and `transition` accept the same forms and resolve them to a real id first.
-
-On `update` and `transition`, `--type` is **only** a lookup aid: it resolves `--state <name>` and lets
-the CLI list the candidate states if the server rejects the change. It is never written to the work
-item — there is no patchable type field.
-
-### Products — 产品管理
-
-A **product** (产品) is ship's parent scope, the way a project is pjm's. Resolve it first: every other
-ship id is scoped to it.
-
-```bash
-pingcode product list --json
-pingcode product list --keywords sales --json
-pingcode product get SLC --json          # name, identifier such as SLC, or id
-```
-
-`--keywords` searches the **name only** — the identifier is not searchable server-side, so the CLI
-matches it client-side over the full list. There is no `product create`/`update`/`delete`: ship has no
-product DELETE at all, and `PATCH` only edits three cosmetic fields.
-
-### `product meta` — mandatory before writing an idea or ticket
-
-```bash
-pingcode product meta idea-states       --product SLC --json
-pingcode product meta idea-priorities   --product SLC --json
-pingcode product meta idea-suites       --product SLC --json
-pingcode product meta idea-properties   --product SLC --json
-pingcode product meta members          --product SLC --json
-pingcode product meta ticket-states     --product SLC --json
-pingcode product meta ticket-priorities --product SLC --json
-pingcode product meta ticket-types      --product SLC --json
-pingcode product meta ticket-channels   --product SLC --json
-pingcode product meta ticket-properties --product SLC --json
-```
-
-`product meta members` is the **only** valid source of `--assignee` values for ideas and tickets —
-the organisation directory is not, because a user who is not a member of the product cannot be
-assigned. `product meta idea-properties` / `product meta ticket-properties` are the only source of `--set` keys and,
-for select-typed properties, of the option ids you must send instead of the display label.
-
-### Requirements 需求 — `product idea`
-
-```bash
-pingcode product idea list --product SLC --json
-pingcode product idea list --product SLC --state 待评审 --assignee zhangsan --json
-pingcode product idea list --product SLC --keywords sso --page-size 20 --page 0 --json
-pingcode product idea list --product SLC --all --limit 200 --json
-
-pingcode product idea get SLC-1 --json                # identifier, id, or a pasted idea URL
-
-pingcode product idea create --product SLC --title "Single sign-on" --dry-run --json
-pingcode product idea create --product SLC --title "Single sign-on" \
-  --assignee zhangsan --priority P1 --suite "客户端 / 登录" --json
-
-pingcode product idea update SLC-1 --title "Single sign-on (v2)" --json
-pingcode product idea update SLC-1 --state 开发中 --json
-pingcode product idea update SLC-1 --set 需求类型=5cb7e763fda1ce4ca0010002 --json
-```
-
-`product idea list` is `POST /v1/ship/ideas/search` — the plain list endpoint cannot filter by assignee, date
-or custom property, so the CLI never uses it. Note there is **no `--type`** anywhere on `idea`: ship
-states are scoped to the product alone, which `--product` (or, on `update`, the idea itself) already
-supplies.
-
-### Tickets 工单 — `product ticket`
-
-```bash
-pingcode product ticket list --product SLC --json
-pingcode product ticket list --product SLC --type 故障 --state 待处理 --json
-pingcode product ticket list --product SLC --channel 邮件 --all --limit 200 --json
-
-pingcode product ticket get SLC-7 --json
-
-pingcode product ticket create --product SLC --type 故障 --title "Cannot log in" --dry-run --json
-pingcode product ticket create --product SLC --type 故障 --title "Cannot log in" \
-  --assignee zhangsan --priority P1 --channel 邮件 --json
-
-pingcode product ticket update SLC-7 --title "Cannot log in (iOS)" --json
-pingcode product ticket transition SLC-7 --state 处理中 --json
-```
-
-`--type` is **required** on `product ticket create` — `type_id` is a required body field, which is the one
-place ship demands a lookup (`pingcode product meta ticket-types --product SLC`) before a write can even be
-attempted. `--channel` can only be set at create time; there is no way to change it afterwards.
-
-### Test libraries 测试库 — `testhub libraries`
-
-A **test library** is testhub's parent scope, the way a product is ship's. Resolve it first: case
-states, case types, run results, the module tree and the plan list are **all library-scoped**.
-
-```bash
-pingcode testhub libraries list --json
-pingcode testhub libraries list --keywords payment --json
-pingcode testhub libraries get LIB --json        # name, identifier such as LIB, or id
-pingcode testhub libraries create --name "Payments" --identifier PAY --json
-```
-
-`--keywords` searches library **names** only — the identifier is not searchable server-side. The
-`--identifier` given to `create` must be unique across the organisation and the server enforces it,
-and `--name` is capped at **32 characters** (verified live 2026-08-02: a longer name is rejected with
-code `100019`, exit 7).
-There is no library update or delete: testhub publishes no library DELETE, so anything created here
-is permanent.
-
-### `testhub meta` — the ids a testhub write cannot be built without
-
-```bash
-pingcode testhub meta case-states       --library LIB --json   # --state / state_id
-pingcode testhub meta case-types        --library LIB --json   # --type / type_id
-pingcode testhub meta run-statuses      --library LIB --json   # --status / status_id
-pingcode testhub meta plan-types        --library LIB --json   # --type on `plans create`
-pingcode testhub meta suites            --library LIB --json   # --suite; PATH is what --suite takes
-pingcode testhub meta important-levels  --json                 # --important-level; org-wide
-```
-
-`important-levels` is the one lookup in the module with **no per-library variant**, so it *refuses*
-`--library` with exit 2 rather than ignoring it (the flag is hidden from `--help`, which is why it
-is spelled out here). The others require `--library`.
-
-`suites` accepts `--parent-id root` for the top level only, or a node id for that node's children.
-
-### Test cases 用例 — `testhub cases`
-
-```bash
-pingcode testhub cases list --library LIB --json
-pingcode testhub cases list --library LIB --state 已评审 --type 功能测试 --json
-pingcode testhub cases list --library LIB --suite "登录 / 双因素" --keywords sso --page-size 20 --page 0 --json
-pingcode testhub cases list --library LIB --all --limit 200 --json
-
-pingcode testhub cases get 5f0e1a2b3c4d5e6f70819200 --json    # an id or a short_id
-pingcode testhub cases get aB3dEf9h --json
-
-pingcode testhub cases create --library LIB --title "SSO login" --dry-run --json
-pingcode testhub cases create --library LIB --title "SSO login" \
-  --suite "登录 / 双因素" --type 功能测试 --important-level 高 --json
-
-pingcode testhub cases update aB3dEf9h --title "SSO login (v2)" --json
-pingcode testhub cases update aB3dEf9h --state 已评审 --json
-pingcode testhub cases update aB3dEf9h --set 自动化=5cb7e763fda1ce4ca0010002 --json
-```
-
-`testhub cases list` is `POST /v1/testhub/cases/search`; the plain list endpoint is never used
-(unfiltered it scans every visible library). `--state` is **PATCH-only**: a case is always created in
-the library's initial state, so `cases create` has no `--state`.
-
-### Test plans 测试计划 — `testhub plans`
-
-```bash
-pingcode testhub plans list --library LIB --json
-pingcode testhub plans list --library LIB --name "2026 S1 回归" --json
-pingcode testhub plans get "2026 S1 回归" --library LIB --json    # name, id or short_id
-pingcode testhub plans create --library LIB --name "2026 S2 回归" \
-  --type 普通 --start 2026-08-10 --end 2026-08-31 --assignee 张三 --json
-```
-
-`create` takes all five: `--name` (unique within the library), `--type` (from
-`testhub meta plan-types`), `--start`, `--end` and `--assignee`. There is no plan update or delete.
-**Read §4c rule 12 before passing a date** — `--end` lands on 23:59:59, not midnight.
-
-### Runs 执行用例 — `testhub runs`
-
-A **run** is one case scheduled inside one plan; recording a result means patching the run.
-
-```bash
-pingcode testhub runs list --library LIB --plan "2026 S1 回归" --json
-pingcode testhub runs list --library LIB --plan "2026 S1 回归" --status 失败 --executor wangxiao --json
-pingcode testhub runs list --plan-id 5f0e1a2b3c4d5e6f70819200 --all --limit 200 --json
-
-pingcode testhub runs patch 7hK2mQ9x --status 通过 --remark "retested on iOS" --dry-run --json
-pingcode testhub runs patch 7hK2mQ9x --status 通过 --executor wangxiao --json
-pingcode testhub runs patch 7hK2mQ9x --status 失败 \
-  --step s1=通过 --step s2=失败 --step-actual s2="500 from /login" --json
-
-pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" \
-  --add-case 5f0e1a2b3c4d5e6f70819200 --executor wangxiao --dry-run --json
-pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" --set-status 7hK2mQ9x=通过 --json
-pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" --remove-run 7hK2mQ9x --json
-```
-
-`testhub runs bulk` is the **only** way to delete a run, and the only way to add one. Every
-name-resolvable flag has an `--x-id` twin (`--status-id`, `--executor-id`, `--plan-id`,
-`--library-id`, …) that is sent verbatim with no lookup; the two forms are mutually exclusive.
-
 ## 4. Rules that will bite you
 
 1. **Resolve ids per project.** Run `pingcode project meta types` / `project meta states` for the project you are
@@ -436,165 +222,6 @@ name-resolvable flag has an `--x-id` twin (`--status-id`, `--executor-id`, `--pl
    small ones, let the metadata cache work, and do not loop `--all` over large projects casually.
 10. **Timestamps are unix seconds.** `--start-at` / `--end-at` accept `1730000000` or `2026-01-31`
     (parsed as UTC midnight).
-
-## 4b. Ship rules that will bite you
-
-These are on top of §4, which still applies. Ship is a different module with the same machinery, and
-almost every difference is a trap.
-
-1. **Resolve the product first, and scope everything to it.** A product is to ship what a project is
-   to pjm. `state_id`, `priority_id`, `suite_id`, `type_id`, `channel_id`, the `properties` keys and
-   the assignable people are **all product-scoped**. They frequently *look* org-global — the same
-   priority id `P0` appears under several products — but the API requires `product_id` on every
-   lookup, so never carry an id from one product to another.
-2. **`--assignee` must be a product member.** `pingcode product meta members --product <p>` is the
-   only valid candidate set; the organisation directory (`settings users`) is not, and a non-member is
-   rejected.
-3. **`--state <name>` needs no companion flag here.** Unlike pjm, ship states hang off the product
-   alone, so there is no `--type` on `idea` at all, and `--type` on `ticket` is a real field being
-   written, not a lookup aid. `--state` and `--state-id` remain mutually exclusive.
-4. **Reads go through `search`.** `product idea list` and `product ticket list` are `POST …/search`. The plain list
-   endpoints exist but cannot filter by assignee, date or custom property, so the CLI never uses
-   them. Search takes **one operator per field and has no `$and`/`$or`**; multiple filters are
-   AND-ed. There is still no sorting anywhere.
-5. **No state change is refused locally — the server decides, and a ticket refusal is explained.**
-   - `pingcode product ticket transition` and `product ticket update --state` send the PATCH. If the server refuses
-     it, the error `message` names the product's configured states, the current state and — when
-     the state plan can be read — **the states reachable from the current one**. Read it from
-     `message`: `--json` errors are `{kind,message,code,exit}` and carry no hint.
-   - Want to know before you write? `product ticket transition <t> --state <s> --dry-run` prints the
-     reachable set on stderr and sends nothing.
-   - `pingcode product idea update --state` gets the configured states on rejection but never a reachable
-     set: ship publishes no idea state-flow endpoint at all.
-   - The CLI does **not** refuse a transition on its own (the one exception: moving a ticket to the
-     state it is already in, which is exit 2). The server refuses atomically with no state change,
-     so a local check saves nothing — and a mis-identified state plan would otherwise block a legal
-     move with no escape hatch. Expect the server's exit code, not exit 2, for an illegal target.
-6. **`--set key=value` sends the value verbatim, and select properties want option ids.** For a
-   `select`-typed property the API expects the option's `_id`, not the label you see in the UI —
-   the docs' own examples only show text properties, which is the trap. Run
-   `pingcode product meta idea-properties --product <p>` (or `ticket-properties`): it prints each key and
-   its `label=option_id` pairs. `properties` **replaces**, it never merges.
-7. **Nothing in ship can be deleted.** There is no DELETE for products, ideas or tickets, and
-   `is_archived` / `is_deleted` are read-only. A test artifact you create is permanent — mark it in
-   the title (for example `[CLI smoke] …`) before you create it, not after.
-8. **Ship identifiers are not lookup keys.** `SLC-1` cannot be fetched directly; the CLI resolves it
-   through `search` and then filters to an exact identifier match. A pasted URL ends in a `short_id`,
-   which no endpoint accepts either, so prefer an id or an identifier over a URL.
-9. **`--suite` filtering on `product idea list` is undocumented.** The API lists `suite.id` as neither
-   filterable nor unfilterable, so an empty result proves nothing. The CLI warns when you use it.
-10. **Tags cannot be set through the API** on ideas or tickets, and `submitter_id` on a ticket is
-    silently ignored under a client-credentials token — the ticket is attributed to the token owner
-    with no error. The CLI exposes neither.
-
-## 4c. Testhub rules that will bite you
-
-These are on top of §4. Testhub is the same machinery again, with a different parent scope and a
-sharper write path.
-
-1. **Resolve the test library first, and never carry an id across libraries.** `state_id`,
-   `type_id`, `status_id`, `suite_id` and the plan list are all **library-scoped**: two libraries
-   never share a state, type or status id, even when the names are identical. `testhub cases list`,
-   `plans list`, `plans get`, `plans create`, `runs bulk` and the five library-scoped `meta` leaves
-   (`case-states`, `case-types`, `run-statuses`, `plan-types`, `suites`) all require
-   `--library <name|id>` and refuse to guess (exit 2). `cases get`, `cases update` and `runs patch`
-   do not: they read the resource first and inherit its library. `runs list` needs one only to
-   resolve a `--plan` or `--status` **by name** — `--plan-id` / `--status-id` work without it.
-   `libraries create` is the one testhub command with no parent at all.
-2. **`--json` search is the read path.** `testhub cases list` is `POST /v1/testhub/cases/search` and
-   `testhub runs list` is `POST /v1/testhub/runs/search`; the plain `GET` lists are never called
-   (unfiltered, `GET /v1/testhub/cases` scans every library you can see). One operator per field, no
-   `$and`/`$or`, filters AND-ed, and no sorting anywhere.
-3. **`steps[]` replaces, it never merges — so `--step` is all-or-nothing.** A run's step array is
-   overwritten wholesale, and a step that arrives without its `step_id` is re-created with a fresh
-   id, orphaning its execution history. Re-emitting an untouched step is impossible: a run step
-   reports an English status **slug** while the write needs a status **id**, and nothing joins the
-   two except the localized name, which a tenant may have renamed. Rather than guess, the CLI
-   refuses a partial `--step` edit and lists every step id you must supply. Pass a status for
-   **every** step, or none at all. The same "replaces, never merges" applies to `--set`/`properties`
-   on a case.
-4. **`testhub runs patch` always sends `status_id`, and carries the executor over for you.**
-   `status_id` is required by the API even on PATCH, so the CLI reads the run first and re-sends the
-   run's current result when you do not name one — patching only a remark is safe here, and would
-   not be if you called the API directly. The run's own executor is re-sent the same way. When the
-   run has **no** executor and you name none, `executor_id` is omitted from the body and the CLI
-   warns on stderr that the run **stays unassigned** — an omitted `executor_id` is a verified no-op
-   on PATCH (2026-08-02), it neither clears the field nor reassigns the run. If the run has no
-   recorded result at all, the CLI asks for `--status` (exit 2) instead of sending a half-formed
-   body.
-5. **`pingcode testhub runs bulk` is the only way to delete a run** — there is no `runs delete` and
-   no run DELETE endpoint. It is also the only way to add one. Each of `--add-case`, `--set-status`
-   and `--remove-run` is capped at **50** entries per call (checked locally, exit 2), and the
-   response carries **counts only**, never the ids of the runs it created: re-list the plan to see
-   them.
-6. **`testhub runs list` cannot filter by library.** `library.id` is on the API's exclusion list for
-   run search, so scope runs with `--plan` instead. Passing `--library` without `--plan` resolves
-   names but does not narrow the result, and the CLI warns on stderr when you do it.
-7. **`testhub meta important-levels` takes no `--library`.** Importance levels are organisation-wide
-   — the only testhub lookup with no per-library variant — so the flag is refused with exit 2 rather
-   than accepted and ignored. It is hidden from `--help`; this line is the documentation.
-8. **The `pcp:read:testhub:configuration` trap.** `testhub meta case-states` and `testhub meta
-   run-statuses` need that scope while their sibling `testhub meta case-types` does not. A token
-   granted only `testcase` + `testplan` can list cases, plans and runs but gets a bare 403 from
-   those two — and since they are the only source of a `state_id` and a `status_id`, that token
-   **cannot write a run at all**. The CLI rewrites the 403 to say so.
-9. **`cases create` takes the library as `test_library_id`, and `--state` is PATCH-only.** The
-   create body field is `test_library_id` (not `library_id`), which the CLI fills from `--library`;
-   a case is created in the library's initial state and can only be moved with
-   `pingcode testhub cases update <case> --state <s>`.
-10. **`short_id` is read-only.** `testhub cases get`, `plans get` and the run read accept an id or a
-    `short_id`, but every write documents `id` only. `testhub cases update` and `testhub runs patch`
-    therefore read the resource first and use the real id — which is also where they learn the
-    library, so a name lookup works without repeating `--library`.
-11. **Two gaps to know about.** There is no `--maintenance` flag (filtering cases by maintainer is
-    not exposed), and `--set` keys have **no discovery command** in this version: testhub's property
-    lookup is outside this endpoint set, so read the keys off an existing case with
-    `pingcode testhub cases get <case> --json`. Values for select-typed properties are option ids,
-    not labels — the same trap as ship.
-12. **`--start` and `--end` on `plans create`: the end date is inclusive, and that is asymmetric.**
-    Both flags accept either form:
-    - `YYYY-MM-DD`, zero-padded. `--start 2026-08-10` becomes **00:00:00 local** on that date;
-      `--end 2026-08-31` becomes **23:59:59 local** on it.
-    - a **10-digit unix seconds** integer, passed through **verbatim** on both flags — no
-      end-of-day adjustment is applied to it. Use this when you want an exact instant.
-
-    The asymmetry is deliberate: a date range means the plan runs *through* the end date, and mapping
-    both ends to midnight would silently shorten every plan by a day — an error you would never see,
-    because the CLI echoes back exactly what it sent. Local time, not UTC, so that a `plans get`
-    agrees with the `plans create` that produced it.
-
-    Everything else is refused with exit 2 **before any request**: an unpadded `2026-8-1`, slashes
-    (`08/31/2026`), an ISO string with a time in it, a 13-digit **milliseconds** value, and an
-    impossible date such as `2026-02-30` (which JavaScript would otherwise roll silently into
-    March). `--end` earlier than `--start` is refused client-side too, and the message prints both
-    resolved unix values so you can see which end moved.
-13. **`plans create` needs all five fields, and `--assignee` has no default.** `--library`,
-    `--name`, `--type`, `--start`, `--end` and `--assignee` are all required. There is deliberately
-    no "assign it to me": an enterprise (client-credentials) token acts as the **bot user**, so a
-    default would quietly make a bot the owner 负责人 of every plan the CLI creates, and nobody would
-    notice until they went looking for whom to ask. Name a real person —
-    `pingcode settings users --keywords <name> --json` is the candidate set.
-14. **A plan type carries no `kind`, so the CLI cannot tell you which types need more.** Iteration
-    and release plan types additionally require `sprint_id` / `version_id` (and the `project_id`
-    they make mandatory), but the plan-type resource exposes only `id` / `name` / `url` / `library`
-    — there is **no `kind` discriminator**, and guessing from the localized name is not safe because
-    tenants rename them. `testhub meta plan-types` therefore lists names only, `plans create` sends
-    just the five fields, and if you pick a type that needs more, **the server's refusal is what you
-    see** — not a local warning. Pick the plain (普通) type unless you know the tenant's setup.
-15. **A library can be created but never updated or deleted.** `--identifier` on
-    `testhub libraries create` must be **unique across the organisation** and the server enforces it
-    (a duplicate is rejected server-side; the CLI does not pre-check, because a probe would race).
-    Testhub publishes no library DELETE and no library PATCH, so a library created here is permanent
-    and unrenameable: get the name and identifier right the first time, and mark throwaway ones
-    (for example `[CLI smoke] …`) *before* creating them. The CLI says so on stderr after each
-    create.
-16. **`runs bulk --add-case` ignores a case id that does not exist — silently, at exit 0.** Verified
-    live 2026-08-02: a bogus `--add-case` id returns `{"inserts":0,"updates":0,"deletes":0}` and
-    succeeds. There is no error and no per-entry report, because the endpoint answers with counts
-    only. **Read the counts**, and if they do not match what you asked for, re-list the plan with
-    `pingcode testhub runs list --plan <plan> --json` to see what actually landed. A bogus id in
-    `--remove-run` does fail loudly (code `100619`, exit 7), so the leniency is specific to inserts.
-
 ## 5. Agent workflow
 
 1. `pingcode auth status` — if it reports no token, ask the user for credentials (§1) instead of
@@ -614,8 +241,8 @@ sharper write path.
      column is the spelling `--suite` takes) and the org-wide `important-levels`. Find the plan with
      `pingcode testhub plans list --library <l> --json`, or create one — `testhub meta plan-types
      --library <l> --json` first, since `--type` on `plans create` comes from there. If the tenant
-     has no usable library at all, `pingcode testhub libraries create` is the bootstrap; read §4c
-     rule 15 first, because it cannot be undone.
+     has no usable library at all, `pingcode testhub libraries create` is the bootstrap; read
+     [`modules/testhub.md`](modules/testhub.md) §4c rule 15 first, because it cannot be undone.
 4. Read before writing: `pingcode project work-item get <ref> --json`, `pingcode product idea get <ref> --json`,
    `pingcode product ticket get <ref> --json` or `pingcode testhub cases get <ref> --json` — and for a
    step-level run edit, read the run's steps first, because `--step` must cover all of them.
@@ -640,7 +267,8 @@ plan **update** and **delete**, `POST /v1/testhub/runs` and `PUT /runs/{id}` (do
 executor when the field is omitted — untested and not worth testing), every configuration write, the
 case/run history reads, and the case-property lookup. Library and plan *creation* **are** covered
 (`testhub libraries create`, `testhub plans create`), so the CLI can bootstrap its own fixtures; only
-iteration and release plan types are out of reach, for the reason in §4c rule 14.
+iteration and release plan types are out of reach, for the reason in
+[`modules/testhub.md`](modules/testhub.md) §4c rule 14.
 
 ## 7. Installing this skill elsewhere
 

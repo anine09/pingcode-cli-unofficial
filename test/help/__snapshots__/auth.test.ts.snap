@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`auth --help > auth 1`] = `
+"Usage: pingcode auth [options] [command]
+
+authenticate against PingCode (Client Credentials app)
+
+Options:
+  -h, --help        display help for command
+
+Commands:
+  login [options]   acquire an org token and verify it against a real capability
+  status [options]  show host, masked client id and token state
+  logout [options]  remove the stored token and credentials, and clear the metadata cache
+  help [command]    display help for command
+"
+`;

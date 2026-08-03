@@ -1,0 +1,100 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`project --help > project 1`] = `
+"Usage: pingcode project [options] [command]
+
+项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           list projects
+  get [options] <project>  show one project
+  work-item                work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
+  meta                     ids you need before writing: every pjm lookup is scoped to one project
+  help [command]           display help for command
+"
+`;
+
+exports[`project --help > project meta 1`] = `
+"Usage: pingcode project meta [options] [command]
+
+ids you need before writing: every pjm lookup is scoped to one project
+
+Options:
+  -h, --help            display help for command
+
+Commands:
+  types [options]       work-item types of a project (values for --type / type_id)
+  states [options]      work-item states of one (project, type) pair — both are required
+  priorities [options]  work-item priorities of a project
+  sprints [options]     sprints of a project (scrum/hybrid only)
+  help [command]        display help for command
+"
+`;
+
+exports[`project --help > project work-item 1`] = `
+"Usage: pingcode project work-item [options] [command]
+
+work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
+
+Options:
+  -h, --help                        display help for command
+
+Commands:
+  list [options]                    list work items of a project
+  get [options] <work-item>         show one work item
+  create [options]                  create a work item (ids are project-scoped: run \`pingcode
+                                    project meta\` first)
+  update [options] <work-item>      patch a work item — only the fields you pass are sent, and they
+                                    replace
+  transition [options] <work-item>  move a work item to another state (workflow-validated by the
+                                    server)
+  help [command]                    display help for command
+"
+`;
+
+exports[`project --help > project work-item transition (--type is a lookup aid, not a patched field) 1`] = `
+"Usage: pingcode project work-item transition [options] <work-item>
+
+move a work item to another state (workflow-validated by the server)
+
+Arguments:
+  work-item         id, short_id, identifier such as SCR-5, or a pasted URL
+
+Options:
+  --type <name|id>  work-item type — used only to resolve --state <name> and to list candidate
+                    states on rejection; never sent
+  --state <name>    target state, resolved by name (requires --type)
+  --state-id <id>   target state, given as an id (no lookup, no --type needed)
+  -h, --help        display help for command
+"
+`;
+
+exports[`project --help > project work-item update (the widest flag set) 1`] = `
+"Usage: pingcode project work-item update [options] <work-item>
+
+patch a work item — only the fields you pass are sent, and they replace
+
+Arguments:
+  work-item                 id, short_id, identifier such as SCR-5, or a pasted URL
+
+Options:
+  --title <text>            new title
+  --description <text>      new description (replaces the old one)
+  --type <name|id>          work-item type — used only to resolve --state <name> and to list
+                            candidate states on rejection; never sent
+  --assignee <name|id>      new assignee
+  --priority <name|id>      new priority
+  --parent <ref>            new parent work item
+  --start-at <when>         unix seconds or a date like 2026-01-31
+  --end-at <when>           unix seconds or a date like 2026-01-31
+  --story-points <n>        story points
+  --estimated-workload <n>  estimated workload in hours
+  --remaining-workload <n>  remaining workload in hours
+  --state <name>            new state, resolved by name (requires --type)
+  --state-id <id>           new state, given as an id (no lookup, no --type needed)
+  -h, --help                display help for command
+"
+`;

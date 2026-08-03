@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`root --help > root 1`] = `
+"Usage: pingcode [options] [command]
+
+Command-line client for the PingCode Open API
+
+Options:
+  --version       output the CLI version
+  --host <url>    PingCode host (default https://open.pingcode.com; self-hosted:
+                  https://pingcode.example.com)
+  --json          emit machine-readable JSON on stdout
+  --dry-run       preview mutating requests without sending them
+  --no-cache      bypass the on-disk metadata cache
+  --verbose       log requests to stderr (secrets redacted)
+  -h, --help      display help for command
+
+Commands:
+  auth            authenticate against PingCode (Client Credentials app)
+  product         产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)
+  project         项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
+  testhub         测试管理 testhub: libraries 测试库, cases 用例, plans 测试计划, runs 执行用例 (scopes
+                  pcp:read:testhub:testcase / :testplan / :configuration)
+  settings        后台设置: organisation-wide directory data
+  help [command]  display help for command
+"
+`;

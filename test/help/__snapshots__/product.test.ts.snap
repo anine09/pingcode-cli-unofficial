@@ -1,0 +1,163 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`product --help > product 1`] = `
+"Usage: pingcode product [options] [command]
+
+产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           list products
+  get [options] <product>  show one product, including its members
+  idea                     ship requirements 需求 (scopes pcp:read:ship:idea / pcp:write:ship:idea)
+  ticket                   ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)
+  meta                     ids you need before writing: every ship lookup is scoped to one product
+  help [command]           display help for command
+"
+`;
+
+exports[`product --help > product idea 1`] = `
+"Usage: pingcode product idea [options] [command]
+
+ship requirements 需求 (scopes pcp:read:ship:idea / pcp:write:ship:idea)
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           search ideas in a product (POST /v1/ship/ideas/search)
+  get [options] <idea>     show one idea
+  create [options]         create an idea (only --product and --title are required)
+  update [options] <idea>  patch an idea — only the fields you pass are sent, and they replace
+  help [command]           display help for command
+"
+`;
+
+exports[`product --help > product idea list (the search filter surface) 1`] = `
+"Usage: pingcode product idea list [options]
+
+search ideas in a product (POST /v1/ship/ideas/search)
+
+Options:
+  --product <name|id>   product name, identifier or id
+  --priority <name|id>  priority
+  --assignee <name|id>  assignee — must be a member of this product
+  --suite <name|id>     requirement module 需求模块 — filtering ideas by suite is undocumented: the API
+                        lists suite.id in neither the filterable nor the unfilterable set (ship
+                        §9.5), so verify the result rather than trusting an empty one
+  --keywords <text>     fuzzy search over identifier and title
+  --page <n>            page index, 0-based (default: "0")
+  --page-size <n>       rows per page, 1-100 (default: "30")
+  --all                 walk every page (best effort: the API guarantees no ordering)
+  --limit <n>           stop after this many rows with --all (default: "500")
+  --state <name|id>     filter by state, resolved by name against the product's states
+  --state-id <id>       filter by state, given as an id (sent unchanged, no lookup)
+  -h, --help            display help for command
+"
+`;
+
+exports[`product --help > product idea update (no --type: ship states are product-scoped) 1`] = `
+"Usage: pingcode product idea update [options] <idea>
+
+patch an idea — only the fields you pass are sent, and they replace
+
+Arguments:
+  idea                  id, identifier such as SLC-1, or a pasted idea URL
+
+Options:
+  --title <text>        new title
+  --description <text>  new description (replaces the old one)
+  --priority <name|id>  new priority
+  --assignee <name|id>  new assignee
+  --suite <name|id>     new requirement module
+  --progress <n>        progress between 0 and 1, two decimal places
+  --set <key=value>     custom property, repeatable: --set key=value. Values for select-type
+                        properties are option ids, not labels. Replaces, never merges
+  --state <name|id>     new state (validated by the server: ship has no idea state-flow endpoint),
+                        resolved by name against the product's states
+  --state-id <id>       new state (validated by the server: ship has no idea state-flow endpoint),
+                        given as an id (sent unchanged, no lookup)
+  -h, --help            display help for command
+"
+`;
+
+exports[`product --help > product meta 1`] = `
+"Usage: pingcode product meta [options] [command]
+
+ids you need before writing: every ship lookup is scoped to one product
+
+Options:
+  -h, --help                   display help for command
+
+Commands:
+  idea-states [options]        idea states of a product (values for --state / state_id)
+  idea-priorities [options]    idea priorities of a product
+  idea-suites [options]        requirement modules 需求模块 of a product (a tree, listed flat with
+                               parents)
+  idea-properties [options]    writable idea property keys and their option ids — the only source
+                               for --set values
+  members [options]            members of a product — the only valid --assignee candidates
+  ticket-states [options]      ticket states of a product (values for --state / state_id)
+  ticket-priorities [options]  ticket priorities of a product
+  ticket-types [options]       ticket types of a product — required to create a ticket
+  ticket-channels [options]    ticket channels of a product (set once, at create time)
+  ticket-properties [options]  writable ticket property keys and their option ids — the only source
+                               for --set values
+  help [command]               display help for command
+"
+`;
+
+exports[`product --help > product ticket 1`] = `
+"Usage: pingcode product ticket [options] [command]
+
+ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)
+
+Options:
+  -h, --help                     display help for command
+
+Commands:
+  list [options]                 search tickets in a product (POST /v1/ship/tickets/search)
+  get [options] <ticket>         show one ticket
+  create [options]               create a ticket (--type is required by the API, unlike idea)
+  update [options] <ticket>      patch a ticket — only the fields you pass are sent, and they
+                                 replace
+  transition [options] <ticket>  move a ticket to another state (--dry-run previews the legal ones)
+  help [command]                 display help for command
+"
+`;
+
+exports[`product --help > product ticket create (--type is required by the API) 1`] = `
+"Usage: pingcode product ticket create [options]
+
+create a ticket (--type is required by the API, unlike idea)
+
+Options:
+  --product <name|id>   product name, identifier or id
+  --type <name|id>      ticket type — list them with \`meta ticket-types\`
+  --title <text>        title, max 255 characters
+  --description <text>  description
+  --assignee <name|id>  assignee — must be a member of this product
+  --priority <name|id>  priority
+  --channel <name|id>   submission channel — can only be set here, never patched
+  --set <key=value>     custom property, repeatable: --set key=value. Values for select-type
+                        properties are option ids, not labels. Replaces, never merges
+  -h, --help            display help for command
+"
+`;
+
+exports[`product --help > product ticket transition (advisory: the server decides) 1`] = `
+"Usage: pingcode product ticket transition [options] <ticket>
+
+move a ticket to another state (--dry-run previews the legal ones)
+
+Arguments:
+  ticket             id, identifier such as SLC-1, or a pasted ticket URL
+
+Options:
+  --state <name|id>  target state, resolved by name against the product's states
+  --state-id <id>    target state, given as an id (sent unchanged, no lookup)
+  -h, --help         display help for command
+"
+`;

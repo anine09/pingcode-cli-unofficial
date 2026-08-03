@@ -1,0 +1,15 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`settings --help > settings 1`] = `
+"Usage: pingcode settings [options] [command]
+
+后台设置: organisation-wide directory data
+
+Options:
+  -h, --help       display help for command
+
+Commands:
+  users [options]  organisation members (scope pcp:read:global:team)
+  help [command]   display help for command
+"
+`;
