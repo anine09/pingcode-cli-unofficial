@@ -85,4 +85,19 @@ describe('layering', () => {
       expect(source).not.toContain('buildUrl');
     }
   });
+
+  /**
+   * `core/catalog/catalog.generated.ts` is data with a provenance header and a
+   * content hash; `core/catalog/index.ts` is the hand-written door that applies
+   * the `paged` overrides and owns the matching rules. Importing the generated
+   * array anywhere else would bypass both (design D2.4 rule (a)).
+   */
+  it('only core/catalog/index.ts imports the generated catalog', () => {
+    const importers = files.filter((file) =>
+      importsOf(file).some((specifier) => specifier.includes('catalog.generated')),
+    );
+    expect(importers.map((f) => path.relative(srcDir, f))).toEqual([
+      path.join('core', 'catalog', 'index.ts'),
+    ]);
+  });
 });
