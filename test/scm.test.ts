@@ -1194,6 +1194,87 @@ describe('code reviews api (S1c)', () => {
   });
 });
 
+describe('scm not-found mapping, part 3 (S1c: exit 5 from HTTP 400)', () => {
+  // S1c smoke, 2026-08-03, live tenant (design D13.1 item 5). The last two scm
+  // families each report absence with one stable code, HTTP 400 like the six before
+  // them. Before these rows a missing pull request exited 7 while a missing branch
+  // exited 5 — the inconsistency D13.4 recorded when the smoke could not be run.
+  async function failing(
+    code: string,
+    message: string,
+    call: (ctx: ReturnType<typeof ctxFor>['ctx']) => Promise<unknown>,
+  ) {
+    const { ctx } = ctxFor([() => jsonResponse({ code, message }, { status: 400 })]);
+    return await call(ctx).catch((error: unknown) => error);
+  }
+
+  it('maps a missing pull request (100208) to exit 5 on GET and PATCH alike', async () => {
+    for (const call of [
+      (ctx: ReturnType<typeof ctxFor>['ctx']) => getPullRequest(ctx, PLATFORM, REPO, PR),
+      (ctx: ReturnType<typeof ctxFor>['ctx']) =>
+        updatePullRequest(ctx, PLATFORM, REPO, PR, { status: 'open' }),
+    ]) {
+      expect(await failing('100208', "'pull request'资源不存在", call)).toMatchObject({
+        kind: 'not_found',
+        exitCode: 5,
+        code: '100208',
+      });
+    }
+  });
+
+  it('maps 100208 on a review create too, because the named pull request is what is absent', async () => {
+    expect(
+      await failing('100208', "'pull request'资源不存在", (ctx) =>
+        createReview(ctx, PLATFORM, REPO, PR, {
+          status: 'comment',
+          reviewer_name: 'bot',
+          submitted_at: 1785751200,
+        }),
+      ),
+    ).toMatchObject({ kind: 'not_found', exitCode: 5, code: '100208' });
+  });
+
+  it('maps a missing review (100222) to exit 5 on GET and PATCH alike', async () => {
+    for (const call of [
+      (ctx: ReturnType<typeof ctxFor>['ctx']) => getReview(ctx, PLATFORM, REPO, PR, REVIEW),
+      (ctx: ReturnType<typeof ctxFor>['ctx']) =>
+        updateReview(ctx, PLATFORM, REPO, PR, REVIEW, { status: 'comment' }),
+    ]) {
+      expect(await failing('100222', "'review'资源不存在", call)).toMatchObject({
+        kind: 'not_found',
+        exitCode: 5,
+        code: '100222',
+      });
+    }
+  });
+
+  it('leaves the four input-validation and business-rule codes on exit 7', async () => {
+    // All observed in the same smoke and deliberately **not** overridden: a missing
+    // required field, the merged-status conditional, and a refusal about two branches
+    // that both exist are none of them an absence.
+    const cases: [string, string][] = [
+      ['100224', '源分支是必填字段'],
+      ['100008', "'status'是必填字段"],
+      ['100212', "请提供'merged_at'，'merged_commit_sha'，'merged_by_name'值"],
+      ['100211', '源分支和目标分支不能相同'],
+    ];
+    for (const [code, message] of cases) {
+      expect(
+        await failing(code, message, (ctx) =>
+          createPullRequest(ctx, PLATFORM, REPO, {
+            title: 'x',
+            number: 1,
+            creator_name: 'bot',
+            source_branch_id: 's',
+            target_branch_id: 't',
+            status: 'open',
+          }),
+        ),
+      ).toMatchObject({ kind: 'api', exitCode: 7, code });
+    }
+  });
+});
+
 describe('no PUT reaches the refined layer (design D8.4)', () => {
   it('exposes no replace wrapper for the five families that document one', async () => {
     const scm = (await import('../src/api/scm')) as Record<string, unknown>;

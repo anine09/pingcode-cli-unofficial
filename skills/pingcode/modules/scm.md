@@ -70,6 +70,22 @@ string**: a commit's `committer_name` and a branch's `sender_name` are matched a
 rows. So do not promise a user that the CLI can "assign a commit to a person"; what it can do
 is make sure the git username exists as an identity with a readable display name and avatar.
 
+⚠️ **Five write fields silently CREATE one of these rows when the name is unknown**, and
+**there is no DELETE for a platform user anywhere in scm**, so every typo is permanent:
+
+| field | flag | upserts? |
+|---|---|---|
+| repository `owner_name` | `scm repo create --owner-name` | **yes** |
+| branch `sender_name` | `scm branch create --sender` | **yes** |
+| pull request `creator_name` | `scm pr create/update --creator` | **yes** |
+| pull request `merged_by_name` | `scm pr create/update --merged-by` | **yes** |
+| code review `reviewer_name` | `scm review create/update --reviewer` | **yes** |
+| commit `committer_name` | `scm commit create --committer` | **no** — that path has no platform to create one in |
+
+All five upserts are verified live. Check the name before a write:
+`scm platform-user list --platform <p> --name <username> --json` returns zero rows if it
+does not exist yet.
+
 `get` and `update` take an **id**, because ids in this API have three shapes and are never
 guessed. Turn a git username into an id with the exact-match filter above
 (`list --name octocat`), which is why no `resolve` kind exists for this resource.
@@ -256,30 +272,40 @@ Rules that will bite otherwise:
   `identifier` and no `short_id` anywhere, and the detail path takes the 24-hex id only.
   So `--number` is a **list filter**, and `pr get|update` take the id: run
   `pingcode scm pr list --number 42 --json` and read `values[0].id`. The CLI does not
-  guess whether what you typed "looks like a number".
+  guess whether what you typed "looks like a number". `--number` is an **exact filter and
+  it really works** (verified live) — unlike `repo list`'s ignored `?name=`, so this
+  discovery path is reliable; an unused number returns zero rows.
 - **`--status` is required by the API on every patch**, not just when you want to change
   it. Omit it and the CLI reads the pull request first and re-sends its *current* status,
   which costs one extra GET; pass `--status` and it does not. There is no way to send a
-  patch without a status.
-- **`--target-branch-id` is required on create, `--source-branch-id` is not** — and both
-  take **branch ids**, from `scm branch list --json`. (The API's `PUT`, which this CLI does
-  not offer, makes the source branch required too; that asymmetry is one reason it is
-  excluded.)
+  patch without a status (verified live: `100008 'status'是必填字段`). The patch is
+  genuinely partial otherwise — counts and work-item links you do not mention survive it.
+- **Both `--target-branch-id` and `--source-branch-id` are required on create**, and both
+  take **branch ids**, from `scm branch list --json`. They must also **differ** (the
+  server refuses `source == target`). The published API reference marks the source branch
+  optional; the live API rejects a create without it, so the CLI requires it and you get
+  exit 2 naming the flag instead of a server error.
 - **`--merged-at`, `--merged-commit-sha` and `--merged-by` become required when
   `--status merged`.** The server enforces that, not the CLI, so expect exit 7 rather than
-  exit 2 if you forget one.
-- **`--creator` and `--merged-by` are git usernames**, matched against 托管平台用户 rows by
-  name — the same attribution model as branch `--sender`. Create the identity first with
-  `scm platform-user create`.
-- **The six `--*-count` flags are yours to report.** Nothing server-side recomputes them,
-  and an omitted count is *not reported* rather than zero, so `--changed-files-count 0` and
-  omitting the flag mean different things.
+  exit 2 if you forget one (verified live: `100212`).
+- ⚠️ **`--creator` and `--merged-by` CREATE a 托管平台用户 if the name is unknown.** They are
+  git usernames matched against 托管平台用户 rows by name, and an unrecognised one is
+  **upserted**, exactly as branch `--sender` is. scm has **no user DELETE**, so a typo
+  leaves a permanent ghost identity in the tenant. Create or confirm the identity first
+  with `scm platform-user list --name <username>`. (A commit's `--committer` is the one
+  exception — it creates nothing.)
+- **The six `--*-count` flags are yours to report.** Nothing server-side recomputes them.
+  Note that the server stores `0` for any count you do not send, so unlike `merged_at`
+  (which stays absent) an omitted count is indistinguishable from `0` once written.
 - **`--work-item` takes an identifier (`PLM-001`) and an unknown one is silently
   ignored**, exactly as on a branch: the response's `work_items` array is the only
   evidence, the CLI warns on stderr about identifiers that did not link, and the exit code
-  stays 0. On `update` it **REPLACES** the whole link set.
+  stays 0. On `update` it **REPLACES** the whole link set. `--work-item-id` on `list` is a
+  different thing — a work item **id**, and an unknown one is an error (exit 5), not an
+  empty result.
 - **`number` must be unique in the repository**; a duplicate is a server-side conflict
   (exit 7), not a silent overwrite.
+- **A missing pull request exits 5**, on `get`, on `update`, and on `review create`.
 
 ### Code reviews — `scm review`
 
@@ -317,6 +343,17 @@ pingcode scm review update 524587fe700d43b81b080988 --platform Github --repo acm
   addressed three parents deep, and **there is no repository-wide or organisation-wide
   review list** — you enumerate one pull request at a time, exactly as with `scm ref` and
   branches. Get the id from `scm pr list --number <n> --json`.
+- ⚠️ **A wrong `--pr-id` reads as "no reviews", not as an error.** `review list` against a
+  pull request that does not exist returns an **empty list with exit 0** — the pull request
+  is the one scm parent whose absence a child *list* does not report (a bad `--platform` or
+  `--repo` does fail). So an empty result means "either no reviews, or that pull request is
+  not there". Confirm with `scm pr get <id>` if it matters. `review get` and
+  `review create` do fail properly, with exit 5.
+- ⚠️ **`--reviewer` CREATES a 托管平台用户 if the name is unknown**, exactly like
+  `pr create --creator` and `branch create --sender`, and platform users cannot be
+  deleted. Confirm the username first with `scm platform-user list --name <username>`.
+- **A missing review exits 5** — including a real review id passed with the wrong
+  `--pr-id`, because the review genuinely is not at that address.
 - **`--submitted-at` is required on create.** A review carries **no server-assigned
   timestamp at all** — no `created_at`, no `updated_at` — so the time is yours to supply.
   On `update` it is optional like everything else: this PATCH has no mandatory field
@@ -351,10 +388,9 @@ that can create a row by accident.
 **`PUT` is deliberately not offered anywhere.** Five scm families document a `PUT` that
 replaces the whole record and blanks every field you did not send, and this API never
 documents what clearing a field does. Use `update` (PATCH). **Full replacement of a pull
-request or a code review therefore goes through `pingcode api PUT`**, and note that the
-pull request `PUT` additionally *requires* `source_branch_id` where the create leaves it
-optional — omitting a field there is not "leave it alone", it is a rejection or a wipe. If
-you truly want a full replacement, ask for it explicitly through the escape hatch:
+request or a code review therefore goes through `pingcode api PUT`** — and there, omitting
+a field is not "leave it alone", it is a wipe. If you truly want a full replacement, ask
+for it explicitly through the escape hatch:
 
 ```bash
 pingcode api PUT /v1/scm/products/68393e8b47512a5d5d4e5b55 \

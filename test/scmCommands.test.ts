@@ -844,7 +844,8 @@ describe('scm pr commands', () => {
     const run = await runCli(
       ['scm', 'pr', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
        '--title', 'feat: login', '--number', '42', '--creator', 'bot',
-       '--target-branch-id', BRANCH, '--status', 'open', '--dry-run', '--json'],
+       '--target-branch-id', BRANCH, '--source-branch-id', 'src1', '--status', 'open',
+       '--dry-run', '--json'],
       [() => jsonResponse({ id: PR })],
     );
     expect(run.exit).toBe(0);
@@ -856,15 +857,32 @@ describe('scm pr commands', () => {
       number: 42,
       creator_name: 'bot',
       target_branch_id: BRANCH,
+      source_branch_id: 'src1',
       status: 'open',
     });
+  });
+
+  it('requires --source-branch-id, because the API rejects a create without it', async () => {
+    // The published catalog marks `source_branch_id` optional on POST, but the live API
+    // answers `100224 源分支是必填字段` at every status (S1c smoke, design D13.1). An
+    // optional flag whose omission always fails is refused here instead, before the
+    // request, so the caller gets exit 2 and a named flag rather than a server 400.
+    const run = await runCli(
+      ['scm', 'pr', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
+       '--title', 't', '--number', '42', '--creator', 'bot',
+       '--target-branch-id', BRANCH, '--status', 'open', '--json'],
+      [() => jsonResponse({ id: PR })],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain('--source-branch-id');
   });
 
   it('parses the merge trio and the counts into numbers and unix seconds', async () => {
     const run = await runCli(
       ['scm', 'pr', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
        '--title', 't', '--number', '7', '--creator', 'bot',
-       '--target-branch-id', BRANCH, '--status', 'merged',
+       '--target-branch-id', BRANCH, '--source-branch-id', 'src1', '--status', 'merged',
        '--merged-at', '2026-08-03T10:00:00Z', '--merged-commit-sha', SHA, '--merged-by', 'bot',
        '--commits-count', '3', '--changed-files-count', '0', '--json'],
       [() => jsonResponse({ id: PR })],
@@ -875,6 +893,7 @@ describe('scm pr commands', () => {
       number: 7,
       creator_name: 'bot',
       target_branch_id: BRANCH,
+      source_branch_id: 'src1',
       status: 'merged',
       merged_at: 1785751200,
       merged_commit_sha: SHA,
@@ -889,7 +908,7 @@ describe('scm pr commands', () => {
     const run = await runCli(
       ['scm', 'pr', 'create', '--platform-id', PLATFORM, '--repo-id', REPO,
        '--title', 't', '--number', '7', '--creator', 'bot',
-       '--target-branch-id', BRANCH, '--status', 'open',
+       '--target-branch-id', BRANCH, '--source-branch-id', 'src1', '--status', 'open',
        '--work-item', 'YYHC-10', '--work-item', 'NOSUCH-99999', '--json'],
       [() => jsonResponse({ id: PR, work_items: [{ id: 'w1', identifier: 'YYHC-10' }] })],
     );

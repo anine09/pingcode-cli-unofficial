@@ -59,11 +59,14 @@ import {
  *    client-side whether the string "looks like a number", and shape-guessing an
  *    identifier is exactly what `quality-guidelines.md` forbids (ids here come in three
  *    shapes). `scm ref --branch-id` made the same call for the same reason.
+ *    `?number=` is a **real, exact filter** — verified live, unlike the repository
+ *    list's `?name=`, which the server silently ignores — so that discovery path works.
  *  - **`PATCH` requires `status`**, uniquely in scm. A caller who only wants to fix a
  *    title cannot express that in one request, so `update` re-reads the pull request and
  *    re-emits its current status. That is a read-modify-write in the command layer, not
  *    a silent default — the same contract testhub's `runs patch` settled on for its
  *    mandatory `status_id` ([TH§7]). Pass `--status` and the extra read is skipped.
+ *    Verified live: a status-less PATCH is refused with `100008 'status'是必填字段`.
  *  - **`--work-item` links can fail silently.** An identifier that does not exist is
  *    dropped and the call still returns 200, so the response's `work_items` array is the
  *    only evidence. Both writes compare it against what was asked for and warn
@@ -74,11 +77,28 @@ import {
  *    would cost a request per call to save a paste. A caller holding only a name runs
  *    `scm branch get <name> --json` first.
  *
+ * ⚠️ **`--creator` and `--merged-by` upsert.** A git username the platform does not know
+ * is **created** as a platform user, so a typo leaves a permanent ghost identity —
+ * platform users have no DELETE anywhere in scm. This is the same hazard as
+ * `scm branch create --sender`, and it was confirmed live for both fields in one call
+ * (design D13.1 item 3). `--reviewer` on `scm review create` behaves the same way; a
+ * commit's `--committer` does **not**, because that path has no platform to create one
+ * in.
+ *
+ * **Both branch ids are required on create, and they must differ.** The published
+ * catalog marks `source_branch_id` optional on `POST`; the live API refuses the call
+ * with `100224 源分支是必填字段` at every status, and refuses `source == target` with
+ * `100211`. Live wins (PRD R2), so `--source-branch-id` is a `requiredOption`: an
+ * "optional" flag whose omission always fails is a lie of the same kind as a filter the
+ * server ignores. This also retires the neatest argument for excluding `PUT` — the
+ * claim that `PUT` promotes this field to required where `POST` leaves it optional was
+ * simply wrong about `POST`. The exclusion still stands on its own ground: a
+ * replacement blanks every field you do not send.
+ *
  * There is **no `delete`** — upstream offers none for this family, as for every scm
  * family but 代码分支 — and **no `replace`**: `PUT …/pull_requests/{id}` exists upstream
- * but is excluded by design (D8.4), and it is the sharpest example of why, because it
- * promotes `source_branch_id` to *required* where `POST` leaves it optional. Use
- * `pingcode api PUT …` if a full replacement is genuinely what you want.
+ * but is excluded by design (D8.4). Use `pingcode api PUT …` if a full replacement is
+ * genuinely what you want.
  */
 
 const PR_HELP = 'pull request id (find it with `scm pr list --number <n> --json`)';
@@ -88,6 +108,14 @@ const PR_STATUSES = 'open | closed | merged | abandoned';
 
 const WORK_ITEM_HELP =
   'work item identifier such as PLM-001, repeatable — an unknown one is silently ignored by the API';
+
+/**
+ * Both name-valued write fields upsert, so a typo is permanent (S1c smoke; see the
+ * header note). Worded as `scm branch create --sender` words it, because it is the
+ * same hazard.
+ */
+const GHOST_WARNING =
+  'an UNKNOWN name is CREATED as a platform user, and platform users cannot be deleted';
 
 type RepoFlags = Parameters<typeof requireRepoScope>[1];
 
@@ -113,8 +141,8 @@ type CreateFlags = RepoFlags &
     number: string;
     creator: string;
     targetBranchId: string;
+    sourceBranchId: string;
     status: string;
-    sourceBranchId?: string | undefined;
     description?: string | undefined;
     workItem?: string[] | undefined;
   };
@@ -148,7 +176,10 @@ function addStatOptions(command: Command): Command {
   return command
     .option('--merged-at <when>', 'merge time: unix seconds or a date — required by the API when --status merged')
     .option('--merged-commit-sha <sha>', 'the merge commit SHA — required by the API when --status merged')
-    .option('--merged-by <git-username>', 'who merged it — required by the API when --status merged')
+    .option(
+      '--merged-by <git-username>',
+      `who merged it — required by the API when --status merged; ${GHOST_WARNING}`,
+    )
     .option('--comments-count <n>', 'number of comments on the pull request')
     .option('--review-comments-count <n>', 'number of code-review comments')
     .option('--commits-count <n>', 'number of commits')
@@ -196,14 +227,17 @@ export function registerPullRequestCommands(parent: Command): void {
           .requiredOption('--number <n>', 'pull request number, unique within the repository')
           .requiredOption(
             '--creator <git-username>',
-            'author git username — create the identity first with `scm platform-user create`',
+            `author git username — ${GHOST_WARNING}`,
           )
           .requiredOption(
             '--target-branch-id <id>',
             'target branch id, from `scm branch list --json` — an id, not a name',
           )
           .requiredOption('--status <status>', `pull request status, one of: ${PR_STATUSES}`)
-          .option('--source-branch-id <id>', 'source branch id — optional here, unlike on the API\u2019s PUT')
+          .requiredOption(
+            '--source-branch-id <id>',
+            'source branch id — required by the API, and it must differ from the target',
+          )
           .option('--description <text>', 'description')
           .option('--work-item <identifier>', WORK_ITEM_HELP, collectValue),
       ),
@@ -226,7 +260,7 @@ export function registerPullRequestCommands(parent: Command): void {
               'and re-sent, because the API requires this field on every patch',
           )
           .option('--title <text>', 'new title')
-          .option('--creator <git-username>', 'new author git username')
+          .option('--creator <git-username>', `new author git username — ${GHOST_WARNING}`)
           .option('--description <text>', 'new description (replaces the old one)')
           .option('--source-branch-id <id>', 'new source branch id')
           .option('--target-branch-id <id>', 'new target branch id')
@@ -296,8 +330,8 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
     number,
     creator_name: requireFlag(flags.creator, '--creator'),
     target_branch_id: requireFlag(flags.targetBranchId, '--target-branch-id'),
+    source_branch_id: requireFlag(flags.sourceBranchId, '--source-branch-id'),
     status: requireFlag(flags.status, '--status'),
-    ...(flags.sourceBranchId === undefined ? {} : { source_branch_id: flags.sourceBranchId }),
     ...(flags.description === undefined ? {} : { description: flags.description }),
     ...statFields(flags),
     ...(identifiers === undefined ? {} : { work_item_identifiers: identifiers }),
@@ -462,7 +496,15 @@ function printPullRequest(pullRequest: ScmPullRequest, ctx: Ctx, verb?: string):
   }
 }
 
-/** An absent count is blank, never `0`: the API does not report one it was not given. */
+/**
+ * A count the resource does not carry renders blank rather than `0`.
+ *
+ * In practice the live API fills every unsent count with `0` (verified in the S1c
+ * smoke: a create passing only `--comments-count`/`--commits-count` came back with the
+ * other four at `0`, while the unsent `merged_at` came back absent). So this branch is
+ * defensive, not routine — it exists so a future shape that genuinely omits a count is
+ * not reported as "zero comments", which is a different claim.
+ */
 function countCell(value: number | undefined): string {
   return value === undefined ? '' : String(value);
 }

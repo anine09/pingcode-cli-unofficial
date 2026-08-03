@@ -116,9 +116,13 @@ describe('scm command surface', () => {
    * would still pass if `pr replace` were spelled `pr overwrite-all`. These two are the
    * last `PUT`s in the module, and the pull request's is the most tempting to wrap,
    * because a caller who wants to change several fields at once will read `PUT` as "the
-   * bulk update". It is not: it makes `source_branch_id` **required** where `POST`
-   * leaves it optional, so a replacement that omits a source branch is rejected while
-   * one that omits a description silently clears it.
+   * bulk update". It is not: a replacement that omits a description silently clears it,
+   * which is the whole reason D8.4 keeps every `PUT` out of the refined layer.
+   *
+   * An earlier revision of this comment made a sharper claim — that `PUT` promotes
+   * `source_branch_id` to required where `POST` leaves it optional. The S1c live smoke
+   * falsified it: `POST` requires that field too (`100224`), so the two verbs agree and
+   * the general "replacement blanks what you omit" argument is the one that carries.
    */
   it('offers no replace leaf for the pull request or the code review either', () => {
     const leaves = leavesOf('scm');
@@ -280,6 +284,48 @@ describe('scm command surface', () => {
     expect(flowingHelp(['scm', 'commit', 'create'])).toContain(
       'unlike branch --sender this creates no platform user',
     );
+  });
+
+  it('carries the same upsert warning on the three pull-request and review name fields', () => {
+    // S1c smoke (design D13.1 item 3): `creator_name`, `merged_by_name` and
+    // `reviewer_name` all upsert a platform user, verified in one call by passing two
+    // distinguishable unknown names and watching both appear. Every entry point that can
+    // mint a permanent identity has to say so, or the warning on `branch create` reads as
+    // if it were the only one.
+    expect(flowingHelp(['scm', 'pr', 'create'])).toContain(
+      'an UNKNOWN name is CREATED as a platform user',
+    );
+    expect(flowingHelp(['scm', 'review', 'create'])).toContain(
+      'an UNKNOWN name is CREATED as a platform user',
+    );
+    // …including on the update paths, which can set the same fields.
+    expect(flowingHelp(['scm', 'pr', 'update'])).toContain(
+      'an UNKNOWN name is CREATED as a platform user',
+    );
+    expect(flowingHelp(['scm', 'review', 'update'])).toContain(
+      'an UNKNOWN name is CREATED as a platform user',
+    );
+  });
+
+  it('requires both branch ids on pr create, because the live API requires both', () => {
+    // The catalog says `source_branch_id` is optional on POST; the server says
+    // `100224 源分支是必填字段` (S1c smoke). Live wins, so the flag is required rather
+    // than being an optional flag that can never be omitted successfully.
+    const help = helpFor(['scm', 'pr', 'create']);
+    expect(help).toContain('--source-branch-id');
+    expect(help).toContain('--target-branch-id');
+    const usage = help.split('\n')[0] ?? '';
+    expect(usage).not.toContain('[options]?');
+    // Both appear above the optional block, i.e. commander lists them as required.
+    expect(optionsOf(['scm', 'pr', 'create'])).toContain('--source-branch-id');
+  });
+
+  it('says an unknown --pr-id reads as an empty review list rather than an error', () => {
+    // The one scm child list that hides a missing parent: GET
+    // …/pull_requests/{unknown}/reviews returns 200 with no rows, where a missing
+    // platform or repository yields 100200/100202 (S1c smoke). Silence is the failure
+    // mode here, so the help has to name it.
+    expect(flowingHelp(['scm', 'review', 'list'])).toContain('empty list');
   });
 
   it('says the commit reference may be a SHA, and that an abbreviated one is not', () => {

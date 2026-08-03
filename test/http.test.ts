@@ -498,6 +498,13 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100201': 'not_found',
       '100206': 'not_found',
       '100207': 'not_found',
+      // S1c: 拉取请求 / 代码评审, completing the module (S1c smoke, 2026-08-03, design
+      // D13.1 item 5). `100208` was observed on GET, PATCH *and* on a POST of a review
+      // under an unknown pull request; `100222` on GET and PATCH, including a real
+      // review id addressed under the wrong pull request.
+      // Behaviour is asserted through the wrappers in `test/scm.test.ts`.
+      '100208': 'not_found',
+      '100222': 'not_found',
     });
   });
 

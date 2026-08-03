@@ -236,11 +236,12 @@ record a pull request (the number must be unique in the repository)
 Options:
   --title <text>               pull request title
   --number <n>                 pull request number, unique within the repository
-  --creator <git-username>     author git username — create the identity first with \`scm
-                               platform-user create\`
+  --creator <git-username>     author git username — an UNKNOWN name is CREATED as a platform user,
+                               and platform users cannot be deleted
   --target-branch-id <id>      target branch id, from \`scm branch list --json\` — an id, not a name
   --status <status>            pull request status, one of: open | closed | merged | abandoned
-  --source-branch-id <id>      source branch id — optional here, unlike on the API’s PUT
+  --source-branch-id <id>      source branch id — required by the API, and it must differ from the
+                               target
   --description <text>         description
   --work-item <identifier>     work item identifier such as PLM-001, repeatable — an unknown one is
                                silently ignored by the API
@@ -252,7 +253,9 @@ Options:
   --merged-at <when>           merge time: unix seconds or a date — required by the API when
                                --status merged
   --merged-commit-sha <sha>    the merge commit SHA — required by the API when --status merged
-  --merged-by <git-username>   who merged it — required by the API when --status merged
+  --merged-by <git-username>   who merged it — required by the API when --status merged; an UNKNOWN
+                               name is CREATED as a platform user, and platform users cannot be
+                               deleted
   --comments-count <n>         number of comments on the pull request
   --review-comments-count <n>  number of code-review comments
   --commits-count <n>          number of commits
@@ -276,7 +279,8 @@ Options:
                                the CURRENT status is read back and re-sent, because the API
                                requires this field on every patch
   --title <text>               new title
-  --creator <git-username>     new author git username
+  --creator <git-username>     new author git username — an UNKNOWN name is CREATED as a platform
+                               user, and platform users cannot be deleted
   --description <text>         new description (replaces the old one)
   --source-branch-id <id>      new source branch id
   --target-branch-id <id>      new target branch id
@@ -290,7 +294,9 @@ Options:
   --merged-at <when>           merge time: unix seconds or a date — required by the API when
                                --status merged
   --merged-commit-sha <sha>    the merge commit SHA — required by the API when --status merged
-  --merged-by <git-username>   who merged it — required by the API when --status merged
+  --merged-by <git-username>   who merged it — required by the API when --status merged; an UNKNOWN
+                               name is CREATED as a platform user, and platform users cannot be
+                               deleted
   --comments-count <n>         number of comments on the pull request
   --review-comments-count <n>  number of code-review comments
   --commits-count <n>          number of commits
@@ -385,7 +391,8 @@ Options:
 
 Commands:
   list [options]             list the code reviews of ONE pull request — the API offers no
-                             repository-wide list
+                             repository-wide list; an unknown --pr-id reads as an empty list, not
+                             an error
   get [options] <review>     show one code review
   create [options]           record a code review on a pull request
   update [options] <review>  patch a code review — only the fields you pass are sent
@@ -400,8 +407,8 @@ record a code review on a pull request
 
 Options:
   --status <status>           review status, one of: comment | approved | request_changes
-  --reviewer <git-username>   reviewer git username — create the identity first with \`scm
-                              platform-user create\`
+  --reviewer <git-username>   reviewer git username — an UNKNOWN name is CREATED as a platform
+                              user, and platform users cannot be deleted
   --submitted-at <when>       when the review was submitted: unix seconds or a date like
                               2026-08-03T09:00:00Z (required — a review carries no server-side
                               timestamp)
@@ -428,7 +435,8 @@ Arguments:
 
 Options:
   --status <status>           new status, one of: comment | approved | request_changes
-  --reviewer <git-username>   new reviewer git username
+  --reviewer <git-username>   new reviewer git username — an UNKNOWN name is CREATED as a platform
+                              user
   --submitted-at <when>       new submission time: unix seconds or a date
   --description <text>        new review body (replaces the old one)
   --html-url <url>            new link back to the hosting platform

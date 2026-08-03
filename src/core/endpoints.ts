@@ -407,18 +407,27 @@ export const ENDPOINTS = {
   //     pull request, reachable only under `…/pull_requests/{id}/reviews`. They share
   //     no id space and no field set. Do not "unify" them.
   //  2. **Both families keep their `PUT` out of the refined layer** (D8.4), so each
-  //     contributes four leaves, not five. `PUT …/pull_requests/{id}` additionally
-  //     makes `source_branch_id` **required** where `POST` leaves it optional, which is
-  //     exactly the "replacement blanks what you omit" hazard the exclusion exists for.
+  //     contributes four leaves, not five. The exclusion rests on the general rule that
+  //     a replacement blanks every field you do not send — **not**, as an earlier
+  //     revision of this comment claimed, on `PUT` promoting `source_branch_id` to
+  //     required where `POST` leaves it optional. The S1c smoke falsified that: `POST`
+  //     requires `source_branch_id` too (`100224 源分支是必填字段`, at every status), so
+  //     the catalog's `required: false` for it is wrong and the CLI marks the flag
+  //     required. Source and target must also differ (`100211`).
   //  3. **`PATCH …/pull_requests/{id}` requires `status`** — the only PATCH in scm with
   //     a mandatory field ([S§3.12.5]; the review PATCH has none). A partial update
   //     that only changes the title therefore cannot be expressed as one request, so
   //     the command layer re-reads the pull request and re-emits its current status,
-  //     the same read-modify-write testhub's run patch settled on ([TH§7]).
+  //     the same read-modify-write testhub's run patch settled on ([TH§7]). Confirmed
+  //     live: a status-less PATCH answers `100008 'status'是必填字段`, and the resulting
+  //     PATCH is genuinely partial — untouched counts and work-item links survive it.
   //  4. **A review is addressed under its pull request, so its path has three parents**
   //     (platform, repository, pull request) — the deepest path in the CLI. There is no
   //     org-wide or repository-wide review list: reviews are enumerated one pull
-  //     request at a time, exactly as refs are enumerated one branch at a time.
+  //     request at a time, exactly as refs are enumerated one branch at a time. Note
+  //     that `GET …/pull_requests/{unknown}/reviews` returns **200 with an empty list**
+  //     rather than a not-found code — the one scm child list that hides a missing
+  //     parent (a missing platform or repository still yields `100200`/`100202`).
   //
   // Field shapes worth knowing before writing a command (docs + the shipped examples;
   // read/write asymmetries follow the module's usual pattern):
@@ -433,10 +442,19 @@ export const ENDPOINTS = {
   //    that shipped before it.
   //  - `number` is unique per repository and is the only human-readable key a pull
   //    request has (there is no `identifier` and no `short_id`), which is why the list
-  //    exposes `?number=`.
+  //    exposes `?number=`. That filter is **real and exact** (S1c smoke: two pull
+  //    requests, `?number=` returned exactly the matching one and zero rows for an
+  //    unused number) — unlike the repository list's `?name=`, which is silently
+  //    ignored (D11.2). `?work_item_id=` filters too, and rejects an unknown id with
+  //    `100317`, which already maps to exit 5.
   //  - `merged_at` / `merged_commit_sha` / `merged_by_name` are documented as required
-  //    **when `status` is `merged`** — a conditional the docs state and the CLI passes
-  //    through rather than second-guessing.
+  //    **when `status` is `merged`**, and the server does enforce it: omitting them
+  //    answers `100212 请提供'merged_at'，'merged_commit_sha'，'merged_by_name'值`. The
+  //    CLI passes the conditional through rather than second-guessing it.
+  //  - `creator_name`, `merged_by_name` and `reviewer_name` all **upsert** a platform
+  //    user, so an unknown git username silently becomes a permanent identity (scm has
+  //    no user DELETE). Verified live for all three; a commit's `committer_name` does
+  //    **not**, because that path carries no platform (D12.1).
   //  - a review's `submitted_at` is required on create; there is no `created_at` on the
   //    resource, so it is the only time a review carries.
   //

@@ -332,6 +332,35 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   '100201': 'not_found',
   '100206': 'not_found',
   '100207': 'not_found',
+  // S1c (08-02-full-api-coverage) scm smoke, 2026-08-03, live tenant — 拉取请求 /
+  // 代码评审, closing the module (design D13.1 item 5). Both HTTP **400**:
+  //   100208 "'pull request'资源不存在" — GET and PATCH
+  //     …/repositories/{repo}/pull_requests/{unknown 24-hex}, and again on
+  //     POST …/pull_requests/{unknown}/reviews, where the pull request the path
+  //     *names* is the thing that is absent. Three verbs, one code, one meaning.
+  //   100222 "'review'资源不存在"      — GET and PATCH
+  //     …/pull_requests/{pr}/reviews/{unknown 24-hex}, and also for a review id that
+  //     exists but hangs off a *different* pull request — the review really is not at
+  //     the address given, so exit 5 is precise there too.
+  // Same shape as the six scm rows above and the reason they were admitted: one stable
+  // per-resource "this record is absent" code, identical across verbs. Without these a
+  // missing pull request exited 7 while a missing branch exited 5, for the same mistake
+  // (the inconsistency design D13.4 recorded while the credentials were unavailable).
+  //
+  // Deliberately **not** mapped, from the same smoke:
+  //  - `100224` (`源分支是必填字段`) and `100008` (`'status'是必填字段`) — missing required
+  //    body fields on POST/PATCH. Input validation, not absence.
+  //  - `100212` (`请提供'merged_at'，'merged_commit_sha'，'merged_by_name'值`) — the
+  //    conditional the docs describe, enforced server-side when `status` is `merged`.
+  //  - `100211` (`源分支和目标分支不能相同`) — a business-rule refusal: both branches
+  //    exist. Judged exactly as `100223` (默认分支不能被删除) was.
+  //  - `100003` (`'source_branch_id'不是有效的字符串(值不能为空)`) — input validation.
+  // Note also that a *missing* pull request is reported only on the review **detail**
+  // paths: `GET …/pull_requests/{unknown}/reviews` answers **HTTP 200 with an empty
+  // list** instead of `100208`, so no override can make that case exit 5 (documented in
+  // `scm/review.ts` and modules/scm.md rather than papered over here).
+  '100208': 'not_found',
+  '100222': 'not_found',
 };
 
 const NOT_FOUND_HINT =

@@ -67,7 +67,21 @@ import { addRepoOptions, oneLine, requireRepoScope, type RepoScope } from './bra
  *  - **`--submitted-at` is required on create.** A review has no server-assigned
  *    timestamp at all — no `created_at`, no `updated_at` — so the caller replaying a
  *    review event owns the time outright. On `update` it is optional, like everything
- *    else: unlike `scm pr update`, this PATCH has no mandatory field.
+ *    else: unlike `scm pr update`, this PATCH has no mandatory field (verified live).
+ *
+ * ⚠️ **`--reviewer` upserts.** A git username the platform does not know is **created**
+ * as a platform user, so a typo leaves a permanent ghost identity — platform users have
+ * no DELETE anywhere in scm. Confirmed live (design D13.1 item 3), and the same hazard
+ * as `scm branch create --sender` and `scm pr create --creator`.
+ *
+ * ⚠️ **A wrong `--pr-id` reads as "no reviews", not as an error.** `GET
+ * …/pull_requests/{unknown}/reviews` answers **HTTP 200 with an empty list** rather than
+ * the `100208` it returns on the detail paths — the pull request is the one scm parent
+ * whose absence a child *list* does not report (a missing platform or repository does
+ * yield `100200`/`100202`). So an empty `review list` means "either no reviews, or that
+ * pull request does not exist"; confirm the id with `scm pr get <id>` if it matters.
+ * `review get` and `review create` are unaffected: both surface a missing pull request
+ * as exit 5.
  *
  * There is **no `delete`** (upstream offers none, as everywhere in scm but 代码分支) and
  * **no `replace`**: `PUT …/reviews/{id}` exists upstream and is excluded by design
@@ -155,7 +169,8 @@ export function registerReviewCommands(parent: Command): void {
         group
           .command('list')
           .description(
-            'list the code reviews of ONE pull request — the API offers no repository-wide list',
+            'list the code reviews of ONE pull request — the API offers no repository-wide list; ' +
+              'an unknown --pr-id reads as an empty list, not an error',
           ),
       ),
     ),
@@ -181,7 +196,8 @@ export function registerReviewCommands(parent: Command): void {
         .requiredOption('--status <status>', `review status, one of: ${REVIEW_STATUSES}`)
         .requiredOption(
           '--reviewer <git-username>',
-          'reviewer git username — create the identity first with `scm platform-user create`',
+          'reviewer git username — an UNKNOWN name is CREATED as a platform user, and ' +
+            'platform users cannot be deleted',
         )
         .requiredOption(
           '--submitted-at <when>',
@@ -203,7 +219,10 @@ export function registerReviewCommands(parent: Command): void {
         .description('patch a code review — only the fields you pass are sent')
         .argument('<review>', REVIEW_HELP)
         .option('--status <status>', `new status, one of: ${REVIEW_STATUSES}`)
-        .option('--reviewer <git-username>', 'new reviewer git username')
+        .option(
+          '--reviewer <git-username>',
+          'new reviewer git username — an UNKNOWN name is CREATED as a platform user',
+        )
         .option('--submitted-at <when>', 'new submission time: unix seconds or a date')
         .option('--description <text>', 'new review body (replaces the old one)')
         .option('--html-url <url>', 'new link back to the hosting platform'),
