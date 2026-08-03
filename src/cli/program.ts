@@ -1,11 +1,7 @@
 import { Command } from 'commander';
 import { VERSION } from '../version';
-import { registerAuthCommands } from './commands/auth';
-import { registerProductCommands } from './commands/product';
-import { registerProjectCommands } from './commands/project';
-import { registerSettingsCommands } from './commands/settings';
-import { registerTesthubCommands } from './commands/testhub';
 import { addGlobalOptions } from './globals';
+import { GROUPS } from './registry';
 
 /**
  * Global flags, as parsed by commander. `--no-cache` yields `cache: false`.
@@ -28,6 +24,10 @@ export const HELP_WIDTH = 100;
  * `exitOverride()` makes commander throw a `CommanderError` instead of calling
  * `process.exit()`, so `bin/pingcode.ts` owns every exit code (design §5.2).
  * The setting is inherited by subcommands via commander's `copyInheritedSettings`.
+ *
+ * The group list itself lives in `cli/registry.ts` and is iterated here, so adding a
+ * command group is one row in that file and touches nothing else (design D6.2).
+ * Registration order is `GROUPS` order, and it is the order `--help` prints.
  */
 export function buildProgram(): Command {
   const program = new Command();
@@ -48,12 +48,7 @@ export function buildProgram(): Command {
       'Agents: prefer --json (stdout is JSON only) and run --dry-run before any write.\n',
   );
 
-  registerAuthCommands(program);
-  registerProductCommands(program);
-  registerProjectCommands(program);
-  // 产品管理 / 项目管理 / 测试管理 / 后台设置 — the GUI's own module order.
-  registerTesthubCommands(program);
-  registerSettingsCommands(program);
+  for (const [, register] of GROUPS) register(program);
 
   return program;
 }
