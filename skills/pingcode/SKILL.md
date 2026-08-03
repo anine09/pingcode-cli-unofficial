@@ -4,12 +4,12 @@ description: >-
   Use the `pingcode` CLI to work with PingCode (研发管理): 敏捷项目管理 (pjm) projects and work items —
   list and search work items (工作项), read a story/task/bug (需求/任务/缺陷), create one, update fields,
   move it to another state (状态流转) — 产品管理 (ship) products, requirements (需求 / idea) and
-    tickets (工单): search, read, create, update and transition them — and 测试管理 (testhub) test
+  tickets (工单): search, read, create, update and transition them — and 测试管理 (testhub) test
   libraries (测试库), test cases (用例), test plans (测试计划) and runs (执行用例): create a library,
   search cases, read one, create and update a case, create a plan, record a run result, and bulk
   add/update/delete the runs of a plan. Also resolves project-, product- and library-scoped ids and
   organisation members (项目/产品/测试库/迭代/成员). Triggers: pingcode, PingCode 工作项,
- 创建任务, 更新状态, 迭代 sprint,
+  创建任务, 更新状态, 迭代 sprint,
   产品 需求 工单, 测试用例 测试计划 执行用例 测试库, SCR-5 or SLC-1 style identifiers, a work-item or
   idea URL from a PingCode instance. Do NOT use for Wiki pages, customers or external users, the
   org chart beyond a member lookup, Insight/Goals/Flow, or webhooks — none of those are covered by
