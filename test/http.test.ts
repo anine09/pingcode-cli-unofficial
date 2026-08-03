@@ -490,6 +490,14 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100200': 'not_found',
       '100202': 'not_found',
       '100209': 'not_found',
+      // S1b: 代码分支 / 提交 / 提交引用, same shape again — one stable "this record is
+      // absent" code per resource, consistent across verbs (S1b smoke, 2026-08-03,
+      // design D12.8). `100201` was observed on GET, PATCH, DELETE *and* on a
+      // POST …/refs whose meta_id names no branch; `100206` on GET by id and by SHA.
+      // Behaviour is asserted through the wrappers in `test/scm.test.ts`.
+      '100201': 'not_found',
+      '100206': 'not_found',
+      '100207': 'not_found',
     });
   });
 

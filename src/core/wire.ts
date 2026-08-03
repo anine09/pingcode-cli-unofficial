@@ -302,6 +302,36 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   '100200': 'not_found',
   '100202': 'not_found',
   '100209': 'not_found',
+  // S1b (08-02-full-api-coverage) scm smoke, 2026-08-03, live tenant — the same three
+  // facts as S1a, for 代码分支 / 提交 / 提交引用 (design D12.8). All HTTP **400**:
+  //   100201 "'branch'资源不存在"     — GET/PATCH/**DELETE** …/branches/{unknown 24-hex},
+  //                                    and also on POST …/refs when `meta_id` names no
+  //                                    branch. Four verbs, one code, one meaning.
+  //   100206 "'commit'资源不存在"     — GET /v1/scm/commits/{unknown} for **both** an
+  //                                    unknown 24-hex id and an unknown full 40-hex
+  //                                    SHA, and on POST …/refs when `sha` names no
+  //                                    commit.
+  //   100207 "'reference'资源不存在"  — GET …/refs/{unknown 24-hex}
+  // On the two `POST …/refs` paths exit 5 is precise rather than incidental: the row
+  // the request *named* genuinely does not exist, which is a different failure from
+  // "the create was rejected".
+  //
+  // Deliberately **not** mapped, from the same smoke:
+  //  - `100217` / `100214` / `100215` (`'branch'|'commit'|'ref'已经存在`) — uniqueness
+  //    conflicts, judged exactly as S1a judged `100220`.
+  //  - `100005` (`'is_default'不是有效的布尔值(值不为true)`) — input validation: PATCH
+  //    accepts only `true`, and the CLI's `--default` switch cannot even express the
+  //    rejected call.
+  //  - `100223` (`默认分支不能被删除`) — a **business-rule refusal**, not an absence:
+  //    the branch exists and the user can see it in `scm branch list`. Calling that
+  //    `not_found` would send an agent hunting for a row it is looking at, the same
+  //    reasoning that keeps ship's `100719`/`100702` on exit 7. `scm branch delete`
+  //    appends the actionable explanation instead.
+  //  - `100000` (`内部服务错误`) — a genuine HTTP **500**, seen when listing the refs of
+  //    an already-deleted branch (D12.5). A server fault must keep its 500.
+  '100201': 'not_found',
+  '100206': 'not_found',
+  '100207': 'not_found',
 };
 
 const NOT_FOUND_HINT =

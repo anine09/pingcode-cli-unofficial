@@ -1,17 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { parseScmPlatform, parseScmPlatformUser, parseScmRepository } from '../src/api/parse';
 import {
+  parseScmBranch,
+  parseScmCommit,
+  parseScmCommitRef,
+  parseScmPlatform,
+  parseScmPlatformUser,
+  parseScmRepository,
+} from '../src/api/parse';
+import {
+  createBranch,
+  createCommit,
+  createCommitRef,
   createPlatform,
   createPlatformUser,
   createRepository,
+  deleteBranch,
+  getBranch,
+  getCommit,
+  getCommitRef,
   getPlatform,
   getPlatformUser,
   getRepository,
+  iterateBranches,
+  iterateCommits,
   iteratePlatforms,
   iterateRepositories,
+  listBranches,
+  listCommitRefs,
+  listCommits,
   listPlatformUsers,
   listPlatforms,
   listRepositories,
+  REF_META_TYPE_BRANCH,
+  updateBranch,
   updatePlatform,
   updatePlatformUser,
   updateRepository,
@@ -37,6 +58,15 @@ import { createFakeFetch, createTestContext, jsonResponse } from './helpers/fake
  * wrapper exists in `api/scm.ts`, because design D8.4 keeps every `PUT` in the
  * generic layer. It lives with the wrappers rather than with the help suite so that
  * "add the missing verb" fails at the layer where someone would actually add it.
+ *
+ * S1b appends 代码分支 / 提交 / 提交引用 below. Their assertions carry three shape facts
+ * that are easy to "tidy" into being wrong, so each is pinned:
+ *  - a commit's `committer_name` stays a **string** and is never promoted to a `Ref`
+ *    (the API creates no identity for it — design D12.1);
+ *  - `/v1/scm/commits` takes **no platform id**, so its wrappers have no platform
+ *    argument to accidentally grow;
+ *  - `deleteBranch` is the module's only delete, and `updateBranch`'s `is_default` is
+ *    typed `true` because the server rejects `false` outright (D12.3).
  */
 
 const NOW = 1_700_000_000_000;
@@ -44,6 +74,11 @@ const NOW = 1_700_000_000_000;
 const PLATFORM = '68393e8b47512a5d5d4e5b55';
 const REPO = '685d393c47512a5d5d52aa70';
 const USER = '685c6ca42974f854bb4979ac';
+const BRANCH = '6a706a6d39cbed1cf7126c22';
+const COMMIT = '6a706a9a919cce9794f011a3';
+const REF = '6a706ac439cbed1cf7126c2d';
+/** A real 40-hex SHA: the one identifier this API shape-validates (design D12.2). */
+const SHA = 'e35cc1ed300bfe85da6d6b8108ddb33d28b26ae5';
 
 function ctxFor(responses: Array<() => Response>, options: { dryRun?: boolean } = {}) {
   const fake = createFakeFetch(responses);
@@ -75,6 +110,27 @@ describe('scm endpoint paths', () => {
     );
   });
 
+  it('nests branches and refs under the repository, and commits under nothing', () => {
+    expect(ENDPOINTS.scmBranches(PLATFORM, REPO)).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/branches`,
+    );
+    expect(ENDPOINTS.scmBranch(PLATFORM, REPO, BRANCH)).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/branches/${BRANCH}`,
+    );
+    expect(ENDPOINTS.scmRefs(PLATFORM, REPO)).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/refs`,
+    );
+    expect(ENDPOINTS.scmRef(PLATFORM, REPO, REF)).toBe(
+      `/v1/scm/products/${PLATFORM}/repositories/${REPO}/refs/${REF}`,
+    );
+
+    // 提交 is organisation-level: no platform, no repository (design D12.6). If this
+    // ever grows a parent segment, every `scm commit` leaf's flag surface is wrong.
+    expect(ENDPOINTS.scmCommits).toBe('/v1/scm/commits');
+    expect(ENDPOINTS.scmCommit(SHA)).toBe(`/v1/scm/commits/${SHA}`);
+    expect(ENDPOINTS.scmCommit(COMMIT)).toBe(`/v1/scm/commits/${COMMIT}`);
+  });
+
   it('percent-encodes ids rather than trusting their shape', () => {
     // Ids are never validated (research §6.8), so a pasted value with a slash must
     // not be able to walk out of its path segment.
@@ -96,6 +152,12 @@ describe('scm endpoint paths', () => {
       '/v1/scm/products/{product_id}/users/{user_id}',
       '/v1/scm/products/{product_id}/repositories',
       '/v1/scm/products/{product_id}/repositories/{repository_id}',
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/branches',
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/branches/{branch_id}',
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/refs',
+      '/v1/scm/products/{product_id}/repositories/{repository_id}/refs/{ref_id}',
+      '/v1/scm/commits',
+      '/v1/scm/commits/{commit_id_or_sha}',
     ]) {
       expect(scmPaths, path).toContain(path);
     }
@@ -443,6 +505,408 @@ describe('scm not-found mapping (exit 5, from HTTP 400)', () => {
   });
 });
 
+describe('scm normalisation, part 2: branches / commits / refs (S1b)', () => {
+  it('parses a branch, keeping sender as a ref and work items as identifiers', () => {
+    const branch = parseScmBranch({
+      id: BRANCH,
+      name: 'cli-smoke/s1b-e2e',
+      product: { id: PLATFORM, name: '[CLI smoke] pingcode-cli', type: 'other' },
+      repository: { id: REPO, name: 'pingcode-cli-unofficial', full_name: 'acme/x' },
+      sender: { id: USER, name: 'cli-smoke-bot' },
+      is_default: false,
+      created_at: 1785750479,
+      work_items: [{ id: 'w1', identifier: 'YYHC-10', title: 'a story', type: 'story' }],
+      future_field: 'kept',
+    });
+
+    expect(branch.sender?.name).toBe('cli-smoke-bot');
+    expect(branch.repository?.id).toBe(REPO);
+    expect(branch.is_default).toBe(false);
+    // `identifier` is what a write sends back as `work_item_identifiers`, so it must
+    // survive as a real field rather than only through the index signature.
+    expect(branch.work_items[0]?.identifier).toBe('YYHC-10');
+    expect(branch.work_items[0]?.title).toBe('a story');
+    expect(branch.created_at).toBe(1785750479);
+    expect(branch.future_field).toBe('kept');
+  });
+
+  it('normalises a branch without work_items to [] rather than undefined', () => {
+    // Call sites join this array unconditionally; an absent field must not make them
+    // branch, exactly as `ShipProduct.members` and `WorkItem.tags` behave.
+    expect(parseScmBranch({ id: BRANCH }).work_items).toEqual([]);
+    expect(parseScmBranch({ id: BRANCH, work_items: 'nonsense' }).work_items).toEqual([]);
+  });
+
+  it('accepts is_default as 0/1 as well as a boolean', () => {
+    // The wire sends a real boolean today, but every other flag in this API arrives as
+    // 0/1 (research §6.10) and the docs only say `Boolean`.
+    expect(parseScmBranch({ id: BRANCH, is_default: 1 }).is_default).toBe(true);
+    expect(parseScmBranch({ id: BRANCH, is_default: 0 }).is_default).toBe(false);
+    expect(parseScmBranch({ id: BRANCH }).is_default).toBe(false);
+  });
+
+  it("keeps a commit's committer_name a string and never invents a reference", () => {
+    // Design D12.1: `POST /v1/scm/commits` has no platform in its path, so it creates
+    // no identity and returns no reference. Promoting this to a `Ref` would fabricate
+    // a link the data does not contain.
+    const commit = parseScmCommit({
+      id: COMMIT,
+      sha: SHA,
+      message: 'feat: x',
+      committer_name: 'cli-smoke-bot',
+      committed_at: 1785751200,
+      tree_id: null,
+      files_added: ['a.ts'],
+      files_removed: [],
+      files_modified: ['b.ts'],
+      file_changed_count: 2,
+      work_items: [{ id: 'w1', identifier: 'YYHC-10' }],
+    });
+
+    expect(commit.committer_name).toBe('cli-smoke-bot');
+    expect(commit.sender).toBeUndefined();
+    expect(commit.committer).toBeUndefined();
+    // `null` is normalised away by the shared parse layer.
+    expect(commit.tree_id).toBeUndefined();
+    expect(commit.files_added).toEqual(['a.ts']);
+    expect(commit.files_modified).toEqual(['b.ts']);
+    expect(commit.file_changed_count).toBe(2);
+    expect(commit.work_items[0]?.identifier).toBe('YYHC-10');
+  });
+
+  it('normalises the three commit file arrays to [] and drops unusable entries', () => {
+    const commit = parseScmCommit({ id: COMMIT, files_added: ['a.ts', '', null, 7] });
+    expect(commit.files_added).toEqual(['a.ts', '7']);
+    expect(commit.files_removed).toEqual([]);
+    expect(commit.files_modified).toEqual([]);
+  });
+
+  it('parses a ref, keeping the embedded commit summary and the branch meta', () => {
+    const ref = parseScmCommitRef({
+      id: REF,
+      product: { id: PLATFORM, name: 'p' },
+      repository: { id: REPO, name: 'r' },
+      commit: { id: COMMIT, sha: SHA, message: 'feat: x', committer_name: 'bot', committed_at: 1 },
+      meta: { id: BRANCH, name: 'cli-smoke/s1b-e2e', type: 'branch' },
+    });
+
+    expect(ref.meta?.name).toBe('cli-smoke/s1b-e2e');
+    expect(ref.meta?.type).toBe('branch');
+    // The embedded commit is a *summary* (no file arrays, no work_items), so it is a
+    // `Ref` and its extra fields survive through the index signature.
+    expect(ref.commit?.sha).toBe(SHA);
+    expect(ref.commit?.committer_name).toBe('bot');
+    expect(ref.commit?.files_added).toBeUndefined();
+  });
+});
+
+describe('branches api (S1b)', () => {
+  it('lists branches under the repository with the exact-name filter', async () => {
+    const { ctx, fake } = ctxFor([() => envelope([{ id: BRANCH, name: 'main' }])]);
+    await listBranches(ctx, PLATFORM, REPO, { name: 'main' }, { pageIndex: 0, pageSize: 30 });
+
+    expect(fake.calls[0]?.method).toBe('GET');
+    expect(fake.urls()[0]).toContain(`/v1/scm/products/${PLATFORM}/repositories/${REPO}/branches?`);
+    expect(fake.urls()[0]).toContain('name=main');
+  });
+
+  it('passes work_item_id through as a query filter', async () => {
+    const { ctx, fake } = ctxFor([() => envelope([])]);
+    await listBranches(ctx, PLATFORM, REPO, { work_item_id: 'w1' });
+    expect(fake.urls()[0]).toContain('work_item_id=w1');
+  });
+
+  it('walks every page of branches', async () => {
+    const { ctx } = ctxFor([
+      () => envelope([{ id: 'b1', name: 'one' }], { page_index: 0, page_size: 1 }),
+      () => envelope([], { page_index: 1, page_size: 1 }),
+    ]);
+    const values = await collect(iterateBranches(ctx, PLATFORM, REPO, {}, { pageSize: 1 }));
+    expect(values.map((branch) => branch.id)).toEqual(['b1']);
+  });
+
+  it('gets one branch', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: BRANCH, name: 'main' })]);
+    await getBranch(ctx, PLATFORM, REPO, BRANCH);
+    expect(fake.urls()[0]).toContain(`/branches/${BRANCH}`);
+  });
+
+  it('creates a branch and sends only the fields it was given', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: BRANCH })]);
+    await createBranch(ctx, PLATFORM, REPO, { name: 'feature/x', sender_name: 'bot' });
+
+    expect(fake.calls[0]?.method).toBe('POST');
+    expect(fake.calls[0]?.body).toEqual({ name: 'feature/x', sender_name: 'bot' });
+  });
+
+  it('lets create send is_default false, which only create accepts', async () => {
+    // Design D12.3: POST takes true or false; PATCH takes only true, and
+    // `UpdateBranchInput` is typed `true` so the rejected call cannot be written.
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: BRANCH })]);
+    await createBranch(ctx, PLATFORM, REPO, {
+      name: 'feature/x',
+      sender_name: 'bot',
+      is_default: false,
+      work_item_identifiers: ['YYHC-10'],
+    });
+    expect(fake.calls[0]?.body).toEqual({
+      name: 'feature/x',
+      sender_name: 'bot',
+      is_default: false,
+      work_item_identifiers: ['YYHC-10'],
+    });
+  });
+
+  it('patches a branch with PATCH, never PUT — this family has no PUT at all', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: BRANCH })]);
+    await updateBranch(ctx, PLATFORM, REPO, BRANCH, { is_default: true });
+
+    expect(fake.calls[0]?.method).toBe('PATCH');
+    expect(fake.calls[0]?.body).toEqual({ is_default: true });
+  });
+
+  it('sends an empty work_item_identifiers array, because [] is how you clear links', async () => {
+    // A replace-semantics field needs `[]` to reach the wire; `compact` only drops
+    // `undefined`, so this asserts the distinction survives.
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: BRANCH })]);
+    await updateBranch(ctx, PLATFORM, REPO, BRANCH, { work_item_identifiers: [] });
+    expect(fake.calls[0]?.body).toEqual({ work_item_identifiers: [] });
+  });
+
+  it('deletes a branch and returns the deleted row', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: BRANCH, name: 'gone' })]);
+    const deleted = await deleteBranch(ctx, PLATFORM, REPO, BRANCH);
+
+    expect(fake.calls[0]?.method).toBe('DELETE');
+    expect(fake.urls()[0]).toContain(`/branches/${BRANCH}`);
+    expect(deleted.name).toBe('gone');
+  });
+
+  it('sends no branch write under --dry-run, including the delete', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: BRANCH })], { dryRun: true });
+    await expect(deleteBranch(ctx, PLATFORM, REPO, BRANCH)).rejects.toBeInstanceOf(DryRunHalt);
+    await expect(
+      createBranch(ctx, PLATFORM, REPO, { name: 'x', sender_name: 'bot' }),
+    ).rejects.toBeInstanceOf(DryRunHalt);
+    expect(fake.calls).toHaveLength(0);
+  });
+});
+
+describe('commits api (S1b) — organisation-level', () => {
+  it('lists commits with no platform anywhere in the path', async () => {
+    const { ctx, fake } = ctxFor([() => envelope([{ id: COMMIT, sha: SHA }])]);
+    await listCommits(ctx, { sha: SHA }, { pageIndex: 0, pageSize: 2 });
+
+    expect(fake.urls()[0]).toContain('/v1/scm/commits?');
+    expect(fake.urls()[0]).not.toContain('/products/');
+    expect(fake.urls()[0]).toContain(`sha=${SHA}`);
+  });
+
+  it('walks every page of commits', async () => {
+    const { ctx } = ctxFor([
+      () => envelope([{ id: 'c1', sha: SHA }], { page_index: 0, page_size: 1 }),
+      () => envelope([], { page_index: 1, page_size: 1 }),
+    ]);
+    const values = await collect(iterateCommits(ctx, {}, { pageSize: 1 }));
+    expect(values.map((commit) => commit.id)).toEqual(['c1']);
+  });
+
+  it('gets a commit by id and by full SHA, passing both through verbatim', async () => {
+    // AC1: `{commit_id_or_sha}` really takes both, and nothing here inspects the shape.
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ id: COMMIT, sha: SHA }),
+      () => jsonResponse({ id: COMMIT, sha: SHA }),
+    ]);
+    await getCommit(ctx, COMMIT);
+    await getCommit(ctx, SHA);
+
+    // Asserted as a URL suffix: the reference is the last path segment and nothing
+    // follows it, which is what "verbatim" means here.
+    expect(fake.urls()[0]).toMatch(new RegExp(`/v1/scm/commits/${COMMIT}$`));
+    expect(fake.urls()[1]).toMatch(new RegExp(`/v1/scm/commits/${SHA}$`));
+  });
+
+  it('never validates or normalises the reference it is given', async () => {
+    // Ids come in three shapes and an abbreviated SHA is refused *by the server*
+    // (404 `100002`, live 2026-08-03). Refusing or rewriting it here would be the
+    // client-side id validation `quality-guidelines.md` forbids — so an abbreviated
+    // SHA, a mixed-case one and a slash all reach the wire untouched (percent-encoded).
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ id: COMMIT }),
+      () => jsonResponse({ id: COMMIT }),
+      () => jsonResponse({ id: COMMIT }),
+    ]);
+    await getCommit(ctx, 'e35cc1e');
+    await getCommit(ctx, SHA.toUpperCase());
+    await getCommit(ctx, 'a/b');
+
+    expect(fake.urls()[0]).toContain('/v1/scm/commits/e35cc1e');
+    expect(fake.urls()[1]).toContain(`/v1/scm/commits/${SHA.toUpperCase()}`);
+    expect(fake.urls()[2]).toContain('/v1/scm/commits/a%2Fb');
+  });
+
+  it('creates a commit, sending the three file arrays even when empty', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: COMMIT })]);
+    await createCommit(ctx, {
+      sha: SHA,
+      message: 'feat: x',
+      committer_name: 'bot',
+      committed_at: 1785751200,
+      files_added: [],
+      files_removed: [],
+      files_modified: [],
+    });
+
+    expect(fake.calls[0]?.method).toBe('POST');
+    expect(fake.calls[0]?.body).toEqual({
+      sha: SHA,
+      message: 'feat: x',
+      committer_name: 'bot',
+      committed_at: 1785751200,
+      files_added: [],
+      files_removed: [],
+      files_modified: [],
+    });
+  });
+});
+
+describe('commit refs api (S1b)', () => {
+  it('requires meta_type and meta_id on the list, because the endpoint does', async () => {
+    const { ctx, fake } = ctxFor([() => envelope([{ id: REF }])]);
+    await listCommitRefs(ctx, PLATFORM, REPO, {
+      meta_type: REF_META_TYPE_BRANCH,
+      meta_id: BRANCH,
+    });
+
+    expect(fake.urls()[0]).toContain(`/repositories/${REPO}/refs?`);
+    expect(fake.urls()[0]).toContain('meta_type=branch');
+    expect(fake.urls()[0]).toContain(`meta_id=${BRANCH}`);
+  });
+
+  it('gets one ref', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: REF })]);
+    await getCommitRef(ctx, PLATFORM, REPO, REF);
+    expect(fake.urls()[0]).toContain(`/refs/${REF}`);
+  });
+
+  it('creates a ref from a SHA plus a branch id', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: REF })]);
+    await createCommitRef(ctx, PLATFORM, REPO, {
+      sha: SHA,
+      meta_type: REF_META_TYPE_BRANCH,
+      meta_id: BRANCH,
+    });
+
+    expect(fake.calls[0]?.method).toBe('POST');
+    expect(fake.calls[0]?.body).toEqual({
+      sha: SHA,
+      meta_type: 'branch',
+      meta_id: BRANCH,
+    });
+  });
+
+  it('exposes no ref update and no ref delete, because upstream has neither', async () => {
+    const scm = (await import('../src/api/scm')) as Record<string, unknown>;
+    expect(Object.keys(scm).filter((name) => /Ref$/.test(name) && /^(update|delete)/.test(name)))
+      .toEqual([]);
+  });
+});
+
+describe('scm not-found mapping, part 2 (S1b: exit 5 from HTTP 400)', () => {
+  async function failing(
+    code: string,
+    message: string,
+    call: (ctx: ReturnType<typeof ctxFor>['ctx']) => Promise<unknown>,
+  ) {
+    const { ctx } = ctxFor([() => jsonResponse({ code, message }, { status: 400 })]);
+    return await call(ctx).catch((error: unknown) => error);
+  }
+
+  it('maps a missing branch (100201) to exit 5 on GET, PATCH and DELETE alike', async () => {
+    for (const call of [
+      (ctx: ReturnType<typeof ctxFor>['ctx']) => getBranch(ctx, PLATFORM, REPO, BRANCH),
+      (ctx: ReturnType<typeof ctxFor>['ctx']) =>
+        updateBranch(ctx, PLATFORM, REPO, BRANCH, { is_default: true }),
+      (ctx: ReturnType<typeof ctxFor>['ctx']) => deleteBranch(ctx, PLATFORM, REPO, BRANCH),
+    ]) {
+      expect(await failing('100201', "'branch'资源不存在", call)).toMatchObject({
+        kind: 'not_found',
+        exitCode: 5,
+        code: '100201',
+      });
+    }
+  });
+
+  it('maps a missing commit (100206) to exit 5, whether addressed by id or by SHA', async () => {
+    for (const reference of [COMMIT, SHA]) {
+      expect(
+        await failing('100206', "'commit'资源不存在", (ctx) => getCommit(ctx, reference)),
+      ).toMatchObject({ kind: 'not_found', exitCode: 5, code: '100206' });
+    }
+  });
+
+  it('maps a missing reference (100207) to exit 5', async () => {
+    expect(
+      await failing('100207', "'reference'资源不存在", (ctx) =>
+        getCommitRef(ctx, PLATFORM, REPO, REF),
+      ),
+    ).toMatchObject({ kind: 'not_found', exitCode: 5, code: '100207' });
+  });
+
+  it('maps the same two codes on ref create, where they name the absent row', async () => {
+    // A create that fails because the commit or branch it *named* does not exist is a
+    // not-found about that row, not a generic rejection (design D12.8).
+    const create = (ctx: ReturnType<typeof ctxFor>['ctx']) =>
+      createCommitRef(ctx, PLATFORM, REPO, {
+        sha: SHA,
+        meta_type: REF_META_TYPE_BRANCH,
+        meta_id: BRANCH,
+      });
+
+    expect(await failing('100206', "'commit'资源不存在", create)).toMatchObject({
+      kind: 'not_found',
+      exitCode: 5,
+    });
+    expect(await failing('100201', "'branch'资源不存在", create)).toMatchObject({
+      kind: 'not_found',
+      exitCode: 5,
+    });
+  });
+
+  it('leaves the conflicts, the validation and the default-branch refusal on exit 7', async () => {
+    // Deliberately not overridden (design D12.8): a duplicate is not an absence, an
+    // `is_default` rejection is input validation, and `100223` refuses to delete a
+    // branch that plainly exists — calling any of them `not_found` would send an agent
+    // looking for a row it can already see.
+    const cases: [string, string, (ctx: ReturnType<typeof ctxFor>['ctx']) => Promise<unknown>][] = [
+      ['100217', "'branch'已经存在", (ctx) => createBranch(ctx, PLATFORM, REPO, { name: 'x', sender_name: 'b' })],
+      ['100214', "'commit'已经存在", (ctx) =>
+        createCommit(ctx, {
+          sha: SHA,
+          message: 'm',
+          committer_name: 'b',
+          committed_at: 1,
+          files_added: [],
+          files_removed: [],
+          files_modified: [],
+        })],
+      ['100215', "'ref'已经存在", (ctx) =>
+        createCommitRef(ctx, PLATFORM, REPO, { sha: SHA, meta_type: 'branch', meta_id: BRANCH })],
+      ['100005', "'is_default'不是有效的布尔值(值不为true)", (ctx) =>
+        updateBranch(ctx, PLATFORM, REPO, BRANCH, { is_default: true })],
+      ['100223', '默认分支不能被删除', (ctx) => deleteBranch(ctx, PLATFORM, REPO, BRANCH)],
+    ];
+
+    for (const [code, message, call] of cases) {
+      expect(await failing(code, message, call), code).toMatchObject({
+        kind: 'api',
+        exitCode: 7,
+        code,
+      });
+    }
+  });
+});
+
 describe('no PUT reaches the refined layer (design D8.4)', () => {
   it('exposes no replace wrapper for the three families that document one', async () => {
     const scm = (await import('../src/api/scm')) as Record<string, unknown>;
@@ -459,5 +923,23 @@ describe('no PUT reaches the refined layer (design D8.4)', () => {
     expect(puts).toContain('/v1/scm/products/{product_id}');
     expect(puts).toContain('/v1/scm/products/{product_id}/users/{user_id}');
     expect(puts).toContain('/v1/scm/products/{product_id}/repositories/{repository_id}');
+  });
+
+  it('confirms the branch family has no PUT upstream either, only a DELETE', () => {
+    // Design D12: 代码分支 is the one scm family shaped the other way round. Asserted so
+    // that "the other five have a PUT, this one is missing it" cannot be acted on — and
+    // so that the delete wrapper is understood as the family's fifth verb, not as the
+    // start of a set the other families should grow.
+    const branchPath = '/v1/scm/products/{product_id}/repositories/{repository_id}/branches/{branch_id}';
+    const methods = CATALOG.filter((entry) => entry.path === branchPath)
+      .map((entry) => entry.method)
+      .sort();
+    expect(methods).toEqual(['DELETE', 'GET', 'PATCH']);
+
+    const scmPuts = CATALOG.filter((entry) => entry.module === 'scm' && entry.method === 'PUT');
+    expect(scmPuts.some((entry) => entry.path.includes('/branches'))).toBe(false);
+    // And no scm family has both, so `deleteBranch` stays the module's only delete.
+    const scmDeletes = CATALOG.filter((entry) => entry.module === 'scm' && entry.method === 'DELETE');
+    expect(scmDeletes.map((entry) => entry.path)).toEqual([branchPath]);
   });
 });

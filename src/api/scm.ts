@@ -2,11 +2,21 @@ import type { Ctx } from '../core/context';
 import { ENDPOINTS } from '../core/endpoints';
 import { request } from '../core/http';
 import type { Page, PageRequest, PaginateOptions } from '../core/paginate';
-import type { ScmPlatform, ScmPlatformUser, ScmRepository } from '../types/api';
+import type {
+  ScmBranch,
+  ScmCommit,
+  ScmCommitRef,
+  ScmPlatform,
+  ScmPlatformUser,
+  ScmRepository,
+} from '../types/api';
 import {
   compact,
   fetchPageOf,
   iterateOf,
+  parseScmBranch,
+  parseScmCommit,
+  parseScmCommitRef,
   parseScmPlatform,
   parseScmPlatformUser,
   parseScmRepository,
@@ -27,10 +37,22 @@ import {
  *    to — the path carries it, so there is no org-wide variant to fall back on.
  *  - **The area is 企业令牌-only.** No wrapper here works with a user token, which
  *    is fine: `client_credentials` is the only flow this CLI has.
- *  - **No `PUT`, and no `DELETE` either.** The `PUT` of each family is excluded by
- *    design (D8.4: full replacement blanks omitted fields) and reachable only as
- *    `pingcode api PUT …`. `DELETE` simply does not exist upstream for these three
- *    families, so — as with ship — no delete wrapper can be added later.
+ *  - **No `PUT`.** The `PUT` of each family that has one is excluded by design
+ *    (D8.4: full replacement blanks omitted fields) and reachable only as
+ *    `pingcode api PUT …`.
+ *
+ * S1b adds 代码分支, 提交 and 提交引用, and each of them bends one of the rules above:
+ *
+ *  - **代码分支 has a `DELETE` and no `PUT`** — the exact mirror of the other five
+ *    families. So `deleteBranch` below is the module's only delete wrapper, and it is
+ *    not the start of a set: nothing else here can grow one.
+ *  - **提交 is not platform-scoped at all.** `/v1/scm/commits` carries no
+ *    `product_id`, so its three wrappers take no platform argument. It is the one
+ *    org-level resource in the module.
+ *  - **提交引用's list is not optional-filtered**: `meta_type` and `meta_id` are
+ *    both *required* query parameters, which is why `ScmRefListQuery` has no
+ *    optional fields and `listCommitRefs` takes it as a positional rather than
+ *    defaulting it to `{}`.
  *
  * Nothing here formats or resolves: names become ids in `core/metadata`, rendering
  * happens in `cli/`.
@@ -326,4 +348,312 @@ export async function updateRepository(
     body: compact(patch),
   });
   return parseScmRepository(raw);
+}
+
+// ---------------------------------------------------------------------------
+// 代码分支 branches (S1b)
+// ---------------------------------------------------------------------------
+
+export type BranchListQuery = {
+  /**
+   * **Exact, case-insensitive** match on the branch name, and genuinely honoured —
+   * unlike the repository list's `name`, which the server ignores (D11.2). Branch
+   * names are unique per repository, so this is a complete name→id lookup in one
+   * request, which is why branches need no resolver row (design D12.7).
+   */
+  name?: string | undefined;
+  /** Only branches linked to this work item **id** (not its identifier). */
+  work_item_id?: string | undefined;
+};
+
+/**
+ * Required: `name` (unique in the repository), `sender_name`.
+ *
+ * ⚠️ **`sender_name` is an upsert.** An unknown git username is not rejected — the
+ * server creates a 托管平台用户 for it (live 2026-08-03), and scm exposes no identity
+ * `DELETE`, so a typo leaves a permanent row behind. Callers should create the
+ * identity deliberately with `createPlatformUser` first.
+ */
+export type CreateBranchInput = {
+  name: string;
+  sender_name: string;
+  /** Accepted as `true` **or** `false` here; `PATCH` takes only `true`. */
+  is_default?: boolean | undefined;
+  /** Work item **identifiers** (`PLM-001`), not ids. Unknown ones are silently dropped. */
+  work_item_identifiers?: string[] | undefined;
+};
+
+/**
+ * The only two patchable fields, and `is_default` is really an *action*: the server
+ * rejects `false` outright (400 `100005`) and setting `true` clears the flag on
+ * whichever branch held it. Typed as `true` rather than `boolean` so the impossible
+ * call does not type-check.
+ */
+export type UpdateBranchInput = {
+  is_default?: true | undefined;
+  /** Replaces the whole link set; `[]` clears it. */
+  work_item_identifiers?: string[] | undefined;
+};
+
+export async function listBranches(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  query: BranchListQuery = {},
+  page: PageRequest = {},
+): Promise<Page<ScmBranch>> {
+  return await fetchPageOf(
+    ctx,
+    ENDPOINTS.scmBranches(platformId, repositoryId),
+    { ...query },
+    page,
+    parseScmBranch,
+  );
+}
+
+export function iterateBranches(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  query: BranchListQuery = {},
+  options: PaginateOptions = {},
+): AsyncGenerator<ScmBranch, void, undefined> {
+  return iterateOf(
+    ctx,
+    ENDPOINTS.scmBranches(platformId, repositoryId),
+    { ...query },
+    options,
+    parseScmBranch,
+  );
+}
+
+export async function getBranch(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  branchId: string,
+): Promise<ScmBranch> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.scmBranch(platformId, repositoryId, branchId),
+  });
+  return parseScmBranch(raw);
+}
+
+export async function createBranch(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  input: CreateBranchInput,
+): Promise<ScmBranch> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.scmBranches(platformId, repositoryId),
+    body: compact(input),
+  });
+  return parseScmBranch(raw);
+}
+
+export async function updateBranch(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  branchId: string,
+  patch: UpdateBranchInput,
+): Promise<ScmBranch> {
+  const raw = await request<unknown>(ctx, {
+    method: 'PATCH',
+    path: ENDPOINTS.scmBranch(platformId, repositoryId, branchId),
+    body: compact(patch),
+  });
+  return parseScmBranch(raw);
+}
+
+/**
+ * The module's **only** delete, and the only one it can ever have.
+ *
+ * Returns the deleted branch, so a caller can report what went — but the `--yes`
+ * gate in `cli/commands/scm/branch.ts` still names the branch *before* sending,
+ * because a confirmation that arrives with the corpse is not a confirmation.
+ *
+ * Two live refusals worth knowing before calling it: the repository's **default
+ * branch cannot be deleted** (400 `100223`), and deleting a branch does **not**
+ * remove the 提交引用 rows pointing at it — those keep reading by id while the
+ * ref *list* for that branch id starts answering HTTP 500 (design D12.5). Refs have
+ * no delete, so that is permanent.
+ */
+export async function deleteBranch(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  branchId: string,
+): Promise<ScmBranch> {
+  const raw = await request<unknown>(ctx, {
+    method: 'DELETE',
+    path: ENDPOINTS.scmBranch(platformId, repositoryId, branchId),
+  });
+  return parseScmBranch(raw);
+}
+
+// ---------------------------------------------------------------------------
+// 提交 commits (S1b) — org-level: no platform, no repository
+// ---------------------------------------------------------------------------
+
+export type CommitListQuery = {
+  /** Full 40-hex SHA, exact. */
+  sha?: string | undefined;
+  /** Work item **id**, not its identifier. */
+  work_item_id?: string | undefined;
+};
+
+/**
+ * Everything except `tree_id` and `work_item_identifiers` is required — including
+ * all three file arrays, which must be sent even when empty.
+ *
+ * `committer_name` is a plain git username and, unlike a branch's `sender_name`,
+ * **creates no identity** (live 2026-08-03): with no platform in this endpoint's
+ * path there is nowhere for one to be created. So a misspelled committer here
+ * produces a commit attributed to nobody rather than a ghost row — bad, but
+ * recoverable in a different way, and the two must not be documented as one hazard.
+ */
+export type CreateCommitInput = {
+  /** Full 40-hex. This is the one identifier the server shape-validates (400 `100003`). */
+  sha: string;
+  message: string;
+  committer_name: string;
+  /** Unix seconds: the git commit time, supplied by the caller. */
+  committed_at: number;
+  tree_id?: string | undefined;
+  files_added: string[];
+  files_removed: string[];
+  files_modified: string[];
+  /** Work item **identifiers**. Unknown ones are silently dropped with a 200. */
+  work_item_identifiers?: string[] | undefined;
+};
+
+export async function listCommits(
+  ctx: Ctx,
+  query: CommitListQuery = {},
+  page: PageRequest = {},
+): Promise<Page<ScmCommit>> {
+  return await fetchPageOf(ctx, ENDPOINTS.scmCommits, { ...query }, page, parseScmCommit);
+}
+
+export function iterateCommits(
+  ctx: Ctx,
+  query: CommitListQuery = {},
+  options: PaginateOptions = {},
+): AsyncGenerator<ScmCommit, void, undefined> {
+  return iterateOf(ctx, ENDPOINTS.scmCommits, { ...query }, options, parseScmCommit);
+}
+
+/**
+ * One commit **by id or by full SHA** — the path parameter is literally
+ * `{commit_id_or_sha}`, and this is the family's reason to exist for CI: a pipeline
+ * holds a SHA and never a PingCode id.
+ *
+ * `commitIdOrSha` is passed through **verbatim**. No shape check, no normalisation,
+ * no case folding: ids in this API have three shapes and validating them
+ * client-side is forbidden (`quality-guidelines.md`). An abbreviated SHA is refused
+ * upstream (404 `100002`), which is the server's answer to give, not ours.
+ */
+export async function getCommit(ctx: Ctx, commitIdOrSha: string): Promise<ScmCommit> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.scmCommit(commitIdOrSha),
+  });
+  return parseScmCommit(raw);
+}
+
+export async function createCommit(ctx: Ctx, input: CreateCommitInput): Promise<ScmCommit> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.scmCommits,
+    body: compact(input),
+  });
+  return parseScmCommit(raw);
+}
+
+// ---------------------------------------------------------------------------
+// 提交引用 commit refs (S1b)
+// ---------------------------------------------------------------------------
+
+/** The only documented `meta_type`; a different value is a server-side enum rejection. */
+export const REF_META_TYPE_BRANCH = 'branch';
+
+/**
+ * **Both fields are required** by the endpoint, so neither is optional here and
+ * `listCommitRefs` takes this as a positional argument rather than defaulting it.
+ * That is the type expressing a real limitation: there is no way to list every ref
+ * in a repository — they are enumerated one branch at a time.
+ */
+export type RefListQuery = {
+  meta_type: string;
+  meta_id: string;
+};
+
+/** Required: all three. `sha` must name a commit that already exists (else 400 `100206`). */
+export type CreateRefInput = {
+  sha: string;
+  meta_type: string;
+  meta_id: string;
+};
+
+export async function listCommitRefs(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  query: RefListQuery,
+  page: PageRequest = {},
+): Promise<Page<ScmCommitRef>> {
+  return await fetchPageOf(
+    ctx,
+    ENDPOINTS.scmRefs(platformId, repositoryId),
+    { ...query },
+    page,
+    parseScmCommitRef,
+  );
+}
+
+export function iterateCommitRefs(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  query: RefListQuery,
+  options: PaginateOptions = {},
+): AsyncGenerator<ScmCommitRef, void, undefined> {
+  return iterateOf(
+    ctx,
+    ENDPOINTS.scmRefs(platformId, repositoryId),
+    { ...query },
+    options,
+    parseScmCommitRef,
+  );
+}
+
+export async function getCommitRef(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  refId: string,
+): Promise<ScmCommitRef> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.scmRef(platformId, repositoryId, refId),
+  });
+  return parseScmCommitRef(raw);
+}
+
+export async function createCommitRef(
+  ctx: Ctx,
+  platformId: string,
+  repositoryId: string,
+  input: CreateRefInput,
+): Promise<ScmCommitRef> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.scmRefs(platformId, repositoryId),
+    body: compact(input),
+  });
+  return parseScmCommitRef(raw);
 }

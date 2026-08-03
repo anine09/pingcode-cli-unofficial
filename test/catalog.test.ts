@@ -363,8 +363,15 @@ describe('path matching', () => {
     // The only automatic detector of an upstream path migration: upstream ships
     // no changelog, so a moved path shows up here first (design D2.4).
     const sample = 'sample-id';
+    // Fill each helper by its declared arity rather than a fixed pair: S1b's
+    // `scmBranch` / `scmRef` take three ids (platform, repository, branch|ref), and a
+    // hardcoded two would have left them `undefined` in the path — which `matchPath`
+    // happily matches on segment count, so the drift check would have passed while
+    // testing nothing.
     const paths = Object.values(ENDPOINTS).map((value) =>
-      typeof value === 'function' ? value(sample, sample) : value,
+      typeof value === 'function'
+        ? (value as (...ids: string[]) => string)(...new Array<string>(value.length).fill(sample))
+        : value,
     );
     expect(paths.length).toBeGreaterThan(40);
     const unmatched = paths.filter((p) => matchPath(p).length === 0);

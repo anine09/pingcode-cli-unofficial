@@ -302,4 +302,93 @@ export const ENDPOINTS = {
     `/v1/scm/products/${encodeURIComponent(platformId)}/repositories`,
   scmRepository: (platformId: string, repositoryId: string): string =>
     `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}`,
+
+  // -------------------------------------------------------------------------
+  // scm, part 2: 代码分支 / 提交 / 提交引用 — research §3.12.4, §3.12.7,
+  // live-verified 2026-08-03 (design D12)
+  // -------------------------------------------------------------------------
+  //
+  // The three warnings above still apply. Four more, specific to these families:
+  //
+  //  1. **代码分支 is the one scm family with a `DELETE` and no `PUT`.** Every other
+  //     family has the mirror shape (a `PUT` and no `DELETE`), so "complete the
+  //     family by adding a replace" is a mistake waiting to happen here — there is
+  //     nothing to add. `test/help/scm.test.ts` asserts no `replace` leaf exists.
+  //  2. **提交 is org-level: `/v1/scm/commits` carries no platform and no
+  //     repository.** It is the only scm resource addressed outside a 托管平台
+  //     (live: an unfiltered list returned 3725 rows spanning every platform), which
+  //     is why `scm commit …` takes no `--platform` while every other leaf demands
+  //     one. A consequence worth stating: an unfiltered `commit list` is a whole-org
+  //     scan, so `?sha=` / `?work_item_id=` are the intended entry points.
+  //  3. **提交引用 needs BOTH `meta_type` and `meta_id`, and both are required
+  //     query parameters** — so "list every ref in this repository" is not an
+  //     operation this API offers; refs are listed per branch. `meta_type` accepts
+  //     only `branch` (live: `commit` → 400 `100003`, enum rejection).
+  //  4. **`sha` is the one identifier this API shape-validates.** A non-SHA `sha`
+  //     body field is 400 `100003` (`'sha'不是有效的字符串(不是SHA格式)`), and
+  //     `GET /v1/scm/commits/{…}` accepts a full 40-hex SHA or a 24-hex id but
+  //     **not an abbreviated SHA** (live: an 8-char prefix is 404 `100002`). The CLI
+  //     still validates nothing client-side — ids pass through untouched — but the
+  //     help text says so, because "abbreviated SHA" is what a git user will try.
+  //
+  // Live findings (2026-08-03) that the docs do not state:
+  //
+  //  - a branch's **`sender_name` is an upsert**, exactly like a repository's
+  //    `owner_name`: an unknown git username returned 200 and created a fresh
+  //    托管平台用户. A commit's **`committer_name` is NOT** — it is a flat string on
+  //    the commit and created nothing, which follows from `POST /v1/scm/commits`
+  //    having no platform in its path to create an identity in.
+  //  - **`work_item_identifiers` silently drops unknown identifiers**: a mixed
+  //    `["YYHC-10", "NOSUCH-99999"]` returned 200 with only the real one linked. The
+  //    array's *shape* is validated (an empty string is rejected) but its elements'
+  //    existence is not, so a caller cannot tell a partial link from a full one by
+  //    status alone — the response's own `work_items` is the only evidence, which is
+  //    why the commands compare the two and warn.
+  //  - `?name=` on the branch list is an **exact, case-insensitive** filter that is
+  //    genuinely honoured — unlike the repository list's, which is ignored. Branch
+  //    names are unique per repository (a duplicate is 400 `100217`), so this is a
+  //    complete name→id lookup in one request and needs no resolver row.
+  //  - `is_default` differs by verb: `POST` takes `true` or `false`, `PATCH` takes
+  //    **only `true`** (400 `100005` otherwise) and additionally clears the flag on
+  //    whichever branch held it. The first branch created in an empty repository
+  //    becomes the default with no field sent.
+  //  - **the default branch cannot be deleted** (400 `100223`), and deleting a branch
+  //    does **not** clean up its 提交引用: afterwards
+  //    `GET …/refs?meta_type=branch&meta_id=<deleted>` answers **HTTP 500**
+  //    (`100000`) while the ref itself still reads by id. Refs have no `DELETE`, so
+  //    that is permanent — hence the unusually specific `--yes` consequence text.
+  //  - Absence is answered with HTTP **400** and a per-resource code, as elsewhere in
+  //    scm: `100201` branch (on `GET`/`PATCH`/`DELETE` *and* on a `POST …/refs` whose
+  //    `meta_id` is unknown), `100206` commit (on `GET` by id *or* by SHA, and on a
+  //    `POST …/refs` whose `sha` is unknown), `100207` reference. All three are in
+  //    `ERROR_CODE_OVERRIDES` (exit 5).
+  //  - Deliberately left on exit 7: `100217`/`100214`/`100215` (duplicate branch /
+  //    commit / ref — conflicts, not absences), `100005` (`is_default` validation),
+  //    `100223` (the default-branch refusal: the branch plainly exists) and `100000`
+  //    (a genuine 500).
+
+  /**
+   * 代码分支. `?name=` is exact and case-insensitive; names are unique per
+   * repository, so it is a complete lookup rather than a search.
+   */
+  scmBranches: (platformId: string, repositoryId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/branches`,
+  scmBranch: (platformId: string, repositoryId: string, branchId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/branches/${encodeURIComponent(branchId)}`,
+
+  /** 提交 — **org-level**, no platform or repository in the path. `?sha=`, `?work_item_id=`. */
+  scmCommits: '/v1/scm/commits',
+  /**
+   * `GET` one 提交 by **id or full SHA** (the path parameter is literally
+   * `{commit_id_or_sha}`). Whatever the caller typed goes through verbatim: no shape
+   * check, ever. An abbreviated SHA is not accepted upstream.
+   */
+  scmCommit: (commitIdOrSha: string): string =>
+    `/v1/scm/commits/${encodeURIComponent(commitIdOrSha)}`,
+
+  /** 提交引用 — repository-scoped, and the list requires `meta_type` + `meta_id`. */
+  scmRefs: (platformId: string, repositoryId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/refs`,
+  scmRef: (platformId: string, repositoryId: string, refId: string): string =>
+    `/v1/scm/products/${encodeURIComponent(platformId)}/repositories/${encodeURIComponent(repositoryId)}/refs/${encodeURIComponent(refId)}`,
 } as const;
