@@ -218,9 +218,21 @@ const SCOPE_HINT =
  *   imply about the rest of the batch, not to which resource is missing.
  * - `100039` / `100043` / `100044` / `100008` (shape, unknown-property, bad
  *   option, missing-required-field) — these are input validation, not absence.
+ *   `100039` is also what the cross-object attachment endpoint returns for a code
+ *   snippet posted without the `comment_id` the docs call optional (F5 smoke,
+ *   2026-08-03) — a malformed request, not a missing row.
+ * - `100049` (`不支持的'principal_type'`) — the cross-object families' rejection of a
+ *   principal type, or of a `(principal_type, target_type)` pair, or of a *missing*
+ *   `target_type` on `GET /v1/relations`: all three arrive under the same code and the
+ *   same message naming `principal_type` (F5 smoke, 2026-08-03). It is a refused
+ *   argument, so it stays exit 7; `cli/commands/_shared/crosscutting.ts` adds the
+ *   explanation the message lacks instead.
  * - `100000` (`内部服务错误`, HTTP 500) — returned for genuinely broken server
  *   states such as a `properties` write against a select- or member-typed key.
- *   It is not a not-found and must keep its 500.
+ *   It is not a not-found and must keep its 500. `GET /v1/activities` answers an
+ *   unrecognised `principal_type` this way too, where its two sibling families answer
+ *   `100049` (F5 smoke, 2026-08-03) — which is precisely why the mount points are a
+ *   table of measured facts and are never probed at runtime.
  *
  * Matching is on the **`code` string only**: the API is Chinese-only and its
  * message wording is not a contract. Any code outside this table keeps the
@@ -244,6 +256,29 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   //   GET /case/states?library_id=, POST /cases. Same 1006xx family and the same
   //   "不存在或无权限访问" wording as 100601/100603 above, which are already mapped.
   '100600': 'not_found',
+  // F5 (08-02-full-api-coverage) cross-object smoke, 2026-08-03, live tenant. The four
+  // generic families each have their own resource-not-found code, all HTTP **400**,
+  // each observed with a syntactically valid but nonexistent 24-hex id:
+  //   100045 "附件不存在"              — GET/DELETE /v1/attachments/{id}
+  //   100051 "评论资源不存在或无权访问"  — GET/DELETE /v1/comments/{id}
+  //   100077 "活动记录不存在"           — GET /v1/activities/{id}
+  //   100801 "关联关系不存在"           — GET /v1/relations/{id}, and again on the second
+  //                                     GET after a successful DELETE
+  //   100903 "页面不存在或无权访问"      — any family with principal_type=page and an
+  //                                     unknown page id (the wiki analogue of 100317)
+  // Same "不存在" family, same reason as the rows above: without these, a missing
+  // comment exits 7 while a missing work item exits 5, for the same mistake.
+  //
+  // One caveat worth knowing rather than hiding: 100045 also fires for an attachment
+  // that *does* exist when the `comment_id` scope is omitted, because a comment-scoped
+  // snippet is simply not addressable without it. Exit 5 is still the honest answer —
+  // nothing was found at the address given — and the command layer's help says to pass
+  // the scope.
+  '100045': 'not_found',
+  '100051': 'not_found',
+  '100077': 'not_found',
+  '100801': 'not_found',
+  '100903': 'not_found',
 };
 
 const NOT_FOUND_HINT =

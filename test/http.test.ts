@@ -477,7 +477,43 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100601': 'not_found',
       '100603': 'not_found',
       '100600': 'not_found',
+      // F5: the four cross-object families, plus the wiki page a principal_type=page
+      // call names (08-02-full-api-coverage F5 smoke).
+      '100045': 'not_found',
+      '100051': 'not_found',
+      '100077': 'not_found',
+      '100801': 'not_found',
+      '100903': 'not_found',
     });
+  });
+
+  // F5 smoke, 2026-08-03: each generic family has its own 400 not-found code, and one
+  // of them (100049) deliberately stays on exit 7 because it is a refused argument
+  // rather than a missing row.
+  it.each([
+    ['100045', '/v1/attachments/000000000000000000000000', '附件不存在'],
+    ['100051', '/v1/comments/000000000000000000000000', '评论资源不存在或无权访问'],
+    ['100077', '/v1/activities/000000000000000000000000', '活动记录不存在'],
+    ['100801', '/v1/relations/000000000000000000000000', '关联关系不存在'],
+    ['100903', '/v1/comments', '页面不存在或无权访问'],
+  ])('maps cross-object code %s (HTTP 400) to NotFoundError, i.e. exit 5', async (code, path, message) => {
+    const error = await request(
+      ctxWith(() => jsonResponse({ code, message }, { status: 400 })),
+      { method: 'GET', path },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect((error as NotFoundError).exitCode).toBe(5);
+  });
+
+  it('leaves 100049 on exit 7: an unsupported principal_type is not an absence', async () => {
+    const error = await request(
+      ctxWith(() =>
+        jsonResponse({ code: '100049', message: "不支持的'principal_type'" }, { status: 400 }),
+      ),
+      { method: 'GET', path: '/v1/relations' },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).exitCode).toBe(7);
   });
 
   // S7b / research/s7-smoke.md F1: ship answers 400 for a missing record, with
