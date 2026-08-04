@@ -323,9 +323,13 @@ export function registerWorkItemCommands(parent: Command): void {
         '--description / --property must be given. Two properties need two calls.\n' +
         'Verified to work upstream: assignee_id, state_id, priority_id, title, description.\n' +
         'Verified ACCEPTED AND SILENTLY IGNORED (HTTP 200, "updated 0"): sprint_id — so a\n' +
-        'bulk move into a sprint is NOT possible, use `work-item update --sprint` per item —\n' +
-        'and also type_id, version_ids, tag_ids, participant_ids, properties, bug_type_id,\n' +
-        'entry_id, swimlane_id, phase_id. parent_id and board_id are refused outright.\n' +
+        'bulk move into a sprint is NOT possible; move items ONE AT A TIME with\n' +
+        '`pingcode api PATCH /v1/pjm/work_items/<id> --set sprint_id=<sprint-id>`, because no\n' +
+        'refined leaf carries sprint_id on update either (`work-item update` has no --sprint;\n' +
+        'only `work-item create` does). The same holds for version_ids, which needs --body\n' +
+        'since it is an array. Also ignored here: type_id, version_ids, tag_ids,\n' +
+        'participant_ids, properties, bug_type_id, entry_id, swimlane_id, phase_id.\n' +
+        'parent_id and board_id are refused outright.\n' +
         '--property is the escape hatch for anything not listed; it is not validated, and a\n' +
         'property the server ignores still answers 200, so always read the "updated" count.\n' +
         'Other live facts worth knowing before scripting this:\n' +

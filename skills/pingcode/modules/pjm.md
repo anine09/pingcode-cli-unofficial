@@ -171,10 +171,10 @@ invocations. Four things about it that will bite an agent that assumes otherwise
 
 - **`--sprint` does not exist here, deliberately.** `property_name: sprint_id` is accepted with
   HTTP 200 and `updated: 0`, and changes nothing (verified live). The same is true of `type_id`,
-  `tag_ids`, `version_ids`, `participant_ids`, `properties` and `bug_type_id`. To move items into a
-  sprint, loop `work-item update --sprint` one item at a time. Only `assignee_id`, `state_id`,
-  `priority_id`, `title` and `description` actually apply; `--property` is the unvalidated escape
-  hatch for anything else.
+  `tag_ids`, `version_ids`, `participant_ids`, `properties` and `bug_type_id`. Moving items into a
+  sprint has to go one at a time through the generic layer — see the next section. Only
+  `assignee_id`, `state_id`, `priority_id`, `title` and `description` actually apply;
+  `--property` is the unvalidated escape hatch for anything else.
 - **Always read the `updated` count.** It is the *only* signal the endpoint gives: a nonexistent id,
   a silently-rejected value and an unsupported property all answer 200. The CLI warns when `updated`
   is less than the number of ids sent — treat that warning as "verify by reading the items back".
@@ -182,6 +182,27 @@ invocations. Four things about it that will bite an agent that assumes otherwise
   `sprint bulk` and `version bulk` creates *are* atomic — do not generalise from one to the other.)
 - **It leaves no audit trail.** The change appears in neither `work-item activity list` nor
   `work-item history list`, while the equivalent single `update` does. It is invisible to an audit.
+
+#### Moving an existing item into a sprint, or onto a release
+
+**No refined leaf can do either.** `work-item create` takes `--sprint`, but `work-item update`
+takes neither `--sprint` nor `--version`, and `bulk-update` answers 200 / `updated: 0` for both.
+So for an item that already exists, the generic layer is the only path — both forms verified live
+2026-08-05:
+
+```bash
+pingcode api PATCH /v1/pjm/work_items/<id> --set sprint_id=<sprint-id>
+pingcode api PATCH /v1/pjm/work_items/<id> --body '{"version_ids":["<version-id>"]}'
+```
+
+- **`version_ids` needs `--body`, not `--set`.** `--set` sends its value verbatim as a *string*, and
+  this is one of the few fields the server actually type-checks: a stringified array is
+  `100006 'version_ids'不是有效的数组`, exit 7, nothing written. `sprint_id` is a scalar, so `--set`
+  is fine there.
+- **`version_ids` replaces the whole array.** Read the item first if you mean to add rather than set.
+- Both changes *are* audited, unlike `bulk-update`: they show up in `work-item activity list` as
+  `property_key: iteration` and `property_key: version`, with `origin`/`target` — which is also how
+  you verify them without trusting the 200.
 
 #### `delete`
 

@@ -3007,3 +3007,220 @@ testhub 的 6 条软删用例与 3 个 `CLI Smoke Plan*`。ship 侧在 S4 前后
 9. **未改**：`src/core/{auth,http,config,errors,redact}.ts`、`src/cli/output.ts`、`src/cli/commands/common.ts`、
    `src/cli/registry.ts`（无新命令组）、`src/core/metadata/**`、`test/help/__snapshots__/root.test.ts.snap`
    （逐字节不变）、`README.md`（留给 X1，F1–S3 一致做法）、`package.json` / `package-lock.json`。
+
+## D19. X3 live findings (A1 端到端闭环实机验证) — 2026-08-05
+
+**0 端点 / 0 叶子。** 本节不落地任何新功能，只把 PRD A1 那条 11 跳链路在真实租户上跑通并留证。
+逐跳命令、`jq` 取值表达式、镜像读回与 dry-run 的前后计数全部在
+`research/x3-a1-closed-loop.md`（run id `1785875150`，HEAD `58e275d` 的构建产物）。
+
+**结论先说：闭环闭上了。** 11 跳、21 条写命令，一次跑通，全部 `--json` 可解析，全部 id 由
+`jq -r` 从上一跳 stdout 取出后喂给下一跳，**没有一处手抄**。但有两跳比 implement.md 的写法弱：
+第 3、4 跳（入迭代 / 挂版本）**没有精修叶子可用**，只能走通用层 `pingcode api PATCH`（D19.2）；
+第 11 跳（缺陷关联到 commit）**不能**用 `relation add`，因为 `/v1/relations` 的词表里没有
+`commit`（D19.3）。两者都是"意图达成、机制与计划不同"，不是失败。
+
+### D19.1 前提确认与推翻
+
+| 前提（来自 implement.md X3 / 各 child） | 实机结果 |
+|---|---|
+| 11 跳的命令拼写 | ⚠️ **3 跳需要改**：`work-item update --sprint`（不存在，D19.2）、"工作项挂版本"（无任何叶子，D19.2）、缺陷→commit 的 `relation add`（词表不含 commit，D19.3）。其余 8 跳的拼写全部命中现役叶子 |
+| 关联以镜像对存储，两侧 id 不同（F5 / S2b） | ✅ **在三种 principal 上各复现一次**（`idea` / `test_case` / `work_item`），见 D19.5 |
+| `/v1/relations` 拒绝 `work_item → work_item` | ✅ 无需再验：本链路唯一的同类对（缺陷→故事）用**父子关系**表达，`work-item link add` 全程未被使用 |
+| `失败 → failure` 的 run status slug（[TH§14] / D17） | ✅ 确认 |
+| run 创建时为 `not_start`、PATCH 省略 `executor_id` 时继承（[TH§14.7]） | ✅ 确认 |
+| `version create` 的日期吸附到整天、省略 `--stage-id` 时服务端取第一个阶段（D15.4 / S2a） | ✅ 确认（`00:00:00` / `23:59:59` 本地，`stage 未开始`） |
+| ship 资源本体收 `identifier` 作查找键（D18.4） | ✅ 确认（`product idea get PD-YYHC-74`） |
+| 「200 + 静默丢弃未知字段」——写完必须读回 | ✅ 纪律执行到底：21 条写全部读回，**零处发现被丢弃的字段** |
+| `--json` stdout 纯净、成功时 stderr 0 字节 | ✅ 42 次成功调用全部满足 |
+| 「网页端可见」 | ❌ **不可能做到，也没有声称**：我只有 API 凭据，没有浏览器会话。替代证据见 D19.5 与 D19.7 |
+
+### D19.2 推翻：`work-item update --sprint` **不存在**，且「工作项挂版本」没有任何精修叶子
+
+```
+$ pingcode project work-item update <id> --sprint <sprint-id> --json
+error: unknown option '--sprint'   (Did you mean --parent?)        exit=2
+```
+
+事实的完整形状：`work-item create` **有** `--sprint`；`work-item update` **既没有** `--sprint`
+**也没有** `--version`；`bulk-update` 对 `sprint_id` 与 `version_ids` 都回 200 / `updated: 0`
+（S2b 的旧结论，未变）。所以**对一个已经存在的工作项，精修层无法把它放进迭代、也无法挂到版本**。
+
+而仓库里有**三处**说了相反的话，全部由本 child 更正：
+
+| 位置 | 原文 |
+|---|---|
+| `skills/pingcode/modules/pjm.md`（bulk-update 小节） | 「To move items into a sprint, loop `work-item update --sprint` one item at a time.」 |
+| `src/cli/commands/workItem.ts`（bulk-update help epilog） | 「use `work-item update --sprint` per item」 |
+| `test/help/__snapshots__/project.test.ts.snap` | 上一条的快照 |
+
+三处统一改指通用层，而通用层**实测可用**（就是本链路的第 3、4 跳）：
+
+```bash
+pingcode api PATCH /v1/pjm/work_items/<id> --set sprint_id=<sprint-id>
+pingcode api PATCH /v1/pjm/work_items/<id> --body '{"version_ids":["<version-id>"]}'
+```
+
+`pjm.md` 另加一小节「Moving an existing item into a sprint, or onto a release」，含两条命令、
+D19.4 的数组注意事项、以及用 activity 记录复核的办法。
+
+**本 child 不做、留给 orchestrator 判的**：`work-item update` 是否该直接长出 `--sprint` /
+`--version`。证据倾向于「这是遗漏而非决策」——API 的 `PATCH` 两个字段都吃（第 3、4 跳即证），
+api 层的 `UpdateWorkItemInput` **已经声明了** `version_ids`（`src/api/workItems.ts:111`）却无人
+可达，而闭环两处都需要它。但这是行为变更，ground rules 明令停下上报，所以 X3 只改文档不加 flag。
+
+### D19.3 `/v1/relations` 词表里没有 `commit`，且 `100049` **指错了字段**
+
+六次探针，`principal_type` 一律是合法的 `work_item` + 真实 `principal_id`：
+
+| `target_type` | 结果 |
+|---|---|
+| `commit` | 400 `100049` `不支持的'principal_type'` |
+| `sha` | 400 `100049` 同上 |
+| `zzz`（无意义对照） | 400 `100049` 同上 |
+| 对照：`principal_type: zzz` + `target_type: idea` | 400 `100049` 同上 |
+
+两条结论。**(a) `commit` 确实在词表外** —— 它与无意义值 `zzz` 的行为逐字节一致，所以第 11 跳
+只能走 scm 原生的 `--work-item` 关联（`scm commit create --work-item <bug identifier>`），
+这也是本 API 唯一提供的路径。**(b) 消息把字段名说错了** —— 不受支持的 *`target_type`* 被报成
+不受支持的 *`principal_type`*，一个码 `100049` 同时覆盖配对的两端。一个 agent 拿着这条消息
+去 debug `relation add`，会去检查错的那个 flag。
+
+现役 help 的措辞恰好是对的（「that list is what a live tenant accepted — it is a hint, not a
+rule」，且本地不拒绝任何值），所以**不需要改代码**；但这条误导性消息值得记下来。
+
+**不进 `ERROR_CODE_OVERRIDES`**：这是词表/校验错误而非「不存在」，且它在两个字段上有歧义 ——
+与 `08-01-ship-cli` §14.3a 否掉 `100702` 是同一条标准。
+
+### D19.4 `api --set` 是**标量 only**，而 `version_ids` 是少数被上游真类型校验的字段
+
+```
+$ pingcode api PATCH /v1/pjm/work_items/<id> --set 'version_ids=["<id>"]'
+error: 'version_ids'不是有效的数组 (HTTP 400 code 100006)            exit=7
+```
+
+`--set` 把值**当 JSON 字符串**原样发出，所以线上收到的是 `{"version_ids":"[\"…\"]"}`。
+值得记的原因**恰恰是它报错了**：本 API 的默认习惯是「类型不对也回 200、然后什么都不存」
+（本任务已多次记录），一个假定沉默即成功的 agent 会以为写进去了。被拒的那次调用**没有**动到
+已挂的版本（复读仍是 `["[CLI smoke] x3 v…"]`）。
+
+`api.md` 因此加了一句：数组/对象字段必须用 `--body`，并点明不要把这次的严格类型检查泛化。
+原文的「flat, values sent verbatim」「never type-guessed」都是准确的，只是没说数组做不到。
+
+**`100006` 不进 override**：输入校验，exit 7 正确，且它在任何字段上都只表示「类型不对」。
+
+### D19.5 关联的镜像对：三种 principal 上各实测一次
+
+这是 A1「网页端可见」的替代证据，而且**更强**：镜像行的 `id` 与 POST 返回的 `id` **不同**，
+这只有在服务端真的物化了一对双向记录时才成立 —— 单靠「POST 回了 200」推不出这一点。
+
+| 跳 | 建立方向 | 返回 id | 从**对侧**读到的 id | 对侧命令 |
+|---|---|---|---|---|
+| H2 | `idea → work_item` | `6a724ad136570f6891f9fd43` | `…fd44` | `project work-item relation list <story> --target-type idea` |
+| H5 | `test_case → work_item` | `6a724ad685dbd8d6c0b89851` | `…9852` | `project work-item relation list <story> --target-type test_case` |
+| H8 | `work_item → test_case` | `6a724adc87d77b3ccbf1852d` | `…852e` | `testhub cases relation list <case> --target-type work_item` |
+
+顺带一条**负面**记录：关联、commit、构建、部署**都不写 activity 记录**（工作项的 activity 只有
+4 行：create、`property_key: iteration`、`property_key: version`、子项 add）。所以这四族的镜像读
+是**唯一**可得的证据 —— 这正是每一族都必须有一次对侧读的原因。反过来，第 3、4 跳因此有**三重**
+证据：自身字段、父集合的成员列表、以及服务端写的 activity 行（`origin: null → target`）。
+
+### D19.6 dry-run 零写入：12 个计数器，实测不是论证
+
+方法：快照 12 个集合的 `total` → 用**逐字相同的 21 条 argv** 追加 `--dry-run` 重放 → 再快照 → `diff`。
+
+```
+ideas 47 · work_items 194 · versions 1 · cases 7 · plans 4 · branches 3
+pull_requests 3 · builds 1 · environments 1 · deploys 1 · commits 3836 · sprints 8
+```
+
+`diff` **空**。对照：live pass 之前这 12 个数是 46 / 192 / 0 / 6 / 3 / 2 / 2 / 0 / 0 / 0 / 3834 / 8，
+即 live 动了 12 个里的 11 个（`sprints` 故意没动 —— 迭代是复用的，上游无 DELETE），dry 动了 0 个。
+**是这个对比构成证明，单看绝对值不构成。**
+
+计划完整性用断言核过，不是肉眼看的：21 个 dry 输出全部满足
+`.dry_run==true and (.request|has("method") and has("url") and has("headers") and has("body"))`，
+再加 live pass 里每写必先跑的 21 个 pre-flight 计划，共 **42 份完整计划**，`Authorization` 一律
+渲染成 `***REDACTED***`。
+
+两件 dry-run **证明不了**的事，明说：它不校验服务端唯一性（重放 `pr create --number 9850` 真跑会被拒），
+以及 `--dry-run` 下**读仍然发生** —— 这是设计（闸门只拦写动词），也正是「每写必先 dry-run」这条
+纪律便宜到可以无条件执行的原因。
+
+### D19.7 反向索引的缺口：四处只有自侧证据
+
+| 关联 | 用的反向读 | 强度 |
+|---|---|---|
+| 三条 `/v1/relations` 关联 | 对侧 `relation list` | **镜像行，id 不同** |
+| work_item → sprint / version | `work-item list --sprint` / `api GET …?version_id=` + activity | 真反向索引 |
+| run → plan | `runs list --plan-id` | 真反向索引 |
+| commit → work_item | `scm commit list --work-item-id` | 真反向索引，**且能区分**：`--work-item-id <story>` 只回特性 commit，`<bug>` 只回修复 commit |
+| ref → branch | `scm ref list --branch-id` | 真反向索引 |
+| deploy → environment | `release deploy list --env-id` | 真反向索引 |
+| **branch / PR / build / deploy → work_item** | 各自 `get` 里的 `work_items` 数组 | **只有自侧** |
+
+最后一行是 API 的能力缺口，不是本轮取证偷懒：PingCode 在 devops 侧**只**为 commit 提供了按工作项
+的反向索引。`GET /v1/build/builds` **一个过滤器都没有**（整个 build 模块 6 条端点全部不可过滤），
+`scm branch list` / `scm pr list` 也没有 work-item 过滤。这四族可得的证据是「服务端存下并在一次
+往返后重新序列化了该关联」，**明显弱于镜像行**，如实标注，不当成同一回事写。
+
+### D19.8 错误码：**0 条**进 `ERROR_CODE_OVERRIDES`
+
+11 条故意的错误探针覆盖了闭环里的每一族。所有「不存在」都落在**已在表里**的码上或真 404：
+`100317`（工作项）、`100725`（需求）、`100601`（用例）、`100603`（执行记录）、`100206`（commit）、
+`100203`（build）、`100204`（deploy）—— 全部 **exit 5**。用法错误全部 **exit 2 且零请求**，
+校验错误（`100049` / `100006`）留在 **exit 7**，理由见 D19.3 / D19.4。
+
+所以 `src/core/wire.ts` **逐字节未改**。八个 S child 之后这是预期结果，ground rules 唯一许可的
+例外这次**没有用到**。
+
+### D19.9 本 child 留在租户里的对象
+
+**18 个对象**（若把三条关联按镜像对计则 21 行），全部带 `[CLI smoke]` 标记（名称/标题/commit message
+里的 `[CLI smoke] x3 …`，或分支的 `cli-smoke/x3-…` 前缀）。**一个都没有删。**
+
+理由，明说而非回避：这条链路**就是** A1 的验收物，而我唯一做不到的那种验证 —— 打开网页端看见这些
+关联 —— 恰好是人类评审者能做的。删掉它等于毁掉评审者唯一能独立复核的东西。表里每一行可删的都附了
+确切的 teardown 命令（见 `research/x3-a1-closed-loop.md` §9），决定是可逆的。
+
+| 对象 | 可删？ |
+|---|---|
+| 需求 `PD-YYHC-74` | **不可** —— ship 全域无 DELETE |
+| 工作项 `YYHC-224`（故事）/ `YYHC-225`（缺陷） | 可 |
+| 三条关联（各一对镜像行） | 可 |
+| 版本 `[CLI smoke] x3 v…` | 可 |
+| 用例 `CLISMOKE-13` | 可，**级联删掉它的 run**（D17.5） |
+| 测试计划 `[CLI smoke] x3 plan …` | **不可** —— testhub 无计划 DELETE |
+| 执行记录 | **只能级联** —— testhub 全模块只有 4 个 DELETE（用例 / 模块 / 库成员 / 用例属性绑定），没有 run |
+| 分支 `cli-smoke/x3-…` | 可，但会**永久孤立**它的 ref（`scm.md`） |
+| 两条 commit / ref / PR `#9850` | **不可** —— scm 全域**唯一**的 DELETE 是分支那条 |
+| 环境 / 构建 / 部署 | 可（环境与部署走 `api DELETE`，构建有 `build delete`） |
+
+**上游设计上永久的：6 行** —— 1 需求、1 测试计划、2 commit、1 ref、1 PR。
+
+**复用而非新建，因此不算残留**：迭代 `[CLI smoke] s-e2e`、scm 平台与仓库、`cli-smoke/keeper` 分支、
+身份 `cli-smoke-bot`、测试库 `CLI Smoke`。**没有创建任何 platform user**（`--sender` / `--creator`
+都点名了已有的 bot —— 未知名字会创建不可删的平台用户）。两个**真实 GitHub 集成全程只读，一次都没写**。
+
+既有残留（未触碰、未清理，按 brief）：项目 `CLIS2BX`、YYHC 的 4 条 `[CLI smoke]` 迭代、scm 的
+`cli-smoke*` 系列、testhub 的 6 条软删用例与 3 个 `CLI Smoke Plan*`。
+
+### D19.10 本轮实机导致的代码改动
+
+1. **`src/cli/commands/workItem.ts`：只改一段 help epilog 文本**（bulk-update 的 4 行改成 8 行），
+   把 D19.2 那句假指引换成通用层的真命令 + 数组注意事项。**没有任何行为变更**、没有新 flag、
+   没有新端点。这是本 child 对 `src/` 的**唯一**触碰；若 orchestrator 决定改为直接给
+   `work-item update` 加 `--sprint` / `--version`，这一处可以整块 revert。
+2. **`test/help/__snapshots__/project.test.ts.snap`**：随上一条重生成（`vitest -u`，仅该文件）。
+   `test/help/__snapshots__/root.test.ts.snap` **逐字节不变**。
+3. **`skills/pingcode/modules/pjm.md`**：改 1 条假指引 + 新增一小节
+   「Moving an existing item into a sprint, or onto a release」。
+4. **`skills/pingcode/modules/api.md`**：`--set` 那组要点加 1 条（标量 only / 数组用 `--body` /
+   `100006`）。原有措辞没有错，只是不完整，所以是**追加**而非更正。
+5. **未改**：`src/core/**`（含 `wire.ts` 与 `ERROR_CODE_OVERRIDES`，D19.8）、`src/cli/output.ts`、
+   `src/cli/registry.ts`、`src/api/**`、`src/types/**`、`README.md`（X1 刚发布的两层覆盖数字未受
+   影响：叶子仍 **254**、命令组仍 **10**、精修 **158/459** —— 本 child 没加也没减端点）、
+   `package.json` / `package-lock.json`（逐字节不变）。
+6. **未提交进仓库**：`chain.sh` / `totals.sh` / `verify.sh` 与全部逐调用日志都留在
+   `$HOME/tmp/x3/`，因为它们硬编码了租户 id，而 `.trellis/spec` 禁止把租户值写进仓库。
+   复现方式写在 `research/x3-a1-closed-loop.md` §10。

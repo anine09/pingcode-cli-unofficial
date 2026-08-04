@@ -61,6 +61,11 @@ pingcode api DELETE /v1/pjm/projects/<id>/versions/<id> --yes
   `--body '<json>'`, or `--body -` to read stdin. The four are mutually exclusive;
 - `--set` values are never type-guessed: a select-typed field wants the option's `_id`, not its
   display text;
+- `--set` is **scalar-only**. Its value is sent verbatim as a JSON *string*, so an array or object
+  field needs `--body` / `--body-file`. A few fields are genuinely type-checked upstream —
+  `--set version_ids='["<id>"]'` on a work item is `100006 'version_ids'不是有效的数组`, exit 7 —
+  but do not count on that everywhere: this API's default is to accept a wrong-typed field with 200
+  and store nothing;
 - paging: `--page` / `--page-size` (max 100) are forwarded **only when you pass them**; `--all`
   walks the pages and prints `{"values":[…],"count":N,"all":true}`. On an endpoint that is not a
   collection, any paging flag is exit 2 rather than silently ignored.
