@@ -13,6 +13,8 @@ Commands:
   get [options] <product>  show one product, including its members
   idea                     ship requirements 需求 (scopes pcp:read:ship:idea / pcp:write:ship:idea)
   ticket                   ship tickets 工单 (scopes pcp:read:ship:ticket / pcp:write:ship:ticket)
+  plan                     需求排期 requirement schedules of a product, read-only (scope
+                           pcp:read:ship:product)
   meta                     ids you need before writing: every ship lookup is scoped to one product
   help [command]           display help for command
 "
@@ -31,11 +33,37 @@ Commands:
   get [options] <idea>     show one idea
   create [options]         create an idea (only --product and --title are required)
   update [options] <idea>  patch an idea — only the fields you pass are sent, and they replace
+  history                  流转记录 the STATE history of a requirement (read-only, scope
+                           pcp:read:ship:idea)
   relation                 关联 cross-kind links of a idea (principal_type=idea)
   comment                  评论 comments on a idea (principal_type=idea)
   attachment               附件 attachments of a idea (principal_type=idea)
   activity                 活动记录 audit trail of a idea (principal_type=idea)
   help [command]           display help for command
+"
+`;
+
+exports[`product --help > product idea history (state changes only, no filter flags) 1`] = `
+"Usage: pingcode product idea history [options] [command]
+
+流转记录 the STATE history of a requirement (read-only, scope pcp:read:ship:idea)
+
+Options:
+  -h, --help                         display help for command
+
+Commands:
+  list [options] <idea>              list the state changes of a requirement
+  get [options] <idea> <history-id>  show one state change
+  help [command]                     display help for command
+
+State changes only. A title, assignee, priority or 排期 change is NOT here — that
+is \`product idea activity\`, the free-form audit feed. Every requirement has one
+row from creation, shown with FROM as (new).
+Read-only upstream: a POST or DELETE on this path answers HTTP 405, so there is no
+route to one through \`pingcode api\` either.
+There is no filter flag: ?name=, ?state_id= and ?keywords= are all accepted and
+silently ignored by this endpoint, which is worse than having none.
+
 "
 `;
 
@@ -102,6 +130,9 @@ Commands:
                                parents)
   idea-properties [options]    writable idea property keys and their option ids — the only source
                                for --set values
+  idea-plans [options]         requirement schedules 需求排期 of a product (values for \`idea update
+                               --plan-id\`); \`product plan list\` shows the same rows with their
+                               dates
   members [options]            members of a product — the only valid --assignee candidates
   ticket-states [options]      ticket states of a product (values for --state / state_id)
   ticket-priorities [options]  ticket priorities of a product
@@ -110,6 +141,51 @@ Commands:
   ticket-properties [options]  writable ticket property keys and their option ids — the only source
                                for --set values
   help [command]               display help for command
+"
+`;
+
+exports[`product --help > product plan (需求排期: one of three unrelated things called a plan) 1`] = `
+"Usage: pingcode product plan [options] [command]
+
+需求排期 requirement schedules of a product, read-only (scope pcp:read:ship:product)
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  list [options]           list the requirement schedules of a product
+  get [options] <plan-id>  show one requirement schedule
+  help [command]           display help for command
+
+This is a 需求排期 — the schedule a requirement is planned into, and the only
+thing \`pingcode product idea update --plan-id\` accepts. It is NOT a 测试计划
+(\`pingcode testhub plans\`) and NOT a configuration scheme (\`ticket_state_plans\`,
+\`idea_property_plans\`), both of which this API also calls a "plan".
+Read-only: create, update and delete all answer HTTP 405 upstream, so they are
+unavailable through \`pingcode api\` too.
+There is no filter flag because the endpoint documents none and an undeclared
+\`?name=\` changed nothing when tried. Use --all and filter client-side.
+
+"
+`;
+
+exports[`product --help > product plan get (why a missing schedule exits 7, not 5) 1`] = `
+"Usage: pingcode product plan get [options] <plan-id>
+
+show one requirement schedule
+
+Arguments:
+  plan-id              schedule id, as printed by \`product plan list\` — names are not lookup keys
+
+Options:
+  --product <name|id>  product name, identifier such as SLC, or id
+  -h, --help           display help for command
+
+A missing schedule exits 7, not 5: the vendor code (100721) is also what an idea
+PATCH answers for an unknown --plan-id, and whether it can additionally mean
+"exists, but in another product" could not be measured — no tenant reached so far
+has a single 排期. Read the message, not just the exit code.
+
 "
 `;
 

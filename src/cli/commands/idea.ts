@@ -2,8 +2,11 @@ import type { Command } from 'commander';
 import {
   createIdea,
   getIdea,
+  getIdeaTransitionHistory,
+  iterateIdeaTransitionHistories,
   iterateIdeas,
   listIdeaStates,
+  listIdeaTransitionHistories,
   searchIdeas,
   updateIdea,
   type CreateIdeaInput,
@@ -23,7 +26,7 @@ import {
   type ShipLocator,
 } from '../../core/metadata';
 import { collect, type SearchPayload } from '../../core/paginate';
-import type { ShipIdea } from '../../types/api';
+import type { Ref, ShipIdea, ShipIdeaTransitionHistory } from '../../types/api';
 import { addGlobalOptions } from '../globals';
 import { errLine, paint, type Column } from '../output';
 import { addCrosscutting } from './_shared/crosscutting';
@@ -100,6 +103,8 @@ type UpdateFlags = StateFlags & {
   set?: string[] | undefined;
 };
 
+const IDEA_REF_HELP = 'id, identifier such as SLC-1, or a pasted idea URL';
+
 const SET_HELP =
   'custom property, repeatable: --set key=value. Values for select-type properties are option ids, not labels. Replaces, never merges';
 
@@ -147,7 +152,7 @@ export function registerIdeaCommands(parent: Command): void {
     group
       .command('get')
       .description('show one idea')
-      .argument('<idea>', 'id, identifier such as SLC-1, or a pasted idea URL'),
+      .argument('<idea>', IDEA_REF_HELP),
     { hidden: true },
   ).action(async (target: string, _flags: unknown, command: Command) => {
     await runGet(target, command);
@@ -174,7 +179,7 @@ export function registerIdeaCommands(parent: Command): void {
       group
         .command('update')
         .description('patch an idea — only the fields you pass are sent, and they replace')
-        .argument('<idea>', 'id, identifier such as SLC-1, or a pasted idea URL')
+        .argument('<idea>', IDEA_REF_HELP)
         .option('--title <text>', 'new title')
         .option('--description <text>', 'new description (replaces the old one)')
         .option('--priority <name|id>', 'new priority')
@@ -192,10 +197,145 @@ export function registerIdeaCommands(parent: Command): void {
   // All four families accept `principal_type=idea`, live-verified 2026-08-03 — and an
   // idea is the one principal `/v1/relations` accepts against every other kind, which
   // makes this the requirement→work-item→case traceability entry point (design D5.2).
+  registerIdeaHistoryCommands(group);
   addCrosscutting(group, 'idea', {
     resolveId: async (ctx, ref) => (await resolveShipRef(ctx, 'idea', ref)).id,
   });
 }
+
+// ---------------------------------------------------------------------------
+// 流转记录 idea state history — state changes only (ship §J2)
+// ---------------------------------------------------------------------------
+
+const IDEA_HISTORY_COLUMNS: Column<ShipIdeaTransitionHistory>[] = [
+  { header: 'ID', value: (row) => row.id },
+  { header: 'WHEN', value: (row) => timestampCell(row.created_at) },
+  {
+    header: 'FROM',
+    value: (row) => (row.from_state === undefined ? '(new)' : refName(row.from_state)),
+  },
+  { header: 'TO', value: (row) => refName(row.to_state) },
+  { header: 'BY', value: (row) => refName(row.created_by), flex: true },
+];
+
+/**
+ * `pingcode product idea history list|get` — the **state** history of a 需求.
+ *
+ * Three facts, all live-verified 2026-08-05 (design §D18):
+ *
+ *  - **State changes only.** A title, assignee or 排期 change is not here; the
+ *    `activity` subgroup is the free-form feed. Every idea has one row from creation,
+ *    printed with FROM as `(new)`.
+ *  - **The raw endpoint takes the 24-hex id only** — `short_id` and `identifier` answer
+ *    a real HTTP 404 there, even though the idea *resource* accepts all three. This
+ *    group therefore resolves the reference first (one extra request), which is why
+ *    `product idea history list SLC-1` works at all.
+ *  - **The parent is validated**, so an empty list means an idea with no rows, not a
+ *    bad reference — the opposite of pjm's work-item link list. A missing idea exits 5,
+ *    and so does a history id that belongs to a different idea.
+ */
+function registerIdeaHistoryCommands(parent: Command): void {
+  const group = parent
+    .command('history')
+    .description('流转记录 the STATE history of a requirement (read-only, scope pcp:read:ship:idea)');
+
+  group.addHelpText(
+    'after',
+    '\nState changes only. A title, assignee, priority or 排期 change is NOT here — that\n' +
+      'is `product idea activity`, the free-form audit feed. Every requirement has one\n' +
+      'row from creation, shown with FROM as (new).\n' +
+      'Read-only upstream: a POST or DELETE on this path answers HTTP 405, so there is no\n' +
+      'route to one through `pingcode api` either.\n' +
+      'There is no filter flag: ?name=, ?state_id= and ?keywords= are all accepted and\n' +
+      'silently ignored by this endpoint, which is worse than having none.\n',
+  );
+
+  addGlobalOptions(
+    addPagingOptions(
+      group
+        .command('list')
+        .description('list the state changes of a requirement')
+        .argument('<idea>', IDEA_REF_HELP),
+    ),
+    { hidden: true },
+  ).action(async (target: string, flags: PagingFlags, command: Command) => {
+    const { ctx } = contextFor(command);
+    const ideaId = await resolveIdeaId(ctx, target);
+    const paging = readPaging(flags);
+
+    if (paging.all) {
+      const values = await collect(
+        iterateIdeaTransitionHistories(ctx, ideaId, {
+          pageSize: paging.pageSize,
+          limit: paging.limit,
+        }),
+      );
+      printCollection(values, IDEA_HISTORY_COLUMNS, modeOf(ctx), { all: true });
+      return;
+    }
+
+    const page = await listIdeaTransitionHistories(ctx, ideaId, {
+      pageIndex: paging.pageIndex,
+      pageSize: paging.pageSize,
+    });
+    printPage(page, IDEA_HISTORY_COLUMNS, modeOf(ctx));
+  });
+
+  addGlobalOptions(
+    group
+      .command('get')
+      .description('show one state change')
+      .argument('<idea>', IDEA_REF_HELP)
+      .argument('<history-id>', 'transition record id, as printed by list'),
+    { hidden: true },
+  ).action(async (target: string, historyId: string, _flags: unknown, command: Command) => {
+    const { ctx } = contextFor(command);
+    const ideaId = await resolveIdeaId(ctx, target);
+    const row = await getIdeaTransitionHistory(
+      ctx,
+      ideaId,
+      requireFlag(historyId, '<history-id>'),
+    );
+
+    printResource(
+      row,
+      [
+        ['id', row.id],
+        ['requirement', ideaRefLabel(row.idea)],
+        ['from', row.from_state === undefined ? '(new)' : refName(row.from_state)],
+        ['to', refName(row.to_state)],
+        ['by', refName(row.created_by)],
+        ['when', timestampCell(row.created_at)],
+      ],
+      modeOf(ctx),
+    );
+  });
+}
+
+/**
+ * The embedded `idea` reference carries `identifier`, `title`, `short_id` and
+ * `html_url` but **no `name`** (live 2026-08-05), so `refName` would degrade to the raw
+ * id — the one form a human reading a history row does not recognise.
+ */
+function ideaRefLabel(ref: Ref | undefined): string {
+  if (ref === undefined) return '';
+  const identifier = typeof ref.identifier === 'string' ? ref.identifier : undefined;
+  return identifier ?? refName(ref);
+}
+
+/**
+ * The sub-collection paths reject anything but the 24-hex id, so every history call
+ * resolves the reference first — and an empty id is a not-found rather than a request
+ * against `/v1/ship/ideas//transition_histories`.
+ */
+async function resolveIdeaId(ctx: Ctx, target: string): Promise<string> {
+  const locator = await resolveShipRef(ctx, 'idea', requireFlag(target, '<idea>'));
+  if (locator.id === '') {
+    throw new NotFoundError(`could not resolve "${target}" to an idea id`);
+  }
+  return locator.id;
+}
+
 
 // ---------------------------------------------------------------------------
 // list / get

@@ -870,3 +870,210 @@ describe('product meta lookups', () => {
     expect(run.calls).toHaveLength(0);
   });
 });
+
+/**
+ * S4 — the 需求排期 and 需求流转记录 leaves, end to end through commander.
+ *
+ * The command-layer facts that the api layer cannot prove: `--product` is resolved
+ * before the schedule path is built, a history reference is resolved to a 24-hex id
+ * first (because the sub-collection rejects `short_id`/`identifier` upstream), and
+ * every one of the five new leaves keeps stdout JSON-only while sending zero writes.
+ */
+describe('product plan (需求排期, S4)', () => {
+  const plansPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 30,
+      total: 1,
+      values: [
+        {
+          id: 'plan-1',
+          name: '2026 Q3',
+          assignee: { id: 'u1', name: 'luoxiutao' },
+          start_at: 1780243027,
+          end_at: 1780620720,
+        },
+      ],
+    });
+
+  it('list resolves --product first and emits the raw envelope on stdout only', async () => {
+    const run = await runCli(
+      ['product', 'plan', 'list', '--product', 'SLC', '--json'],
+      [productsPage, plansPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(parseStdout(run)).toMatchObject({ total: 1, values: [{ id: 'plan-1' }] });
+    expect(run.calls.map((call) => new URL(call.url).pathname)).toEqual([
+      '/v1/ship/products',
+      '/v1/ship/products/prod-1/plans',
+    ]);
+    expect(run.stderr).toBe('');
+    expect(mutations(run)).toHaveLength(0);
+  });
+
+  it('list renders the window in human mode and counts rows on stderr', async () => {
+    const run = await runCli(['product', 'plan', 'list', '--product', 'SLC'], [productsPage, plansPage]);
+    expect(run.stdout).toContain('2026 Q3');
+    expect(run.stdout).toContain('START');
+    expect(run.stderr).toContain('row(s)');
+    expect(run.stdout).not.toContain('row(s)');
+  });
+
+  it('list --all walks pages and reports {values,count,all}', async () => {
+    const run = await runCli(
+      ['product', 'plan', 'list', '--product', 'SLC', '--all', '--page-size', '1', '--json'],
+      [
+        productsPage,
+        () => jsonResponse({ page_index: 0, page_size: 1, total: 2, values: [{ id: 'plan-1' }] }),
+        () => jsonResponse({ page_index: 1, page_size: 1, total: 2, values: [{ id: 'plan-2' }] }),
+        () => jsonResponse({ page_index: 2, page_size: 1, total: 2, values: [] }),
+      ],
+    );
+    expect(parseStdout(run)).toMatchObject({ count: 2, all: true });
+  });
+
+  it('get puts the plan under the resolved product', async () => {
+    const run = await runCli(
+      ['product', 'plan', 'get', 'plan-1', '--product', 'SLC', '--json'],
+      [productsPage, () => jsonResponse({ id: 'plan-1', name: '2026 Q3' })],
+    );
+    expect(run.exit).toBe(0);
+    expect(new URL(run.calls[1]?.url ?? '').pathname).toBe('/v1/ship/products/prod-1/plans/plan-1');
+  });
+
+  it('requires --product on both leaves, before any request', async () => {
+    for (const argv of [
+      ['product', 'plan', 'list', '--json'],
+      ['product', 'plan', 'get', 'plan-1', '--json'],
+    ]) {
+      const run = await runCli(argv, []);
+      expect(run.exit, argv.join(' ')).toBe(2);
+      expect(run.calls, argv.join(' ')).toHaveLength(0);
+    }
+  });
+
+  it('has no create/update/delete leaf: every write verb is HTTP 405 upstream', () => {
+    const program = buildProgram();
+    const plan = program.commands
+      .find((group) => group.name() === 'product')
+      ?.commands.find((group) => group.name() === 'plan');
+    expect(plan?.commands.map((leaf) => leaf.name()).sort()).toEqual(['get', 'list']);
+  });
+});
+
+describe('product idea history (流转记录, S4)', () => {
+  /**
+   * `SLC-1` matches `IDENTIFIER_RE`, so `resolveShipRef` resolves it through search —
+   * the two-request path. A dash-containing product prefix (`PD-YYHC-1`) misses that
+   * regex and takes the one-request direct GET instead; both were exercised live and
+   * both end up handing a 24-hex id to the sub-collection, which is the only form the
+   * endpoint accepts.
+   */
+  const ideaByIdentifier = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 20,
+      total: 1,
+      values: [{ id: 'i1', identifier: 'SLC-1', product: { id: 'prod-1' }, is_archived: 0 }],
+    });
+
+  const historyPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 30,
+      total: 2,
+      values: [
+        {
+          id: 'h1',
+          idea: { id: 'i1', identifier: 'SLC-1', title: 'single sign-on' },
+          from_state: null,
+          to_state: { id: 'st-1', name: '待排期' },
+          created_by: { id: 'u1', name: 'luoxiutao' },
+          created_at: 1780243027,
+        },
+        {
+          id: 'h2',
+          idea: { id: 'i1', identifier: 'SLC-1', title: 'single sign-on' },
+          from_state: { id: 'st-1', name: '待排期' },
+          to_state: { id: 'st-2', name: '已计划' },
+          created_by: { id: 'u1', name: 'luoxiutao' },
+          created_at: 1780274023,
+        },
+      ],
+    });
+
+  it('resolves the reference to a 24-hex id before the sub-collection call', async () => {
+    const run = await runCli(
+      ['product', 'idea', 'history', 'list', 'SLC-1', '--json'],
+      [ideaByIdentifier, historyPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls.map((call) => new URL(call.url).pathname)).toEqual([
+      '/v1/ship/ideas/search',
+      // …the sub-collection is addressed by id, never by the identifier that was typed:
+      // upstream answers a real HTTP 404 for anything but the id.
+      '/v1/ship/ideas/i1/transition_histories',
+    ]);
+    expect(run.stderr).toBe('');
+  });
+
+  it('prints (new) for the creation row rather than an empty FROM cell', async () => {
+    const run = await runCli(['product', 'idea', 'history', 'list', 'SLC-1'], [ideaByIdentifier, historyPage]);
+    expect(run.stdout).toContain('(new)');
+    expect(run.stdout).toContain('已计划');
+  });
+
+  it('get shows one row and labels the parent by identifier, not by raw id', async () => {
+    const run = await runCli(
+      ['product', 'idea', 'history', 'get', 'SLC-1', 'h2'],
+      [
+        ideaByIdentifier,
+        () =>
+          jsonResponse({
+            id: 'h2',
+            idea: { id: 'i1', identifier: 'SLC-1', title: 'single sign-on' },
+            from_state: { id: 'st-1', name: '待排期' },
+            to_state: { id: 'st-2', name: '已计划' },
+          }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(new URL(run.calls[1]?.url ?? '').pathname).toBe(
+      '/v1/ship/ideas/i1/transition_histories/h2',
+    );
+    expect(run.stdout).toContain('SLC-1');
+    expect(run.stdout).not.toMatch(/requirement\s+i1/);
+  });
+
+  it('reports a mismatched (idea, history) pair as not_found, i.e. exit 5', async () => {
+    const run = await runCli(
+      ['product', 'idea', 'history', 'get', 'SLC-1', 'h-of-another-idea', '--json'],
+      [ideaByIdentifier, () => jsonResponse({ code: '100740', message: '需求流转记录不存在' }, { status: 400 })],
+    );
+    expect(run.exit).toBe(5);
+    expect(run.stdout).toBe('');
+  });
+
+  it('offers no filter flag, because the endpoint ignores the ones it accepts', async () => {
+    const run = await runCli(
+      ['product', 'idea', 'history', 'list', 'SLC-1', '--keywords', 'x', '--json'],
+      [],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+  });
+});
+
+describe('product meta idea-plans (S4)', () => {
+  it('hits the singular idea lookup with ?product_id= and emits {values,count}', async () => {
+    const run = await runCli(
+      ['product', 'meta', 'idea-plans', '--product', 'SLC', '--json'],
+      [productsPage, () => jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'plan-1', name: '2026 Q3' }] })],
+    );
+    expect(run.exit).toBe(0);
+    const url = new URL(run.calls[1]?.url ?? '');
+    expect(url.pathname).toBe('/v1/ship/idea/plans');
+    expect(url.searchParams.get('product_id')).toBe('prod-1');
+    expect(parseStdout(run)).toEqual({ values: [{ id: 'plan-1', name: '2026 Q3' }], count: 1 });
+  });
+});

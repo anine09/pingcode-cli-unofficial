@@ -1,12 +1,16 @@
 import type { Command } from 'commander';
 import {
   getProduct,
+  getProductPlan,
+  iterateProductPlans,
   iterateProducts,
+  listIdeaPlans,
   listIdeaPriorities,
   listIdeaProperties,
   listIdeaStates,
   listIdeaSuites,
   listProductMembers,
+  listProductPlans,
   listProducts,
   listTicketChannels,
   listTicketPriorities,
@@ -20,6 +24,8 @@ import { resolveProduct } from '../../core/metadata';
 import { collect } from '../../core/paginate';
 import type {
   ShipChannel,
+  ShipPlan,
+  ShipPlanSummary,
   ShipPriority,
   ShipProduct,
   ShipProductMember,
@@ -74,6 +80,8 @@ type GetFlags = {
 };
 
 type ProductFlag = { product: string };
+
+const PRODUCT_HELP = 'product name, identifier such as SLC, or id';
 
 export const PRODUCT_COLUMNS: Column<ShipProduct>[] = [
   { header: 'IDENTIFIER', value: (p) => p.identifier ?? '' },
@@ -136,6 +144,20 @@ const SHIP_CHANNEL_COLUMNS: Column<ShipChannel>[] = [
   { header: 'DESCRIPTION', value: (c) => c.description ?? '', flex: true },
 ];
 
+const SHIP_PLAN_SUMMARY_COLUMNS: Column<ShipPlanSummary>[] = [
+  { header: 'ID', value: (p) => p.id },
+  { header: 'NAME', value: (p) => p.name ?? '', flex: true },
+];
+
+/** The full 排期 record; `product meta idea-plans` gets the thin one above. */
+const SHIP_PLAN_COLUMNS: Column<ShipPlan>[] = [
+  { header: 'ID', value: (p) => p.id },
+  { header: 'NAME', value: (p) => p.name ?? '', flex: true },
+  { header: 'ASSIGNEE', value: (p) => refName(p.assignee) },
+  { header: 'START', value: (p) => timestampCell(p.start_at) },
+  { header: 'END', value: (p) => timestampCell(p.end_at) },
+];
+
 export function registerProductCommands(program: Command): void {
   const product = program
     .command('product')
@@ -171,8 +193,110 @@ export function registerProductCommands(program: Command): void {
   // first, then the resource subgroups, then the lookups.
   registerIdeaCommands(product);
   registerTicketCommands(product);
+  registerProductPlanCommands(product);
   registerProductMetaCommands(product);
 }
+
+// ---------------------------------------------------------------------------
+// 需求排期 requirement schedules — read-only, and one of three unrelated "plans"
+// ---------------------------------------------------------------------------
+
+/**
+ * `pingcode product plan list|get` — 需求排期 (ship §E), the schedule a 需求 can be
+ * planned into and the values `product idea update --plan-id` takes.
+ *
+ * **Read-only, and provably rather than presumably**: `POST`, `PATCH` and `DELETE` on
+ * the path all answer HTTP 405 `Method Not Allowed` (live 2026-08-05), so there is no
+ * write leaf to add here later and no generic-layer route to one either.
+ *
+ * ⚠️ **"Plan" means three unrelated things in this API.** This group is the only 排期.
+ * `pingcode testhub plans …` is a 测试计划 — a test cycle. And the `*_state_plans` /
+ * `*_property_plans` families are **configuration schemes**, reachable only through
+ * `pingcode api`. An id from one is never valid in another.
+ */
+function registerProductPlanCommands(parent: Command): void {
+  const group = parent
+    .command('plan')
+    .description('需求排期 requirement schedules of a product, read-only (scope pcp:read:ship:product)');
+
+  group.addHelpText(
+    'after',
+    '\nThis is a 需求排期 — the schedule a requirement is planned into, and the only\n' +
+      'thing `pingcode product idea update --plan-id` accepts. It is NOT a 测试计划\n' +
+      '(`pingcode testhub plans`) and NOT a configuration scheme (`ticket_state_plans`,\n' +
+      '`idea_property_plans`), both of which this API also calls a "plan".\n' +
+      'Read-only: create, update and delete all answer HTTP 405 upstream, so they are\n' +
+      'unavailable through `pingcode api` too.\n' +
+      'There is no filter flag because the endpoint documents none and an undeclared\n' +
+      '`?name=` changed nothing when tried. Use --all and filter client-side.\n',
+  );
+
+  addGlobalOptions(
+    addPagingOptions(
+      group
+        .command('list')
+        .description('list the requirement schedules of a product')
+        .requiredOption('--product <name|id>', PRODUCT_HELP),
+    ),
+    { hidden: true },
+  ).action(async (flags: PagingFlags & ProductFlag, command: Command) => {
+    const { ctx } = contextFor(command);
+    const product = await resolveProduct(ctx, flags.product);
+    const paging = readPaging(flags);
+
+    if (paging.all) {
+      const values = await collect(
+        iterateProductPlans(ctx, product.id, {
+          pageSize: paging.pageSize,
+          limit: paging.limit,
+        }),
+      );
+      printCollection(values, SHIP_PLAN_COLUMNS, modeOf(ctx), { all: true });
+      return;
+    }
+
+    const page = await listProductPlans(ctx, product.id, {
+      pageIndex: paging.pageIndex,
+      pageSize: paging.pageSize,
+    });
+    printPage(page, SHIP_PLAN_COLUMNS, modeOf(ctx));
+  });
+
+  addGlobalOptions(
+    group
+      .command('get')
+      .description('show one requirement schedule')
+      .argument('<plan-id>', 'schedule id, as printed by `product plan list` — names are not lookup keys')
+      .requiredOption('--product <name|id>', PRODUCT_HELP)
+      .addHelpText(
+        'after',
+        '\nA missing schedule exits 7, not 5: the vendor code (100721) is also what an idea\n' +
+          'PATCH answers for an unknown --plan-id, and whether it can additionally mean\n' +
+          '"exists, but in another product" could not be measured — no tenant reached so far\n' +
+          'has a single 排期. Read the message, not just the exit code.\n',
+      ),
+    { hidden: true },
+  ).action(async (planId: string, flags: ProductFlag, command: Command) => {
+    const { ctx } = contextFor(command);
+    const product = await resolveProduct(ctx, flags.product);
+    const plan = await getProductPlan(ctx, product.id, requireFlag(planId, '<plan-id>'));
+
+    printResource(
+      plan,
+      [
+        ['id', plan.id],
+        ['name', plan.name ?? ''],
+        ['product', refName(plan.product)],
+        ['assignee', refName(plan.assignee)],
+        ['start', timestampCell(plan.start_at)],
+        ['end', timestampCell(plan.end_at)],
+        ['url', plan.url ?? ''],
+      ],
+      modeOf(ctx),
+    );
+  });
+}
+
 
 // ---------------------------------------------------------------------------
 // product meta: every ship lookup is scoped to one product
@@ -235,6 +359,12 @@ function registerProductMetaCommands(parent: Command): void {
     'writable idea property keys and their option ids — the only source for --set values',
     listIdeaProperties,
     SHIP_PROPERTY_COLUMNS,
+  );
+  productScoped(
+    'idea-plans',
+    'requirement schedules 需求排期 of a product (values for `idea update --plan-id`); `product plan list` shows the same rows with their dates',
+    listIdeaPlans,
+    SHIP_PLAN_SUMMARY_COLUMNS,
   );
   productScoped(
     'members',
