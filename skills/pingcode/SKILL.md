@@ -58,8 +58,12 @@ Credentials come from a PingCode application, not from a user account:
 2. Set 鉴权方式 (grant type) to **Client Credentials**.
 3. Grant these scopes:
    - `pcp:read:pjm:project` — projects
-   - `pcp:read:pjm:workitem` — work items, types, states, priorities
-   - `pcp:write:pjm:workitem` — create/update work items
+   - `pcp:write:pjm:project` — `project create` / `project update` / `project member add`. Grant
+     this one deliberately: **a project can never be deleted or archived** through this API, so
+     `project create` is irreversible
+   - `pcp:read:pjm:workitem` — work items, types, states, priorities, tags, relation types
+   - `pcp:write:pjm:workitem` — create/update/**delete** work items, plus links, tags and
+     `bulk-update`
    - `pcp:read:global:team` — `pingcode settings users`
    - `pcp:read:pjm:sprint` / `pcp:write:pjm:sprint` — `pingcode project meta sprints` (the sprint
      list) and `project sprint get|create|update|bulk`. Grant the write half only if you intend to

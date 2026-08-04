@@ -133,6 +133,25 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['sprints cannot be deleted', /A sprint cannot be deleted/i],
   ['releases', /pingcode project version (list|get|create|update|delete|bulk)/],
   ['release is not a wiki page version', /not a wiki page revision/i],
+  // S2b — the work-item write surface plus project writes and members. Eight rows, and
+  // six of them exist because the thing an agent gets wrong is invisible from `--help`:
+  // `bulk-update` reports success for a property it ignored, a project can never be
+  // deleted or archived, `work-item tag list` does not exist, the tag vocabulary answers
+  // for the whole organisation while the write does not, `member remove` is generic-layer
+  // only, and — the one that makes an agent loop — `link` and `relation` are two
+  // different families that each refuse what the other takes.
+  ['work-item bulk update', /pingcode project work-item bulk-update .*--id /],
+  ['bulk update ignores sprint_id', /`?--sprint`? does not exist here/i],
+  ['work-item deletion', /pingcode project work-item delete .*--yes/],
+  ['typed work-item links', /pingcode project work-item link (add|list|get|delete)/],
+  ['link is not relation', /`?link`? is work item ↔ work item, with a required type/i],
+  ['no work-item tag list', /no `?work-item tag list`?, and there cannot be/i],
+  ['work-item state history', /pingcode project work-item history (list|get)/],
+  ['project writes are irreversible', /A project cannot be deleted, and cannot even be archived/i],
+  ['project members', /pingcode project member (list|get|add)/],
+  ['member remove is generic-layer only', /pingcode api DELETE \/v1\/pjm\/projects\//],
+  ['relation types are organisation-wide', /pingcode project meta relation-types/],
+  ['tag vocabulary is organisation-wide', /pingcode project meta tags/],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {
@@ -155,6 +174,11 @@ describe('SKILL.md records the contract that does not scale with the surface (PR
     expect(skill).toContain('凭据管理');
     for (const scope of [
       'pcp:read:pjm:project',
+      // S2b: the only genuinely new scope in the whole child — its other nineteen
+      // endpoints all fall under `pjm:project` / `pjm:workitem` read+write, already
+      // listed. Worth its own row because it is the one that makes an irreversible
+      // create possible.
+      'pcp:write:pjm:project',
       'pcp:read:pjm:workitem',
       'pcp:write:pjm:workitem',
       'pcp:read:global:team',
