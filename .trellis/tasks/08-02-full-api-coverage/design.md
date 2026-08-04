@@ -3224,3 +3224,97 @@ pull_requests 3 · builds 1 · environments 1 · deploys 1 · commits 3836 · sp
 6. **未提交进仓库**：`chain.sh` / `totals.sh` / `verify.sh` 与全部逐调用日志都留在
    `$HOME/tmp/x3/`，因为它们硬编码了租户 id，而 `.trellis/spec` 禁止把租户值写进仓库。
    复现方式写在 `research/x3-a1-closed-loop.md` §10。
+
+## D20. 收尾修补：`work-item update` 长出 `--sprint` / `--release` — 2026-08-05
+
+D19.2 的观测**全部成立、原样保留**：在那一刻 `work-item update` 确实既没有 `--sprint` 也没有
+`--version`，`bulk-update` 确实对两个字段答 200 / `updated: 0`，通用层确实是唯一路径。本节只记
+**那个缺口已被关闭**、新 flag 是什么形状、以及重验结果。D19.2 末尾「留给 orchestrator 判」的那个
+问题，答案是「补」。
+
+### D20.1 落地形状：`--sprint`（标量）+ `--release`（可重复，整体替换）
+
+```
+project work-item update <ref> --sprint <name|id>
+project work-item update <ref> --release <name|id> [--release <name|id> …]
+```
+
+- `sprint_id` 是标量 → `--sprint` 取一个值。
+- `version_ids` 是数组且**整体替换** → `--release` 用既有的 `collectValue` 可重复，收集到的列表
+  就是新的完整值。**选可重复而不是「单值包成单元素数组」**，理由有三：(a) 一个工作项确实可以挂多个
+  发布（`versions[]` 本就是复数，`parseWorkItem` 也已按数组解析），单值形态会把「多发布」这一个
+  用例继续赶去通用层，等于只关闭一半缺口；(b) `projectSprint.ts` 的 `--category-id`
+  (`'…repeatable — replaces the whole set'`) 已经是仓库里同一形状的先例，零新机制；(c) 替换语义
+  在可重复形态下**可以被表达**（「把这个工作项最终应该在的发布全部传进来」），在单值形态下只能靠
+  文档提醒。代价是无法清空 —— 但 D20.3 证明**任何形态都无法清空**，所以这不是可重复方案的代价。
+- 第二个及之后的 `--release` **不额外发请求**：第一次解析写进的 24 h 缓存就是后续的候选表
+  （单测已断言 `/versions` 只被读一次）。
+- **无需 `--project`**：两个名字都是项目级作用域，而项目是从工作项自身读出来的（`locator.projectId`），
+  与 `--priority` 走同一个守卫；payload 不报 project 时仍是原来的 exit 2。
+
+### D20.2 推翻 brief 的一个前提：flag 不能叫 `--version`
+
+brief 要求的是 `--version`。**这个名字结构上不可用**，实测（编译产物，2026-08-05）：
+
+```
+$ node dist/bin/pingcode.js project work-item update YYHC-225 --version "[CLI smoke] x3 v…" --json
+0.1.0
+exit=0
+```
+
+根命令用 `.version(VERSION, '--version', …)` 占了这个长名，而 commander 的**根命令会跨整个 argv
+解析自己认识的选项**（这正是「全局 flag 可以放在子命令前后」的实现方式），所以子命令根本拿不到它。
+结果是**打印版本号、exit 0、一个请求都不发** —— 正是本任务反复在上游发现、并反复拒绝引入的那种
+「报告成功却什么都没做」的失败形态。
+
+改名 `--release`：`pjm-version` 这一行的 `label` 本来就是 `release`，API 自己叫 发布，而 `version`
+是这套 API 最过载的词（D7.2）。`test/help/project.test.ts` 同时断言 `--release` **在**、`--version`
+**不在**，把这个陷阱钉住，防止后人「修正」命名时把静默 no-op 装回来。
+
+### D20.3 新的实机发现：sprint / release **无法清空**
+
+复原 YYHC-225 时撞出来的，四条对照（全部 2026-08-05 实测）：
+
+| body | 结果 |
+|---|---|
+| `{"version_ids":[]}` | 400 `100006` `'version_ids'不是有效的数组(数组不能为空)` |
+| `{"version_ids":[""]}` | 400 `100006` `'version_ids[0]'不是有效的字符串(值不能为空)` |
+| `{"version_ids":null}` | **200，且什么都没变**（复读仍挂着原发布） |
+| `{"sprint_id":null}` | **200，且什么都没变** |
+| `{"sprint_id":""}` | 400 `100003` `不是有效的字符串(值不能为空)` |
+
+即：**可以换到另一个迭代/发布，但无法从所有迭代/发布上摘下来** —— 通用层也不行。这条否掉了本次
+文档初稿里「清空要走通用层」的说法（那是我写下时未经验证的推测），已改成实测事实写进
+`pjm.md` 与 `update --help`。`null` 那两行又是一次「接受即忽略」，与 `release deploy` 的 `env_id`
+同类。**不进 `ERROR_CODE_OVERRIDES`**：`100006` / `100003` 是输入校验，exit 7 正确。
+
+### D20.4 五项重验（外加两项）
+
+| # | 项 | 结果 |
+|---|---|---|
+| 1 | `--dry-run` 计划正确、零写入 | ✅ body 恰为 `{sprint_id, version_ids:[…]}`，`Authorization: ***REDACTED***`，事后复读工作项未变 |
+| 2 | `--sprint <id>` 实机 + **读回** | ✅ `s-e2e` → `s-bulk-e2e-1`（读回确认，不只看 200） |
+| 3 | `--release <id>` 实机 + **读回** | ✅ `versions: []` → `["[CLI smoke] x3 v1785875150"]` |
+| 4 | 两者各用**名字**跑一次 | ✅ 一次 PATCH 同时带 `sprint_id` + `version_ids`，读回 `s-e2e` + 该发布 —— 两个 resolver 都真的接上了 |
+| 5 | `bulk-update` 对两个字段仍 200 / `updated: 0` | ✅ 两次调用都是 `{inserts:0,updates:0,deletes:0}`，CLI 照常告警，读回证明**确实没变** |
+| +6 | 可重复 `--release` 与替换语义 | ✅ 一次调用挂两个发布；再传一个 → 列表变回一个（**替换而非追加**，实测） |
+| +7 | 服务端审计 | ✅ 6 次精修写产生 6 行 activity（`property_key: iteration` × 2 / `version` × 4，带 `origin`/`target`），两次 `bulk-update` 产生 **0 行** —— D19 那条「bulk 无审计」的反面证据这次同时被复核 |
+
+反面路径顺带各跑一次：未知发布名 → exit 2 `no release matches "…"`、零写入；空 patch 的 hint 现在
+点名了两个新 flag。
+
+### D20.5 基线与残留
+
+叶子 **254**、命令组 **10**、端点 **未增减**（只是给既有的
+`PATCH /v1/pjm/work_items/{id}` 加 flag，S2b 的 20 条与八 child 合计 92 的恒等式不动）；
+`src/cli/registry.ts`、`test/help/__snapshots__/root.test.ts.snap`、`src/core/**`、`src/cli/output.ts`、
+`src/cli/commands/common.ts`、`README.md`、`package*.json` **零 diff**；`src/core/metadata/registry.ts`
+未改（两个 resolver kind 都已存在，没有新 `resolve` 叶子）。测试 **1522 → 1530**（+7 命令层、
++1 help 层），49 个文件不变。
+
+**租户残留：新建 0 个净残留。** 为验证可重复 `--release` 建了 1 个发布
+`[CLI smoke] f-relflag 1785878979`（`6a7259c4…`），验完**已用 `project version delete` 删除**，
+`version list` 复核只剩 X3 那一个。其余全部复用 X3 留下的对象（`YYHC-225`、`s-e2e`、
+`s-bulk-e2e-1`、`x3 v1785875150`）。**一处不可逆的状态变化**：`YYHC-225` 现在挂着
+`[CLI smoke] x3 v1785875150`（原为 `versions: []`），因为 D20.3 —— 发布列表清不掉。迭代已复原为
+原值 `s-e2e`。

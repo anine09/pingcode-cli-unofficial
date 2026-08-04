@@ -208,6 +208,44 @@ describe('project command surface', () => {
     }
   });
 
+  /**
+   * The X3 gap that this repair closes, pinned from the flag side.
+   *
+   * `PATCH /v1/pjm/work_items/{id}` accepts `sprint_id` and `version_ids`; before this,
+   * only `create` carried `--sprint` and nothing carried the release, so an item that
+   * already existed could join either **only** through `pingcode api PATCH`.
+   *
+   * The name matters more than the presence. `--version` is **not available**: the root
+   * program owns it, commander's root parses options across the whole argv, and
+   * `work-item update <id> --version 1.4.0` therefore prints `0.1.0` and exits 0 having
+   * sent nothing (observed on the built binary, 2026-08-05). A flag that reports success
+   * while doing nothing is the failure mode this whole task keeps finding upstream, so it
+   * must not be introduced here — hence the negative assertion.
+   */
+  it('lets an existing work item join a sprint and a release, and refuses to name the release flag --version', () => {
+    const update = commandAt(program(), ['project', 'work-item', 'update']);
+    const flags = update.options.map((option) => option.long);
+    expect(flags).toContain('--sprint');
+    expect(flags).toContain('--release');
+    // Would be swallowed by the root's own --version.
+    expect(flags).not.toContain('--version');
+    // `sprint_id` is a scalar and `version_ids` an array that replaces, so exactly one
+    // of the two is variadic — the shape difference has to survive in the surface.
+    expect(update.options.find((option) => option.long === '--sprint')?.variadic).toBeFalsy();
+    const help = fullHelpFor(['project', 'work-item', 'update']);
+    expect(help).toContain('repeatable');
+    expect(help).toContain('REPLACES');
+    // And `bulk-update` still may not grow either one: it answers 200 / `updated: 0`.
+    const bulk = commandAt(program(), ['project', 'work-item', 'bulk-update']).options.map(
+      (option) => option.long,
+    );
+    expect(bulk).not.toContain('--sprint');
+    expect(bulk).not.toContain('--release');
+    expect(fullHelpFor(['project', 'work-item', 'bulk-update'])).toContain(
+      'work-item update --sprint',
+    );
+  });
+
   it('marks the search-only list filters and keeps them off the simple-list path', () => {
     // The two transports accept **different filters**, which is why the switch has to be
     // visible in `--help` at all. It is *not* because search pages differently: it pages

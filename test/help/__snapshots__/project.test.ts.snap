@@ -305,14 +305,12 @@ The endpoint takes ONE property_name and ONE value, so exactly one of --assignee
 --assignee-id / --state / --state-id / --priority / --priority-id / --title /
 --description / --property must be given. Two properties need two calls.
 Verified to work upstream: assignee_id, state_id, priority_id, title, description.
-Verified ACCEPTED AND SILENTLY IGNORED (HTTP 200, "updated 0"): sprint_id — so a
-bulk move into a sprint is NOT possible; move items ONE AT A TIME with
-\`pingcode api PATCH /v1/pjm/work_items/<id> --set sprint_id=<sprint-id>\`, because no
-refined leaf carries sprint_id on update either (\`work-item update\` has no --sprint;
-only \`work-item create\` does). The same holds for version_ids, which needs --body
-since it is an array. Also ignored here: type_id, version_ids, tag_ids,
-participant_ids, properties, bug_type_id, entry_id, swimlane_id, phase_id.
-parent_id and board_id are refused outright.
+Verified ACCEPTED AND SILENTLY IGNORED (HTTP 200, "updated 0"): sprint_id and
+version_ids — so a bulk move into a sprint or onto a release is NOT possible here,
+however valid the id. Do it ONE AT A TIME with \`work-item update --sprint <s>\` /
+\`work-item update --release <r>\`, which patch the single-item endpoint and do work.
+Also ignored here: type_id, tag_ids, participant_ids, properties, bug_type_id,
+entry_id, swimlane_id, phase_id. parent_id and board_id are refused outright.
 --property is the escape hatch for anything not listed; it is not validated, and a
 property the server ignores still answers 200, so always read the "updated" count.
 Other live facts worth knowing before scripting this:
@@ -493,6 +491,9 @@ Options:
   --assignee <name|id>      new assignee
   --priority <name|id>      new priority
   --parent <ref>            new parent work item
+  --sprint <name|id>        move into this sprint (scrum/hybrid projects only)
+  --release <name|id>       发布/release to put this item on, repeatable — replaces the whole list
+                            (--version is the CLI's own flag)
   --start-at <when>         unix seconds or a date like 2026-01-31
   --end-at <when>           unix seconds or a date like 2026-01-31
   --story-points <n>        story points

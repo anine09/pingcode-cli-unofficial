@@ -108,6 +108,14 @@ export type UpdateWorkItemInput = {
   state_id?: string | undefined;
   assignee_id?: string | undefined;
   parent_id?: string | undefined;
+  /**
+   * 迭代. A **scalar**, unlike `version_ids` below — the two fields that move an
+   * existing item onto a plan have deliberately different shapes upstream, and both
+   * are accepted by `PATCH /v1/pjm/work_items/{id}` (live 2026-08-05, design D20.1).
+   * The bulk PATCH takes neither: it answers 200 / `updated: 0` for both.
+   */
+  sprint_id?: string | undefined;
+  /** **Replaces** the whole array (design §7.2), and the server type-checks it. */
   version_ids?: string[] | undefined;
   board_id?: string | undefined;
   entry_id?: string | undefined;

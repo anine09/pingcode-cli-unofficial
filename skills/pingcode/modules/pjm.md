@@ -172,9 +172,9 @@ invocations. Four things about it that will bite an agent that assumes otherwise
 - **`--sprint` does not exist here, deliberately.** `property_name: sprint_id` is accepted with
   HTTP 200 and `updated: 0`, and changes nothing (verified live). The same is true of `type_id`,
   `tag_ids`, `version_ids`, `participant_ids`, `properties` and `bug_type_id`. Moving items into a
-  sprint has to go one at a time through the generic layer — see the next section. Only
-  `assignee_id`, `state_id`, `priority_id`, `title` and `description` actually apply;
-  `--property` is the unvalidated escape hatch for anything else.
+  sprint or onto a release has to go one at a time through `work-item update --sprint` /
+  `--release` — see the next section. Only `assignee_id`, `state_id`, `priority_id`, `title` and
+  `description` actually apply; `--property` is the unvalidated escape hatch for anything else.
 - **Always read the `updated` count.** It is the *only* signal the endpoint gives: a nonexistent id,
   a silently-rejected value and an unsupported property all answer 200. The CLI warns when `updated`
   is less than the number of ids sent — treat that warning as "verify by reading the items back".
@@ -185,21 +185,37 @@ invocations. Four things about it that will bite an agent that assumes otherwise
 
 #### Moving an existing item into a sprint, or onto a release
 
-**No refined leaf can do either.** `work-item create` takes `--sprint`, but `work-item update`
-takes neither `--sprint` nor `--version`, and `bulk-update` answers 200 / `updated: 0` for both.
-So for an item that already exists, the generic layer is the only path — both forms verified live
-2026-08-05:
+`work-item update` carries both, and it is the only refined path: `bulk-update` answers
+200 / `updated: 0` for `sprint_id` and `version_ids` alike, however valid the id (verified live
+2026-08-05, and again after these flags landed).
 
 ```bash
-pingcode api PATCH /v1/pjm/work_items/<id> --set sprint_id=<sprint-id>
-pingcode api PATCH /v1/pjm/work_items/<id> --body '{"version_ids":["<version-id>"]}'
+pingcode project work-item update SCR-5 --sprint "Sprint 12" --json
+pingcode project work-item update SCR-5 --release "1.4.0" --json
+pingcode project work-item update SCR-5 --release "1.4.0" --release "1.4.1-hotfix" --json
 ```
 
-- **`version_ids` needs `--body`, not `--set`.** `--set` sends its value verbatim as a *string*, and
-  this is one of the few fields the server actually type-checks: a stringified array is
-  `100006 'version_ids'不是有效的数组`, exit 7, nothing written. `sprint_id` is a scalar, so `--set`
-  is fine there.
-- **`version_ids` replaces the whole array.** Read the item first if you mean to add rather than set.
+- **The release flag is `--release`, NOT `--version`.** `--version` belongs to the CLI itself, and
+  because commander's root parses options across the whole argv it wins even after the subcommand:
+  `work-item update <id> --version 1.4.0` prints `0.1.0` and **exits 0 having sent nothing**. Do not
+  reach for it. These are the same 发布 that `project version list` prints.
+- **The two fields have different shapes upstream, so the flags differ.** `sprint_id` is a
+  **scalar**: one `--sprint`, and moving between sprints is a single call. `version_ids` is an
+  **array that replaces**: `--release` is repeatable, and the releases you pass become the complete
+  list. Pass every release the item should end up on in one invocation; read the current ones off
+  `work-item get` first if you mean to add rather than set.
+- **No `--project` is needed.** Both names resolve per project, and the project comes off the work
+  item itself. Repeating `--release` costs no extra round-trip: the second name hits the list the
+  first one cached.
+- **Neither field can be EMPTIED — not by these flags and not by any other route.** Omitting
+  `--release` leaves the list alone, and the generic layer cannot clear it either (all live
+  2026-08-05): `--body '{"version_ids":[]}'` is refused with
+  `100006 'version_ids'不是有效的数组(数组不能为空)`, `[""]` with `不是有效的字符串`, and
+  `{"version_ids":null}` answers **200 and changes nothing** — the accepted-and-ignored pattern this
+  API keeps repeating. `sprint_id` behaves identically (`null` → 200 no-op, `""` → `100003`). You can
+  move an item to a *different* sprint or release; you cannot take it off all of them. `version_ids`
+  is also one of the few fields the server really type-checks, so a stringified array via `--set` is
+  `100006`, exit 7, nothing written — use `--body` if you go around the flags.
 - Both changes *are* audited, unlike `bulk-update`: they show up in `work-item activity list` as
   `property_key: iteration` and `property_key: version`, with `origin`/`target` — which is also how
   you verify them without trusting the 200.

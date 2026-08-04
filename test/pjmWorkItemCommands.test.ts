@@ -287,6 +287,173 @@ describe('project work-item list — transport switch', () => {
 });
 
 // ---------------------------------------------------------------------------
+// update: --sprint (a scalar) and --version (an array that replaces)
+// ---------------------------------------------------------------------------
+
+const SPRINT = '6a715951a2f1bc8bb00ebf51';
+const OTHER_SPRINT = '6a715951a2f1bc8bb00ebf58';
+const VERSION = '6a724ad33e127a186f11372c';
+const OTHER_VERSION = '6a724ad33e127a186f113730';
+
+const sprintsPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 2,
+    values: [
+      { id: SPRINT, name: 'Sprint 12', status: 'in_progress' },
+      { id: OTHER_SPRINT, name: 'Sprint 11', status: 'completed' },
+    ],
+  });
+
+const versionsPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 2,
+    values: [
+      { id: VERSION, name: '1.4.0' },
+      { id: OTHER_VERSION, name: '1.4.1-hotfix' },
+    ],
+  });
+
+/**
+ * The X3 gap, closed. `PATCH /v1/pjm/work_items/{id}` accepts both fields (live
+ * 2026-08-05) but only `create` carried `--sprint`, so an item that already existed
+ * could join a sprint or a release **only** through `pingcode api PATCH`. The bulk
+ * endpoint is not an alternative: it answers 200 / `updated: 0` for both.
+ *
+ * The asymmetry worth pinning here is the *shape*: `sprint_id` is a scalar and
+ * `version_ids` is an array that replaces, so `--release` is repeatable and the
+ * collected list is the whole new value. A single `--release` must therefore still
+ * arrive as a one-element array, not a string — that is the field the server really
+ * type-checks (400 `100006`), which is why it gets its own assertion.
+ *
+ * The flag is `--release` and not `--version` because the root program owns
+ * `--version` and commander's root parses options across the whole argv: the
+ * asserted-against alternative printed `0.1.0` and exited 0 without sending anything
+ * (observed on the built binary, 2026-08-05). `test/help/project.test.ts` pins the
+ * name so it cannot be "corrected" back into a silent no-op.
+ */
+describe('project work-item update — --sprint and --release', () => {
+  it('resolves a sprint NAME against the item\'s own project and sends a scalar sprint_id', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'update', ITEM, '--sprint', 'Sprint 12'],
+      [itemResponse, sprintsPage, itemResponse],
+    );
+
+    expect(run.exit).toBe(0);
+    // No --project on this command: the project comes off the work item, so the
+    // lookup has to be scoped by what the first read reported.
+    const lookup = run.calls[1];
+    expect(lookup?.method).toBe('GET');
+    expect(lookup?.url).toContain(`/v1/pjm/projects/${PROJECT}/sprints`);
+    const write = run.writes[0];
+    expect(write?.method).toBe('PATCH');
+    expect(write?.url).toContain(`/v1/pjm/work_items/${ITEM}`);
+    expect(write?.body).toEqual({ sprint_id: SPRINT });
+  });
+
+  it('wraps ONE --release into the one-element array the field demands', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'update', ITEM, '--release', '1.4.0'],
+      [itemResponse, versionsPage, itemResponse],
+    );
+
+    expect(run.exit).toBe(0);
+    expect(run.calls[1]?.url).toContain(`/v1/pjm/projects/${PROJECT}/versions`);
+    // Not `version_ids: '1.4.0…'` — a stringified value is 400 `100006` upstream.
+    expect(run.writes[0]?.body).toEqual({ version_ids: [VERSION] });
+  });
+
+  it('collects a repeated --release into the whole replacement list, in order', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'update', ITEM, '--release', '1.4.0', '--release', '1.4.1-hotfix'],
+      [itemResponse, versionsPage, itemResponse],
+    );
+
+    expect(run.exit).toBe(0);
+    expect(run.writes[0]?.body).toEqual({ version_ids: [VERSION, OTHER_VERSION] });
+    // Two names, ONE list read: the second resolution comes off the cache the first
+    // one wrote, so a multi-release move costs no extra round-trip per release.
+    expect(run.calls.filter((call) => call.url.includes('/versions'))).toHaveLength(1);
+  });
+
+  it('sends both fields plus a scalar in a single PATCH', async () => {
+    const run = await runCli(
+      [
+        'project',
+        'work-item',
+        'update',
+        ITEM,
+        '--sprint',
+        SPRINT,
+        '--release',
+        VERSION,
+        '--title',
+        'login times out (v2)',
+      ],
+      [itemResponse, sprintsPage, versionsPage, itemResponse],
+    );
+
+    expect(run.exit).toBe(0);
+    expect(run.writes).toHaveLength(1);
+    expect(run.writes[0]?.body).toEqual({
+      title: 'login times out (v2)',
+      sprint_id: SPRINT,
+      version_ids: [VERSION],
+    });
+  });
+
+  it('names both flags in the empty-patch refusal, and sends nothing at all', async () => {
+    const run = await runCli(['project', 'work-item', 'update', ITEM], []);
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('--sprint');
+    expect(run.stderr).toContain('--release');
+    // The guard runs before the reference is even resolved.
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('resolves both names under --dry-run and still sends nothing', async () => {
+    const run = await runCli(
+      [
+        'project',
+        'work-item',
+        'update',
+        ITEM,
+        '--sprint',
+        'Sprint 12',
+        '--release',
+        '1.4.0',
+        '--dry-run',
+        '--json',
+      ],
+      [itemResponse, sprintsPage, versionsPage],
+    );
+
+    expect(run.exit).toBe(0);
+    expect(run.writes).toHaveLength(0);
+    const plan = JSON.parse(run.stdout) as {
+      dry_run: boolean;
+      request: { method: string; body: Record<string, unknown> };
+    };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.method).toBe('PATCH');
+    expect(plan.request.body).toEqual({ sprint_id: SPRINT, version_ids: [VERSION] });
+  });
+
+  it('refuses an unknown release by name, listing the real ones, before any write', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'update', ITEM, '--release', '9.9.9'],
+      [itemResponse, versionsPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('1.4.0');
+    expect(run.writes).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // bulk-update
 // ---------------------------------------------------------------------------
 

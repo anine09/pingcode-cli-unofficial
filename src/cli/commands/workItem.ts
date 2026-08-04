@@ -33,6 +33,7 @@ import { ApiError, NotFoundError, PingcodeError, UsageError } from '../../core/e
 import {
   parseWorkItemRef,
   resolveProject,
+  resolveProjectVersion,
   resolveRelationType,
   resolveSprint,
   resolveUser,
@@ -129,6 +130,12 @@ type UpdateFlags = StateFlags & {
   assignee?: string | undefined;
   priority?: string | undefined;
   parent?: string | undefined;
+  sprint?: string | undefined;
+  /**
+   * Repeatable, and the collected list **replaces** `version_ids` wholesale. Named
+   * `--release`, not `--version`, for a hard reason — see the note on the option.
+   */
+  release?: string[] | undefined;
   startAt?: string | undefined;
   endAt?: string | undefined;
   storyPoints?: string | undefined;
@@ -258,6 +265,18 @@ export function registerWorkItemCommands(parent: Command): void {
         .option('--assignee <name|id>', 'new assignee')
         .option('--priority <name|id>', 'new priority')
         .option('--parent <ref>', 'new parent work item')
+        .option('--sprint <name|id>', 'move into this sprint (scrum/hybrid projects only)')
+        // NOT `--version`: the root program owns that flag, and commander's root parses
+        // options across the whole argv, so `work-item update X --version 1.4.0` prints
+        // the CLI version and exits 0 without sending anything (verified 2026-08-05 on
+        // the built binary). A flag that silently succeeds while doing nothing is the
+        // worst available failure, so the field takes the resolver's own label —
+        // `pjm-version` is labelled *release*, and 发布 is what the API calls it.
+        .option(
+          '--release <name|id>',
+          '发布/release to put this item on, repeatable — replaces the whole list (--version is the CLI\'s own flag)',
+          collectValue,
+        )
         .option('--start-at <when>', 'unix seconds or a date like 2026-01-31')
         .option('--end-at <when>', 'unix seconds or a date like 2026-01-31')
         .option('--story-points <n>', 'story points')
@@ -266,9 +285,33 @@ export function registerWorkItemCommands(parent: Command): void {
       'new state',
     ),
     { hidden: true },
-  ).action(async (target: string, flags: UpdateFlags, command: Command) => {
-    await runUpdate(target, flags, command);
-  });
+  )
+    .addHelpText(
+      'after',
+      '\n--sprint and --release are how an item that already EXISTS joins a sprint or a\n' +
+        'release; `create` has --sprint too, and `bulk-update` can do neither (it answers\n' +
+        '200 / "updated 0" for sprint_id and version_ids alike, verified live).\n' +
+        'The two fields have different shapes upstream, which is why the flags differ:\n' +
+        '  - sprint_id is a SCALAR, so --sprint takes one sprint and moving an item from\n' +
+        '    one sprint to another is a single call;\n' +
+        '  - version_ids is an ARRAY that REPLACES, so --release is repeatable and the\n' +
+        '    releases you pass become the complete list. Pass every release the item\n' +
+        '    should end up on, in one invocation — `work-item get` prints the current\n' +
+        '    ones. Omitting --release leaves the list alone.\n' +
+        'NEITHER field can be EMPTIED, here or anywhere: `version_ids: []` is refused\n' +
+        '(400 100006 "数组不能为空"), `null` answers 200 and changes nothing, and sprint_id\n' +
+        'behaves the same (live 2026-08-05). You can move an item to a DIFFERENT sprint or\n' +
+        'release; you cannot take it off all of them.\n' +
+        'The flag is --release and NOT --version because `--version` belongs to the CLI\n' +
+        'itself: it would print 0.1.0 and exit 0 without sending anything. This is the\n' +
+        'same 发布/release these ids come from — `project version list` prints them.\n' +
+        'Both names resolve per PROJECT, and the project comes from the work item itself,\n' +
+        'so no --project is needed here. Both changes are audited: they appear in\n' +
+        '`work-item activity list` as property_key iteration / version.\n',
+    )
+    .action(async (target: string, flags: UpdateFlags, command: Command) => {
+      await runUpdate(target, flags, command);
+    });
 
   addGlobalOptions(
     addStateOptions(
@@ -322,14 +365,12 @@ export function registerWorkItemCommands(parent: Command): void {
         '--assignee-id / --state / --state-id / --priority / --priority-id / --title /\n' +
         '--description / --property must be given. Two properties need two calls.\n' +
         'Verified to work upstream: assignee_id, state_id, priority_id, title, description.\n' +
-        'Verified ACCEPTED AND SILENTLY IGNORED (HTTP 200, "updated 0"): sprint_id — so a\n' +
-        'bulk move into a sprint is NOT possible; move items ONE AT A TIME with\n' +
-        '`pingcode api PATCH /v1/pjm/work_items/<id> --set sprint_id=<sprint-id>`, because no\n' +
-        'refined leaf carries sprint_id on update either (`work-item update` has no --sprint;\n' +
-        'only `work-item create` does). The same holds for version_ids, which needs --body\n' +
-        'since it is an array. Also ignored here: type_id, version_ids, tag_ids,\n' +
-        'participant_ids, properties, bug_type_id, entry_id, swimlane_id, phase_id.\n' +
-        'parent_id and board_id are refused outright.\n' +
+        'Verified ACCEPTED AND SILENTLY IGNORED (HTTP 200, "updated 0"): sprint_id and\n' +
+        'version_ids — so a bulk move into a sprint or onto a release is NOT possible here,\n' +
+        'however valid the id. Do it ONE AT A TIME with `work-item update --sprint <s>` /\n' +
+        '`work-item update --release <r>`, which patch the single-item endpoint and do work.\n' +
+        'Also ignored here: type_id, tag_ids, participant_ids, properties, bug_type_id,\n' +
+        'entry_id, swimlane_id, phase_id. parent_id and board_id are refused outright.\n' +
         '--property is the escape hatch for anything not listed; it is not validated, and a\n' +
         'property the server ignores still answers 200, so always read the "updated" count.\n' +
         'Other live facts worth knowing before scripting this:\n' +
@@ -997,12 +1038,14 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
     wantsState ||
     flags.assignee !== undefined ||
     flags.priority !== undefined ||
-    flags.parent !== undefined;
+    flags.parent !== undefined ||
+    flags.sprint !== undefined ||
+    (flags.release !== undefined && flags.release.length > 0);
 
   // An empty PATCH is a usage error (exit 2), never a no-op round-trip (design §7.2).
   if (Object.keys(scalarPatch).length === 0 && !wantsReference) {
     throw new UsageError('nothing to update: no updatable field was given', {
-      hint: 'pass at least one of --title / --description / --state / --state-id / --assignee / --priority / --parent / --start-at / --end-at / --story-points / --estimated-workload / --remaining-workload',
+      hint: 'pass at least one of --title / --description / --state / --state-id / --assignee / --priority / --parent / --sprint / --release / --start-at / --end-at / --story-points / --estimated-workload / --remaining-workload',
     });
   }
 
@@ -1052,6 +1095,21 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
       flags.assignee === undefined ? undefined : await resolveUser(attemptCtx, flags.assignee);
     const parent =
       flags.parent === undefined ? undefined : await resolveWorkItem(attemptCtx, flags.parent);
+    // Both are project-scoped, and the project came off the item — so unlike `create`
+    // this command needs no --project (the guard above already refused a payload that
+    // reports none). `sprint_id` is a scalar; `version_ids` is an array that replaces,
+    // which is why `--release` is repeatable and every value is resolved in order. The
+    // second and later releases cost no request: they hit the list the first one cached.
+    const sprint =
+      flags.sprint === undefined || projectId === undefined
+        ? undefined
+        : await resolveSprint(attemptCtx, projectId, flags.sprint);
+    const releases: ResolveResult[] = [];
+    if (flags.release !== undefined && projectId !== undefined) {
+      for (const input of flags.release) {
+        releases.push(await resolveProjectVersion(attemptCtx, projectId, input));
+      }
+    }
 
     const patch: UpdateWorkItemInput = {
       ...scalarPatch,
@@ -1059,9 +1117,14 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
       ...(priority === undefined ? {} : { priority_id: priority.id }),
       ...(assignee === undefined ? {} : { assignee_id: assignee.id }),
       ...(parent === undefined ? {} : { parent_id: parent.id }),
+      ...(sprint === undefined ? {} : { sprint_id: sprint.id }),
+      ...(releases.length === 0 ? {} : { version_ids: releases.map((release) => release.id) }),
     };
 
-    return { resolutions: present([type, state, priority, assignee]), value: patch };
+    return {
+      resolutions: present([type, state, priority, assignee, sprint, ...releases]),
+      value: patch,
+    };
   };
 
   try {
