@@ -12,6 +12,10 @@ Commands:
   list [options]           list projects
   get [options] <project>  show one project
   work-item                work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
+  sprint                   迭代 sprints: plan and update them (scopes pcp:read:pjm:sprint /
+                           pcp:write:pjm:sprint)
+  version                  发布 releases of a project (scopes pcp:read:pjm:release /
+                           pcp:write:pjm:release)
   meta                     ids you need before writing: every pjm lookup is scoped to one project
   help [command]           display help for command
 "
@@ -31,6 +35,117 @@ Commands:
   priorities [options]  work-item priorities of a project
   sprints [options]     sprints of a project (scrum/hybrid only)
   help [command]        display help for command
+"
+`;
+
+exports[`project --help > project sprint (the two absences are in the group help) 1`] = `
+"Usage: pingcode project sprint [options] [command]
+
+迭代 sprints: plan and update them (scopes pcp:read:pjm:sprint / pcp:write:pjm:sprint)
+
+Options:
+  -h, --help                 display help for command
+
+Commands:
+  get [options] <sprint>     show one sprint
+  create [options]           create a sprint (permanent — there is no way to delete one)
+  update [options] <sprint>  patch a sprint — only the fields you pass are sent, and arrays replace
+  bulk [options]             create many sprints in one atomic call — 企业令牌 only, and permanent
+  help [command]             display help for command
+"
+`;
+
+exports[`project --help > project sprint bulk (the entry schema and the ENT-only note) 1`] = `
+"Usage: pingcode project sprint bulk [options]
+
+create many sprints in one atomic call — 企业令牌 only, and permanent
+
+Options:
+  --file <path|->       JSON array of entries, or - for stdin (see below)
+  --project <name|id>   default project for entries that name none
+  --assignee <name|id>  default owner for entries that name none
+  -h, --help            display help for command
+"
+`;
+
+exports[`project --help > project sprint create (permanent, and the widest sprint flag set) 1`] = `
+"Usage: pingcode project sprint create [options]
+
+create a sprint (permanent — there is no way to delete one)
+
+Options:
+  --project <name|id>   project name or id — a sprint lives inside one project
+  --name <text>         sprint name, unique within the project
+  --start <date>        start — a date (2026-08-31) or a 10-digit unix seconds value, stored at
+                        00:00:00 local
+  --end <date>          end — a date (2026-08-31) or a 10-digit unix seconds value, stored at
+                        23:59:59 local
+  --assignee <name|id>  sprint owner 负责人 — the API requires one
+  --description <text>  description
+  --status <status>     initial status: pending | in_progress | completed (default pending)
+  --category-id <id>    迭代类别 id, repeatable — replaces the whole set
+  -h, --help            display help for command
+"
+`;
+
+exports[`project --help > project version (the four-way name collision is in the group help) 1`] = `
+"Usage: pingcode project version [options] [command]
+
+发布 releases of a project (scopes pcp:read:pjm:release / pcp:write:pjm:release)
+
+Options:
+  -h, --help                  display help for command
+
+Commands:
+  list [options]              list the releases of a project
+  get [options] <version>     show one release
+  create [options]            create a release
+  update [options] <version>  patch a release — only the fields you pass are sent, and arrays
+                              replace
+  delete [options] <version>  delete a release — the only delete in the pjm planning surface
+  bulk [options]              create many releases in one atomic call — 企业令牌 only
+  help [command]              display help for command
+"
+`;
+
+exports[`project --help > project version delete (the only delete in the planning surface) 1`] = `
+"Usage: pingcode project version delete [options] <version>
+
+delete a release — the only delete in the pjm planning surface
+
+Arguments:
+  version              release 发布 name or id
+
+Options:
+  --project <name|id>  project name or id — checked on this verb only
+  --yes                confirm: this cannot be undone
+  -h, --help           display help for command
+"
+`;
+
+exports[`project --help > project version update (--operate-at needs --stage-id) 1`] = `
+"Usage: pingcode project version update [options] <version>
+
+patch a release — only the fields you pass are sent, and arrays replace
+
+Arguments:
+  version               release 发布 name or id
+
+Options:
+  --project <name|id>   project name or id (the API does not check this one)
+  --name <text>         new name
+  --start <date>        new start — a date (2026-08-31) or a 10-digit unix seconds value, stored at
+                        00:00:00 local
+  --end <date>          new end — a date (2026-08-31) or a 10-digit unix seconds value, stored at
+                        23:59:59 local
+  --assignee <name|id>  new owner
+  --stage-id <id>       move to this stage; needs --operate-at unless the release has been in it
+                        before
+  --operate-at <when>   when the release reached --stage-id, inside its window. Only valid WITH
+                        --stage-id: alone the API accepts it, echoes the old value and stores
+                        nothing
+  --category-id <id>    repeatable; replaces the whole set
+  -h, --help            display help for command
 "
 `;
 

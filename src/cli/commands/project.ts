@@ -30,6 +30,8 @@ import {
   timestampCell,
   type PagingFlags,
 } from './common';
+import { registerSprintCommands } from './projectSprint';
+import { registerVersionCommands } from './projectVersion';
 import { registerWorkItemCommands } from './workItem';
 
 /**
@@ -115,9 +117,14 @@ export function registerProjectCommands(program: Command): void {
     await runGet(target, flags, command);
   });
 
-  // Registration order is asserted by `test/help.test.ts`: the group's own verbs
-  // first, then the resource subgroup, then the lookups.
+  // Registration order is the `--help` order and is asserted by
+  // `test/help/project.test.ts`: the group's own verbs first, then the resource
+  // subgroups, then the lookups. S2a inserted `sprint` and `version` between
+  // `work-item` and `meta` — planning objects that work items are filed into, so they
+  // read after the work item and before the id lookups.
   registerWorkItemCommands(project);
+  registerSprintCommands(project);
+  registerVersionCommands(project);
   registerProjectMetaCommands(project);
 }
 
