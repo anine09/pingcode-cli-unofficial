@@ -166,6 +166,13 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['run result history', /pingcode testhub runs history (list|get) /],
   ['plan report and lifecycle', /pingcode testhub plans update /],
   ['three vocabularies called state', /meta plan-states/],
+  // S4 — the last two ship families. Three rows, and the third is the point of the
+  // child: an agent that does not know "plan" is three unrelated resources will hand a
+  // 需求排期 id to `testhub plans` (or a scheme id to either) and get a not-found it
+  // cannot explain. The other two are the flows themselves, both read-only upstream.
+  ['requirement schedules', /pingcode product plan (list|get) /],
+  ['requirement state history', /pingcode product idea history (list|get) /],
+  ['three resources called plan', /"?Plan"? is three unrelated things/i],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {
@@ -295,6 +302,28 @@ describe('the module documents carry the per-module rules (design D6.4)', () => 
     expect(ship).toMatch(/--dry-run.{0,120}reachable set/is);
     expect(ship).toMatch(/no\s+idea\s+state-flow\s+endpoint/i);
     expect(ship).toMatch(/state it is already in/i);
+  });
+
+  // S4: the two read-only families, and the disambiguation that is the whole point of
+  // documenting them. Each row is a fact an agent cannot get from `--help` alone.
+  it('ship separates the three things called a plan, and marks both new families read-only', () => {
+    const ship = modules['ship.md'] ?? '';
+    // the 排期 ↔ 测试计划 ↔ 配置方案 table, by all three of its rows
+    expect(ship).toMatch(/pingcode product plan list --product/);
+    expect(ship).toMatch(/pingcode testhub plans list --library/);
+    expect(ship).toMatch(/ticket_state_plans/);
+    // read-only is upstream's doing (HTTP 405), not a scoping decision
+    expect(ship).toMatch(/HTTP 405/);
+    // the two-structures-for-one-resource trap between plan list and meta idea-plans
+    expect(ship).toMatch(/two structures for one resource/i);
+    // history is states only; the activity feed is the other half
+    expect(ship).toMatch(/\*\*State changes only\.\*\*/);
+    expect(ship).toMatch(/product idea activity/);
+    // filters that are accepted and then ignored, which is why no flag exists
+    expect(ship).toMatch(/\?name=/);
+    expect(ship).toMatch(/ignoring\s+all three/i);
+    // and the exit-code surprise on a missing schedule
+    expect(ship).toMatch(/exits \*\*7\*\*, not 5/);
   });
 
   it('testhub keeps the library-scoping, run-write and date rules', () => {

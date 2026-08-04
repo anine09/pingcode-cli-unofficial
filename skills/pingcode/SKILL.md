@@ -35,7 +35,7 @@ Each business module owns its resources *and* its id lookups, so a module's whol
 
 ```
 auth      login status logout
-product   list get · idea … · ticket … · meta …
+product   list get · idea … · ticket … · plan … · meta …
 project   list get · work-item … · meta …
 testhub   libraries … · cases … · plans … · runs … · meta …
 scm       platform … · platform-user … · repo … · branch … · commit … · ref … · pr … · review …
@@ -73,9 +73,10 @@ Credentials come from a PingCode application, not from a user account:
      *version*
 
    For the ship (产品管理) commands, add:
-   - `pcp:read:ship:product` — `product list` / `product get` / `product meta members`, and every
-     product name lookup, which every other ship command starts with
-   - `pcp:read:ship:idea` — `product idea list` / `get`, and `product meta idea-states|idea-priorities|idea-suites|idea-properties`
+   - `pcp:read:ship:product` — `product list` / `product get` / `product meta members` /
+     `product plan list|get`, and every product name lookup, which every other ship command starts
+     with
+   - `pcp:read:ship:idea` — `product idea list` / `get` / `history list|get`, and `product meta idea-states|idea-priorities|idea-suites|idea-properties|idea-plans`
    - `pcp:write:ship:idea` — `product idea create` / `update`
    - `pcp:read:ship:ticket` — `product ticket list` / `get`, and `product meta ticket-states|ticket-priorities|ticket-types|ticket-channels|ticket-properties`
    - `pcp:write:ship:ticket` — `product ticket create` / `update` / `transition`
@@ -198,7 +199,7 @@ one file per module, so a module can be revised without touching this one:
 | Module | File | Covers |
 |---|---|---|
 | 项目管理 pjm | [`modules/pjm.md`](modules/pjm.md) | `project list/get`, `project meta …`, `project work-item …` |
-| 产品管理 ship | [`modules/ship.md`](modules/ship.md) | `product list/get`, `product meta …`, `product idea …`, `product ticket …`, and the ship-only traps |
+| 产品管理 ship | [`modules/ship.md`](modules/ship.md) | `product list/get`, `product meta …`, `product idea …`, `product ticket …`, `product plan …` (需求排期, read-only), and the ship-only traps |
 | 测试管理 testhub | [`modules/testhub.md`](modules/testhub.md) | `testhub libraries/cases/plans/runs/meta …`, and the testhub-only traps |
 | 源码管理 scm | [`modules/scm.md`](modules/scm.md) | `scm platform …`, `scm platform-user …`, `scm repo …` — the DevOps write-back surface, 企业令牌 only |
 | 构建与部署 | [`modules/cicd.md`](modules/cicd.md) | `build …` (CI build records) and `release env …` / `release deploy …` (deploy targets and deployments), 企业令牌 only |
