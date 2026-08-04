@@ -1,0 +1,203 @@
+# Weekly watch on the upstream endpoint catalog
+# (task 08-02-full-api-coverage X2; design D2.5 and D9 risk 2).
+#
+# `npm run catalog:check` fetches the live apiDoc bundle
+# (https://open.pingcode.com/api_data.js) and diffs it against the vendored
+# snapshot in `src/core/catalog/catalog.generated.ts`, reporting added / removed /
+# method-changed / path-changed / scope-changed endpoints, and separately
+# verifying that the vendored file's own content hash still matches its body.
+#
+# It is deliberately **not** a step in ci.yml and must never become one. Two
+# reasons, either sufficient: it depends on a third-party network host, and an
+# upstream edit has nothing to do with whichever pull request happens to be open
+# when it lands. As a PR gate, one vendor change would block every merge and turn
+# `main` red for a fact about someone else's documentation. So it runs on a
+# schedule, and its result becomes a tracked issue instead of a failed build —
+# the job itself stays green on drift.
+#
+# What to do with that issue is `.trellis/spec/backend/catalog-drift.md`.
+name: catalog drift
+
+on:
+  schedule:
+    # Mondays 03:17 UTC (11:17 Asia/Shanghai). Early in the week so drift is on
+    # the board before anyone plans work against the API surface, and off the
+    # hour because GitHub defers cron runs that pile up at :00.
+    - cron: '17 3 * * 1'
+  # On demand as well: after a vendor announcement, or before starting a task
+  # that adds endpoints, waiting up to a week is not useful.
+  workflow_dispatch:
+
+# One drift watch at a time. Not cancel-in-progress: a run that has already
+# reached the issue-filing step should finish it.
+concurrency:
+  group: catalog-drift
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # For the single tracking issue and its label. Nothing here writes to the
+  # repository itself.
+  issues: write
+
+jobs:
+  check:
+    name: catalog:check against the live docs
+    runs-on: ubuntu-latest
+    env:
+      # Reused by every step below, so the label and title exist in exactly one
+      # place — that identity is what keeps this to one issue instead of a weekly
+      # stream of duplicates.
+      LABEL: catalog-drift
+      TITLE: 'catalog drift: upstream API docs no longer match the vendored snapshot'
+      LOG: ${{ runner.temp }}/catalog-check.log
+      BODY: ${{ runner.temp }}/issue-body.md
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24, one version, no `npm ci`, no cache — the same reasoning as
+      # ci.yml's `checks` job. `scripts/catalog-sync.ts` is type-stripped
+      # TypeScript (`node --experimental-strip-types`, which needs >= 22.6, so
+      # ci.yml's Node 20 leg could not run it at all) importing only `node:`
+      # builtins and the global `fetch`; its one relative import is an
+      # `import type` the stripper erases. There is nothing to install, hence
+      # nothing to cache. A matrix would also be meaningless here: this job
+      # asserts a fact about the vendor's documentation, not about our supported
+      # Node range — that is ci.yml's job.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: catalog:check
+        id: check
+        run: |
+          set -uo pipefail
+          run_check() { npm run catalog:check >"$LOG" 2>&1; }
+          classify() {
+            # `catalog-sync` exits 1 for real drift and for a hand-edited
+            # vendored file; both are findings a human must act on. Anything else
+            # non-zero (docs host down, 5xx, a bundle shape the parser cannot
+            # unwrap) is broken tooling, not a finding, and must not be filed as
+            # drift.
+            grep -qE 'upstream drifted|hand-edited' "$LOG" && echo drift || echo broken
+          }
+          if run_check; then
+            status=clean
+          else
+            status=$(classify)
+            if [ "$status" = broken ]; then
+              # One second chance for the network, the same retry-exactly-once
+              # discipline core/http.ts applies to a 429. Never more than once.
+              echo "unrecognised failure; retrying once in 30s"
+              sleep 30
+              if run_check; then status=clean; else status=$(classify); fi
+            fi
+          fi
+          cat "$LOG"
+          echo "status=$status" >>"$GITHUB_OUTPUT"
+
+      - name: compose the report
+        id: report
+        if: steps.check.outputs.status == 'drift'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # The digest covers the drift text only, which carries no timestamps —
+          # so it is stable while the same drift persists, and changes exactly
+          # when the finding changes. That is what decides whether this run
+          # notifies anyone (see the next step).
+          digest=$(sha256sum "$LOG" | cut -c1-16)
+          {
+            echo "\`npm run catalog:check\` found the vendored endpoint catalog out of step with"
+            echo "the live PingCode API docs."
+            echo
+            echo "**Nothing is broken by this and nothing is blocked.** The CLI never fetches the"
+            echo "docs at runtime; it reads the vendored snapshot. This issue is the only place"
+            echo "the drift is tracked, and it is refreshed in place every week — so its body is"
+            echo "always the *current* finding, not a historical one."
+            echo
+            echo "Runbook: \`.trellis/spec/backend/catalog-drift.md\` — in particular, do not"
+            echo "delete a command because an endpoint disappeared for one cycle, and remember"
+            echo "that live evidence outranks the catalog (PRD R2)."
+            echo
+            echo '```text'
+            sed -e 's/\r$//' "$LOG"
+            echo '```'
+            echo
+            echo "Reproduce locally: \`npm run catalog:check\` (add \`--from <file>\` to diff a"
+            echo "saved bundle offline)."
+            echo
+            echo "Last checked: $(date -u '+%Y-%m-%d %H:%M UTC') · [run]($RUN_URL) · \`${GITHUB_SHA:0:12}\`"
+            echo
+            echo "<!-- drift-digest: $digest -->"
+          } >"$BODY"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+
+      - name: file or refresh the single tracking issue
+        if: steps.check.outputs.status == 'drift'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DIGEST: ${{ steps.report.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # `gh` is preinstalled on GitHub runners, so no third-party action is
+          # needed for this. `--force` makes the label creation idempotent.
+          gh label create "$LABEL" --color 'B60205' \
+            --description 'upstream API docs drifted from the vendored catalog' --force
+
+          number=$(gh issue list --label "$LABEL" --state open --limit 1 \
+            --json number --jq '.[0].number // empty')
+
+          if [ -z "$number" ]; then
+            url=$(gh issue create --title "$TITLE" --label "$LABEL" --body-file "$BODY")
+            echo "opened $url"
+            exit 0
+          fi
+
+          previous=$(gh issue view "$number" --json body --jq '.body')
+          gh issue edit "$number" --body-file "$BODY" >/dev/null
+          case "$previous" in
+            *"drift-digest: $DIGEST"*)
+              # Same drift as last time. The body is refreshed (new run link,
+              # new timestamp) and nobody is notified: a weekly comment saying
+              # "still drifting" is exactly the noise that gets an issue muted,
+              # and a muted drift watch is no drift watch.
+              echo "issue #$number already reports this drift; refreshed body, no comment"
+              ;;
+            *)
+              gh issue comment "$number" --body "The drift report changed. Body updated from [this run]($RUN_URL); digest \`$DIGEST\`."
+              echo "issue #$number updated and commented (drift changed)"
+              ;;
+          esac
+
+      - name: close the issue once upstream matches again
+        if: steps.check.outputs.status == 'clean'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          number=$(gh issue list --label "$LABEL" --state open --limit 1 \
+            --json number --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            echo "in sync, and no open drift issue — nothing to do"
+            exit 0
+          fi
+          # Either the snapshot was resynced or upstream reverted itself. Both
+          # mean the finding is gone, and a stale open issue teaches people to
+          # ignore the label.
+          gh issue close "$number" --reason completed \
+            --comment "Upstream matches the vendored snapshot again as of [this run]($RUN_URL). A fresh issue is filed if it drifts again."
+
+      # Only reached when the check could not reach a verdict at all. This fails
+      # loudly on purpose — it is broken tooling, not upstream drift, and it
+      # blocks nothing: this workflow is not a gate for `main` or for a release.
+      - name: fail on a check that could not run
+        if: steps.check.outputs.status == 'broken'
+        run: |
+          echo "::error::catalog:check failed twice without producing a drift report — see the log above"
+          exit 1
