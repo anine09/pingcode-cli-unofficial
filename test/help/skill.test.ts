@@ -152,6 +152,20 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['member remove is generic-layer only', /pingcode api DELETE \/v1\/pjm\/projects\//],
   ['relation types are organisation-wide', /pingcode project meta relation-types/],
   ['tag vocabulary is organisation-wide', /pingcode project meta tags/],
+  // S3 — the testhub write surface. Eight rows, and six of them are for things an agent
+  // cannot see in `--help` alone: the two bulk-run halves fail in OPPOSITE ways (one
+  // per-element under a 200, one atomic), a case delete destroys its runs, the two
+  // history reads answer different questions, "state" means three different vocabularies
+  // here, and `--set` keys are mostly built-in fields that either 500 or edit the wrong
+  // field. The remaining two are the plain import and plan-report flows.
+  ['case bulk import', /pingcode testhub cases bulk-(create|update) /],
+  ['case deletion cascades to runs', /deleting\s+a\s+case\s+.{0,40}removed\s+the\s+run|deletes the case's RUNS too/i],
+  ['case execution history', /pingcode testhub cases history list /],
+  ['run creation', /pingcode testhub runs (create|bulk-create) /],
+  ['run bulk results', /pingcode testhub runs bulk-update /],
+  ['run result history', /pingcode testhub runs history (list|get) /],
+  ['plan report and lifecycle', /pingcode testhub plans update /],
+  ['three vocabularies called state', /meta plan-states/],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {
@@ -298,7 +312,11 @@ describe('the module documents carry the per-module rules (design D6.4)', () => 
     expect(testhub).toMatch(/`?short_id`?\s+is\s+read-only/i);
     expect(testhub).toMatch(/no\s+`?--maintenance`?\s+flag/i);
     expect(testhub).toMatch(/unique\s+across\s+the\s+organisation/i);
-    expect(testhub).toMatch(/no\s+library\s+update\s+or\s+delete/i);
+    // Corrected in S3: there is no library DELETE, but a library PATCH *does* exist
+    // upstream and is reachable through the generic layer. The doc used to say neither
+    // existed, which sent a reader looking for a workaround that was never needed.
+    expect(testhub).toMatch(/no\s+library\s+DELETE/i);
+    expect(testhub).toMatch(/pingcode api PATCH \/v1\/testhub\/libraries\//);
     expect(testhub).toMatch(/no\s+`?kind`?\s+discriminator|carries\s+no\s+kind/i);
     // the --start/--end asymmetry: only prose can explain why the two ends differ
     expect(testhub).toMatch(/YYYY-MM-DD/);
@@ -307,6 +325,33 @@ describe('the module documents carry the per-module rules (design D6.4)', () => 
     expect(testhub).toMatch(/\*?through\*?\s+the\s+end\s+date/i);
     expect(testhub).toMatch(/2026-8-1/);
     expect(testhub).toMatch(/milliseconds/i);
+  });
+
+  it('testhub records the S3 write-surface traps an agent cannot see in --help', () => {
+    const testhub = modules['testhub.md'] ?? '';
+    // The two bulk-run halves fail in opposite ways — the single most script-breaking
+    // fact in the module, and undocumented upstream.
+    expect(testhub).toMatch(/per-element best effort/i);
+    expect(testhub).toMatch(/atomic/i);
+    // The caps: 100 is the server's own limit on four endpoints, 50 is a CLI-side
+    // conservatism on the one endpoint that enforces nothing.
+    expect(testhub).toMatch(/capped at\s+\*?\*?100\*?\*?|100\*?\*?\s+by the server/i);
+    expect(testhub).toMatch(/enforces\s+\*?\*?nothing\*?\*?/i);
+    // The destructive one, and its blast radius.
+    expect(testhub).toMatch(/takes the case's runs with it/i);
+    expect(testhub).toMatch(/soft\*?\*?-deleted/i);
+    // The two histories answer different questions, and neither accepts a short_id.
+    expect(testhub).toMatch(/row per\s+\*?\*?run\*?\*?\s+of that case/i);
+    expect(testhub).toMatch(/id-only/i);
+    // Three vocabularies called "state", disambiguated in a table.
+    expect(testhub).toMatch(/meta plan-states/);
+    expect(testhub).toMatch(/organisation-level\*?\*?\s+plan state|plan state.{0,60}organisation/i);
+    // Plan update: partial, verbatim dates, unclearable summary.
+    expect(testhub).toMatch(/stored\s+\*?\*?verbatim\*?\*?/i);
+    expect(testhub).toMatch(/replaced but never cleared/i);
+    // `--set` is a warning as much as a lookup.
+    expect(testhub).toMatch(/rewrites the top-level `?description`?/i);
+    expect(testhub).toMatch(/no`?\*?\*?\s+`?testhub-case-property`? kind|no\*?\*? `testhub-case-property`/i);
   });
 
   it('scm keeps the platform hop, the identity-is-not-a-member rule and the PUT exclusion', () => {
