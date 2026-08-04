@@ -61,7 +61,12 @@ Credentials come from a PingCode application, not from a user account:
    - `pcp:read:pjm:workitem` — work items, types, states, priorities
    - `pcp:write:pjm:workitem` — create/update work items
    - `pcp:read:global:team` — `pingcode settings users`
-   - `pcp:read:pjm:sprint` — only if you need `pingcode project meta sprints`
+   - `pcp:read:pjm:sprint` / `pcp:write:pjm:sprint` — `pingcode project meta sprints` (the sprint
+     list) and `project sprint get|create|update|bulk`. Grant the write half only if you intend to
+     plan sprints: **a sprint cannot be deleted**, by the API or by anyone
+   - `pcp:read:pjm:release` / `pcp:write:pjm:release` — `pingcode project version …` (发布, a
+     project release). Note the mismatch: the scope says *release*, the resource and the command say
+     *version*
 
    For the ship (产品管理) commands, add:
    - `pcp:read:ship:product` — `product list` / `product get` / `product meta members`, and every

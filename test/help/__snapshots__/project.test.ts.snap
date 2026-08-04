@@ -141,9 +141,10 @@ Options:
   --assignee <name|id>  new owner
   --stage-id <id>       move to this stage; needs --operate-at unless the release has been in it
                         before
-  --operate-at <when>   when the release reached --stage-id, inside its window. Only valid WITH
-                        --stage-id: alone the API accepts it, echoes the old value and stores
-                        nothing
+  --operate-at <date>   when the release reached --stage-id — a date (2026-08-31) or a 10-digit
+                        unix seconds value, read at 00:00:00 local like --start. Must fall inside
+                        the release window, and is only valid WITH --stage-id: alone the API
+                        accepts it, echoes the old value and stores nothing
   --category-id <id>    repeatable; replaces the whole set
   -h, --help            display help for command
 "

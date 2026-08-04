@@ -515,6 +515,32 @@ describe('project version create / update', () => {
     expect(run.writes[0]?.body).toEqual({ stage_id: STAGE, operate_at: 1789000000 });
   });
 
+  it('reads --operate-at as LOCAL midnight, like --start', async () => {
+    // `parseTimestampFlag` would read a bare date as UTC, putting `--start 2026-11-15`
+    // and `--operate-at 2026-11-15` hours apart in the same request — and possibly
+    // outside the window the server validates operate_at against (400 `100395`).
+    // Caught during the live smoke: the rendered "reached" showed 08:00 on a +08 tenant.
+    const run = await runCli(
+      [
+        'project',
+        'version',
+        'update',
+        VERSION,
+        '--project',
+        PROJECT,
+        '--stage-id',
+        STAGE,
+        '--operate-at',
+        '2026-11-15',
+      ],
+      [projectsPage, versionsPage, () => jsonResponse(versionBody())],
+    );
+    const body = run.writes[0]?.body as { operate_at: number };
+    const at = new Date(body.operate_at * 1000);
+    expect(at.getHours()).toBe(0);
+    expect(at.getDate()).toBe(15);
+  });
+
   it('refuses an empty patch before any request', async () => {
     const run = await runCli(['project', 'version', 'update', VERSION, '--project', PROJECT], []);
     expect(run.exit).toBe(2);

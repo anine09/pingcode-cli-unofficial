@@ -31,7 +31,6 @@ import {
   contextFor,
   modeOf,
   parseDateBoundaryFlag,
-  parseTimestampFlag,
   printCollection,
   printPage,
   printResource,
@@ -210,8 +209,9 @@ export function registerVersionCommands(parent: Command): void {
         'move to this stage; needs --operate-at unless the release has been in it before',
       )
       .option(
-        '--operate-at <when>',
-        'when the release reached --stage-id, inside its window. Only valid WITH --stage-id: ' +
+        '--operate-at <date>',
+        `when the release reached --stage-id — ${DATE_FLAG_HELP}, read at 00:00:00 local like ` +
+          '--start. Must fall inside the release window, and is only valid WITH --stage-id: ' +
           'alone the API accepts it, echoes the old value and stores nothing',
       )
       .option('--category-id <id>', 'repeatable; replaces the whole set', collectValue),
@@ -341,7 +341,15 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
     flags.start === undefined ? undefined : parseDateBoundaryFlag(flags.start, '--start', 'start');
   const end = flags.end === undefined ? undefined : parseDateBoundaryFlag(flags.end, '--end', 'end');
   if (start !== undefined && end !== undefined) requireOrderedWindow(start, end);
-  const operateAt = parseTimestampFlag(flags.operateAt, '--operate-at');
+  // `parseDateBoundaryFlag`, not `parseTimestampFlag`: the latter reads a bare date as
+  // **UTC**, which would put `--start 2026-11-01 --operate-at 2026-11-01` eight hours
+  // apart on this tenant and could push the value outside the window the server checks
+  // it against (400 `100395`). All three date flags on this leaf are therefore local and
+  // start-of-day.
+  const operateAt =
+    flags.operateAt === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.operateAt, '--operate-at', 'start');
 
   // `operate_at` without `stage_id` is accepted upstream, echoes the old value and
   // stores nothing (design D15.7). Sending it anyway would report success for a change

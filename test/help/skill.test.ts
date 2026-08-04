@@ -123,6 +123,16 @@ const REQUIRED_FLOWS: readonly (readonly [string, RegExp])[] = [
   ['deploy environments', /pingcode release env (list|get|create|update)/],
   ['deployment records', /pingcode release deploy (list|get|create|update)/],
   ['devops release delete is generic-layer only', /pingcode api DELETE \/v1\/release\//],
+  // S2a — the pjm planning surface. Five rows, and four of them are about facts an agent
+  // cannot see in `--help` alone: the sprint list lives under another command, a sprint
+  // can never be deleted, "version" means four different resources in this API, and the
+  // server ignores --project on a release read/write so a successful update is no proof
+  // the project was right.
+  ['sprints', /pingcode project sprint (get|create|update|bulk)/],
+  ['sprint list is project meta sprints', /no `?sprint list`? leaf/i],
+  ['sprints cannot be deleted', /A sprint cannot be deleted/i],
+  ['releases', /pingcode project version (list|get|create|update|delete|bulk)/],
+  ['release is not a wiki page version', /not a wiki page revision/i],
 ];
 
 describe('SKILL.md is a well-formed skill', () => {
@@ -167,6 +177,10 @@ describe('SKILL.md records the contract that does not scale with the surface (PR
       'pcp:write:devops:build',
       'pcp:read:devops:deploy',
       'pcp:write:devops:deploy',
+      'pcp:read:pjm:sprint',
+      'pcp:write:pjm:sprint',
+      'pcp:read:pjm:release',
+      'pcp:write:pjm:release',
     ]) {
       expect(skill, scope).toContain(scope);
     }
