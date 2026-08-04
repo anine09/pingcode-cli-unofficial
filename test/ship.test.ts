@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseShipIdea,
+  parseShipIdeaTransitionHistory,
+  parseShipPlan,
+  parseShipPlanSummary,
   parseShipProduct,
   parseShipProperty,
   parseShipStateFlow,
@@ -12,13 +15,20 @@ import {
   createIdea,
   createTicket,
   getIdea,
+  getIdeaTransitionHistory,
   getProduct,
+  getProductPlan,
   getTicket,
+  iterateIdeaTransitionHistories,
+  iterateProductPlans,
+  listIdeaPlans,
   listIdeaPriorities,
   listIdeaProperties,
   listIdeaStates,
   listIdeaSuites,
+  listIdeaTransitionHistories,
   listProductMembers,
+  listProductPlans,
   listProducts,
   listTicketChannels,
   listTicketPriorities,
@@ -33,7 +43,8 @@ import {
   updateTicket,
 } from '../src/api/ship';
 import { THIRTY_DAYS_MS } from '../src/core/auth';
-import { DryRunHalt } from '../src/core/errors';
+import { ApiError, DryRunHalt, NotFoundError } from '../src/core/errors';
+import { collect } from '../src/core/paginate';
 import { createFakeFetch, createTestContext, jsonResponse } from './helpers/fake';
 
 /**
@@ -351,5 +362,176 @@ describe('the api layer neither logs nor sends under --dry-run', () => {
       expect(error, label).toBeInstanceOf(DryRunHalt);
       expect(fake.calls, label).toHaveLength(0);
     }
+  });
+});
+
+/**
+ * S4 — 需求排期 (requirement schedules) and 需求流转记录 (idea state history).
+ *
+ * Live-verified 2026-08-05 against the real tenant (design §D18). Two things this
+ * block pins that only a live run could establish: the API answers **two different
+ * structures for one 排期 resource** depending on the endpoint (ship GOTCHA #12), and
+ * the idea history is a **third** `transition_histories` shape whose parent key is
+ * `idea` rather than pjm's `work_item`.
+ */
+describe('需求排期 requirement schedules (S4)', () => {
+  it('lists the full records under the product, with no filter query', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 30,
+          total: 1,
+          values: [
+            {
+              id: 'plan-1',
+              name: '2026 Q3',
+              assignee: { id: 'u1', name: 'luoxiutao' },
+              start_at: 1780243027,
+              end_at: 1780620720,
+            },
+          ],
+        }),
+    ]);
+    const page = await listProductPlans(ctx, 'prod-1');
+    expect(page.values[0]?.name).toBe('2026 Q3');
+    expect(page.values[0]?.start_at).toBe(1780243027);
+    const url = new URL(fake.urls()[0] ?? '');
+    expect(fake.calls[0]?.method).toBe('GET');
+    expect(url.pathname).toBe('/v1/ship/products/prod-1/plans');
+    // No filter is offered, so none may be sent: `?name=` was accepted and ignored.
+    expect(url.searchParams.get('name')).toBeNull();
+  });
+
+  it('walks pages through the shared query paginator', async () => {
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ page_index: 0, page_size: 1, total: 2, values: [{ id: 'plan-1' }] }),
+      () => jsonResponse({ page_index: 1, page_size: 1, total: 2, values: [{ id: 'plan-2' }] }),
+      () => jsonResponse({ page_index: 2, page_size: 1, total: 2, values: [] }),
+    ]);
+    const all = await collect(iterateProductPlans(ctx, 'prod-1', { pageSize: 1 }));
+    expect(all.map((plan) => plan.id)).toEqual(['plan-1', 'plan-2']);
+    expect(fake.calls).toHaveLength(3);
+  });
+
+  it('gets one schedule under its product', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'plan-1', name: '2026 Q3' })]);
+    expect((await getProductPlan(ctx, 'prod-1', 'plan-1')).name).toBe('2026 Q3');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/ship/products/prod-1/plans/plan-1');
+  });
+
+  it('reads the same rows through the singular idea lookup with ?product_id=', async () => {
+    const { ctx, fake } = ctxFor([() => envelope([{ id: 'plan-1', name: '2026 Q3' }])]);
+    expect((await listIdeaPlans(ctx, 'prod-1'))[0]?.name).toBe('2026 Q3');
+    const url = new URL(fake.urls()[0] ?? '');
+    // Singular `idea`, the module's oldest trap — `/v1/ship/ideas` is the resource.
+    expect(url.pathname).toBe('/v1/ship/idea/plans');
+    expect(url.searchParams.get('product_id')).toBe('prod-1');
+  });
+
+  it('does not share a deserializer between the two plan shapes (ship GOTCHA #12)', async () => {
+    const wire = {
+      id: 'plan-1',
+      name: '2026 Q3',
+      assignee: { id: 'u1', name: 'luoxiutao' },
+      start_at: 1780243027,
+      end_at: 1780620720,
+    };
+    // The full parser lifts the window and the owner…
+    expect(parseShipPlan(wire)).toMatchObject({
+      assignee: { id: 'u1' },
+      start_at: 1780243027,
+      end_at: 1780620720,
+    });
+    // …while the summary parser asserts only what its endpoint documents. Anything
+    // the wire does carry still survives untouched, which is what makes that safe.
+    const summary = parseShipPlanSummary(wire);
+    expect(Object.keys(summary)).not.toContain('assignee_id');
+    expect(summary.start_at).toBe(1780243027);
+    expect(parseShipPlanSummary({ id: 'plan-1', name: '2026 Q3' })).toEqual({
+      id: 'plan-1',
+      name: '2026 Q3',
+      url: undefined,
+    });
+  });
+
+  it('leaves 100721 (missing schedule) on exit 7 — it is also a write-path code', async () => {
+    const { ctx } = ctxFor([
+      () => jsonResponse({ code: '100721', message: '产品排期不存在' }, { status: 400 }),
+    ]);
+    const error = await getProductPlan(ctx, 'prod-1', 'nope').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).not.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('需求流转记录 idea state history (S4)', () => {
+  const historyRow = {
+    id: 'h1',
+    idea: { id: 'i1', identifier: 'PD-YYHC-1', title: '称重 App', short_id: 'HxUyPHCz' },
+    from_state: null,
+    to_state: { id: 'st-1', name: '待排期', type: 'pending' },
+    created_by: { id: 'u1', name: 'luoxiutao' },
+    created_at: 1780243027,
+  };
+
+  it('lists a state history under the plural idea path, with no filter query', async () => {
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [historyRow] }),
+    ]);
+    const page = await listIdeaTransitionHistories(ctx, 'i1');
+    expect(page.values[0]?.to_state?.name).toBe('待排期');
+    const url = new URL(fake.urls()[0] ?? '');
+    expect(url.pathname).toBe('/v1/ship/ideas/i1/transition_histories');
+    // All three of ?name=, ?state_id= and ?keywords= are ignored upstream, so the
+    // wrapper offers none of them: the paging cursor is the only query it sends.
+    expect([...url.searchParams.keys()].sort()).toEqual(['page_index', 'page_size']);
+  });
+
+  it('walks pages and gets one row', async () => {
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ page_index: 0, page_size: 1, total: 1, values: [historyRow] }),
+      () => jsonResponse({ page_index: 1, page_size: 1, total: 1, values: [] }),
+    ]);
+    expect(await collect(iterateIdeaTransitionHistories(ctx, 'i1', { pageSize: 1 }))).toHaveLength(1);
+
+    const { ctx: single, fake: singleFake } = ctxFor([() => jsonResponse(historyRow)]);
+    expect((await getIdeaTransitionHistory(single, 'i1', 'h1')).id).toBe('h1');
+    expect(new URL(singleFake.urls()[0] ?? '').pathname).toBe(
+      '/v1/ship/ideas/i1/transition_histories/h1',
+    );
+    expect(fake.calls[0]?.method).toBe('GET');
+  });
+
+  it('parses the third history shape: the parent key is `idea`, not `work_item`', async () => {
+    const parsed = parseShipIdeaTransitionHistory(historyRow);
+    expect(parsed.idea?.id).toBe('i1');
+    expect(parsed.idea?.identifier).toBe('PD-YYHC-1');
+    expect(parsed.work_item).toBeUndefined();
+    // `from_state: null` on the creation row — the renderer prints "(new)" for it.
+    expect(parsed.from_state).toBeUndefined();
+    expect(parsed.created_at).toBe(1780243027);
+  });
+
+  it('maps 100740 to exit 5 for an unknown id AND for a mismatched pair', async () => {
+    for (const label of ['unknown history id', 'history of another idea']) {
+      const { ctx } = ctxFor([
+        () => jsonResponse({ code: '100740', message: '需求流转记录不存在' }, { status: 400 }),
+      ]);
+      const error = await getIdeaTransitionHistory(ctx, 'i1', 'nope').catch(
+        (caught: unknown) => caught,
+      );
+      expect(error, label).toBeInstanceOf(NotFoundError);
+    }
+  });
+
+  it('surfaces an unknown parent idea as exit 5 through the already-mapped 100725', async () => {
+    const { ctx } = ctxFor([
+      () => jsonResponse({ code: '100725', message: '需求不存在或无权访问' }, { status: 400 }),
+    ]);
+    const error = await listIdeaTransitionHistories(ctx, 'nope').catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(NotFoundError);
   });
 });

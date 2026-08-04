@@ -559,6 +559,23 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       // uniqueness conflict.
       '100602': 'not_found',
       '100642': 'not_found',
+      // S4: 需求流转记录 (S4 smoke, 2026-08-05, design §D18). `100740` was observed on
+      // GET /v1/ship/ideas/{idea}/transition_histories/{history} for an unknown history
+      // id **and** for a real history id addressed under a different idea — both
+      // segments are enforced there, so both are "no record at this address". It is the
+      // fourth transition-history code here after pjm's `1003108` and testhub's
+      // `100642`.
+      // Behaviour is asserted through the wrappers in `test/ship.test.ts`.
+      //
+      // Two codes from the same smoke are deliberately absent. `100721`
+      // (`产品排期不存在`) reads like an obvious row — it is a per-resource absence on
+      // `products/{p}/plans/{unknown}` — but the tenant holds **zero** 需求排期 rows, so
+      // the case that disqualified `100354` and `100300` (a row that exists, addressed
+      // under the wrong parent) could not be tested, and the same code answers an idea
+      // PATCH with an unknown `plan_id`, which is exactly where that confusion would
+      // live. `100701` (`产品不存在或无权访问`) is ship's `100300`: a *parent* code shared
+      // by the whole product-scoped surface.
+      '100740': 'not_found',
     });
   });
 

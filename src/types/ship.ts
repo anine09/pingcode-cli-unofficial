@@ -206,6 +206,75 @@ export type ShipChannel = {
 };
 
 /**
+ * 需求排期 — `GET /v1/ship/products/{product_id}/plans[/{plan_id}]`, the **full**
+ * schedule record (ship §3.6).
+ *
+ * Read-only: every write verb on the path answers HTTP 405 (live 2026-08-05, S4).
+ * The window is a pair of unix-second timestamps rather than ship's usual
+ * `{from,to,granularity}` `ShipDateRange`, because a 排期 *is* the window — it is not
+ * a field on something else.
+ *
+ * ⚠️ Not to be confused with two other things this API also calls a plan: testhub's
+ * 测试计划 (`TestPlan`) and the `*_plans` configuration schemes (`ShipStatePlan`).
+ *
+ * The field list is the documented one; this tenant holds **zero** 排期 rows in all
+ * three products, so the shape could not be confirmed live (design §D18). Unknown
+ * fields survive into `--json` regardless, which is what makes that safe.
+ */
+export type ShipPlan = {
+  id: string;
+  name?: string | undefined;
+  url?: string | undefined;
+  product?: Ref | undefined;
+  assignee?: Ref | undefined;
+  start_at?: number | undefined;
+  end_at?: number | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * The same 排期 rows as `ShipPlan`, as returned by `GET /v1/ship/idea/plans?product_id=`
+ * — documented as `{id, url, name}` and nothing else.
+ *
+ * A separate type, and a separate parser, because ship returns **two structures for
+ * one resource depending on the endpoint** (ship GOTCHA #12), exactly as it does for
+ * the product↔ticket_type join. Sharing a deserializer would invent `assignee` /
+ * `start_at` / `end_at` on a list that does not carry them.
+ */
+export type ShipPlanSummary = {
+  id: string;
+  name?: string | undefined;
+  url?: string | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * One 需求 state change — `GET /v1/ship/ideas/{idea_id}/transition_histories[/{id}]`.
+ *
+ * The **third** `transition_histories` family in this API, and it shares only its name
+ * with the other two: the parent key is **`idea`**, not pjm's `work_item`, and the
+ * embed is a rich one carrying `identifier`, `title`, `short_id` and `html_url`
+ * (live 2026-08-05, S4). testhub's histories are a different thing again — they record
+ * *results*, not states. Never share a deserializer across the three.
+ *
+ * `from_state` is `null` on the creation row, so a freshly created 需求 already has
+ * exactly one history row. State changes only: a title, assignee or 排期 change is not
+ * here — `/v1/activities` is the free-form feed.
+ */
+export type ShipIdeaTransitionHistory = {
+  id: string;
+  url?: string | undefined;
+  /** The rich embed: `{id, url, identifier, title, short_id, html_url}`. */
+  idea?: Ref | undefined;
+  /** `undefined` on the creation row. */
+  from_state?: Ref | undefined;
+  to_state?: Ref | undefined;
+  created_by?: Ref | undefined;
+  created_at?: number | undefined;
+  [key: string]: unknown;
+};
+
+/**
  * `GET /v1/ship/{idea,ticket}/properties?product_id=` — the authoritative list of
  * valid `properties` keys **and** of the option `_id`s a select-typed property
  * accepts (ship GOTCHA #4/#5).

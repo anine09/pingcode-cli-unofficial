@@ -15,6 +15,9 @@ import type {
   ShipChannel,
   ShipDateRange,
   ShipIdea,
+  ShipIdeaTransitionHistory,
+  ShipPlan,
+  ShipPlanSummary,
   ShipPriority,
   ShipProduct,
   ShipProductMember,
@@ -217,6 +220,67 @@ export function parseShipChannel(raw: unknown): ShipChannel {
     id: asString(record.id) ?? '',
     name: asString(record.name),
     description: asString(record.description),
+  };
+}
+
+/**
+ * 需求排期, the **full** record from `GET /v1/ship/products/{id}/plans[/{plan}]`.
+ *
+ * `start_at` / `end_at` are plain unix seconds here, not a `ShipDateRange` — a 排期
+ * *is* the window, so it has no `granularity`.
+ */
+export function parseShipPlan(raw: unknown): ShipPlan {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+    product: parseRef(record.product),
+    assignee: parseRef(record.assignee),
+    start_at: asNumber(record.start_at),
+    end_at: asNumber(record.end_at),
+  };
+}
+
+/**
+ * The same rows from `GET /v1/ship/idea/plans?product_id=`, which documents only
+ * `{id, url, name}`.
+ *
+ * Deliberately **not** `parseShipPlan`: ship returns two structures for one resource
+ * depending on the endpoint (ship GOTCHA #12), and lifting `assignee` / `start_at` /
+ * `end_at` here would assert fields this list does not promise. Anything the wire does
+ * carry still survives into `--json` through the spread.
+ */
+export function parseShipPlanSummary(raw: unknown): ShipPlanSummary {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+  };
+}
+
+/**
+ * One 需求 state change. The parent key is **`idea`**, not pjm's `work_item`, so this
+ * is a third parser rather than a reuse (live 2026-08-05, S4): sharing pjm's would
+ * leave `idea` unlifted and invent an always-`undefined` `work_item`.
+ *
+ * `from_state` is `null` on the creation row, which `parseRef` already reads as
+ * `undefined`; the renderer prints `(new)` for it.
+ */
+export function parseShipIdeaTransitionHistory(raw: unknown): ShipIdeaTransitionHistory {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    url: asString(record.url),
+    idea: parseRef(record.idea),
+    from_state: parseRef(record.from_state),
+    to_state: parseRef(record.to_state),
+    created_by: parseRef(record.created_by),
+    created_at: asNumber(record.created_at),
   };
 }
 

@@ -553,6 +553,41 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   //    key is pushed through the `properties` map. A server fault keeps its 500.
   '100602': 'not_found',
   '100642': 'not_found',
+  // S4 (08-02-full-api-coverage) ship 需求排期 + 流转记录 smoke, 2026-08-05, live tenant
+  // (design §D18). **One** row, and it is the fourth transition-history code in this
+  // table after pjm's `1003108` and testhub's `100642`:
+  //   100740 "需求流转记录不存在" — GET
+  //     /v1/ship/ideas/{idea}/transition_histories/{history}, for a well-formed but
+  //     unknown history id **and** for a real history id addressed under a *different*
+  //     idea. The idea segment is genuinely enforced here, so both are "no record at
+  //     the address given" — the `100351`/`100222` reasoning, not the `100643` one
+  //     (this vendor code says 不存在, it does not claim a mismatch). A malformed id
+  //     answers a real HTTP 404 `100002`, which the status branch already maps, and an
+  //     unknown *parent* idea answers `100725`, mapped since S7b.
+  //
+  // Deliberately **not** mapped, from the same smoke:
+  //  - `100721` (`产品排期不存在`) — the honest gap of this child. It reads like an
+  //    obvious row: GET /v1/ship/products/{p}/plans/{unknown} answers it, and so does
+  //    `PATCH /v1/ship/ideas/{id}` with an unknown `plan_id`, always meaning "no such
+  //    排期". But the case that disqualified `100354` and `100300` — a row that plainly
+  //    exists, addressed under the wrong parent — is **unobservable in this tenant**,
+  //    which holds zero 排期 rows in all three products, and the write path above is
+  //    exactly where a user would hand over a schedule id from another product. Mapping
+  //    it would be asserting unambiguity that was not measured. It stays on exit 7 until
+  //    a tenant with ≥1 排期 in two products can settle it; `product plan get` says so
+  //    in its own help.
+  //  - `100701` (`产品不存在或无权访问`) — ship's `100300`. It is the *parent* absence
+  //    code shared by the whole product-scoped surface (both new lists answer it), so
+  //    admitting it would silently re-map ten existing `product meta` leaves from a
+  //    5-endpoint child, and pjm's twin proved a parent code can also mean "this module
+  //    is not available here" — a distinction this tenant cannot test either.
+  //  - `100008` (`'product_id'是必填字段`) — the **cross-module** required-field code,
+  //    refused here for the fourth time.
+  //  - `100003` (`'product_id'不是有效的字符串(不是有效的id)`) and `100009`
+  //    (`'page_size'的取值范围是1到100`) — input validation. `100009` is a *new* code and
+  //    a welcome one: it proves the server enforces the same page-size cap the CLI
+  //    already refuses client-side.
+  '100740': 'not_found',
 };
 
 const NOT_FOUND_HINT =

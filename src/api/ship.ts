@@ -10,6 +10,9 @@ import type {
 import type {
   ShipChannel,
   ShipIdea,
+  ShipIdeaTransitionHistory,
+  ShipPlan,
+  ShipPlanSummary,
   ShipPriority,
   ShipProduct,
   ShipProductMember,
@@ -30,6 +33,9 @@ import {
   listAllOf,
   parseShipChannel,
   parseShipIdea,
+  parseShipIdeaTransitionHistory,
+  parseShipPlan,
+  parseShipPlanSummary,
   parseShipPriority,
   parseShipProduct,
   parseShipProductMember,
@@ -119,6 +125,61 @@ export async function listProductMembers(
 }
 
 // ---------------------------------------------------------------------------
+// 需求排期 requirement schedules (ship §E) — read-only, and provably so
+// ---------------------------------------------------------------------------
+
+/**
+ * The **full** 排期 records of a product. Paged and faithful (`page_index` /
+ * `page_size` echoed, out-of-range answers the requested index with zero rows).
+ *
+ * No filter is offered because none is documented and none was observed to work: an
+ * undeclared `?name=` changed nothing. See `endpoints.ts` for the three unrelated
+ * things this API calls a "plan".
+ */
+export async function listProductPlans(
+  ctx: Ctx,
+  productId: string,
+  page: PageRequest = {},
+): Promise<Page<ShipPlan>> {
+  return await fetchPageOf(ctx, ENDPOINTS.shipProductPlans(productId), {}, page, parseShipPlan);
+}
+
+export function iterateProductPlans(
+  ctx: Ctx,
+  productId: string,
+  options: PaginateOptions = {},
+): AsyncGenerator<ShipPlan, void, undefined> {
+  return iterateOf(ctx, ENDPOINTS.shipProductPlans(productId), {}, options, parseShipPlan);
+}
+
+/** An unknown plan answers 400 `100721`, an unknown product 400 `100701`. */
+export async function getProductPlan(
+  ctx: Ctx,
+  productId: string,
+  planId: string,
+): Promise<ShipPlan> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.shipProductPlan(productId, planId),
+  });
+  return parseShipPlan(raw);
+}
+
+/**
+ * The same rows through the idea-side lookup: `{id, url, name}` only, hence the
+ * separate parser (ship GOTCHA #12). This is the list `idea update --plan-id` draws
+ * from, which is why it belongs with the other nine `product meta` lookups.
+ */
+export async function listIdeaPlans(ctx: Ctx, productId: string): Promise<ShipPlanSummary[]> {
+  return await listAllOf(
+    ctx,
+    ENDPOINTS.shipIdeaPlans,
+    { product_id: productId },
+    parseShipPlanSummary,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ideas (需求)
 // ---------------------------------------------------------------------------
 
@@ -204,6 +265,67 @@ export async function updateIdea(
     body: compact(patch),
   });
   return parseShipIdea(raw);
+}
+
+// ---------------------------------------------------------------------------
+// 需求流转记录 idea state history (ship §J2) — state changes only
+// ---------------------------------------------------------------------------
+
+/**
+ * List one 需求's state changes, oldest first as the API orders them.
+ *
+ * This list **validates its parent** (400 `100725` for an unknown idea, already mapped
+ * to exit 5), so an empty result really means "no rows" — unlike pjm's work-item link
+ * list, which hides a bad parent behind 200 + zero rows. `ideaId` must be the 24-hex
+ * id: this sub-collection rejects `short_id` and `identifier` with a real HTTP 404
+ * (live 2026-08-05, S4).
+ *
+ * No filter is offered: `?name=`, `?state_id=` and `?keywords=` were all accepted and
+ * silently ignored, returning the full list every time.
+ */
+export async function listIdeaTransitionHistories(
+  ctx: Ctx,
+  ideaId: string,
+  page: PageRequest = {},
+): Promise<Page<ShipIdeaTransitionHistory>> {
+  return await fetchPageOf(
+    ctx,
+    ENDPOINTS.shipIdeaTransitionHistories(ideaId),
+    {},
+    page,
+    parseShipIdeaTransitionHistory,
+  );
+}
+
+export function iterateIdeaTransitionHistories(
+  ctx: Ctx,
+  ideaId: string,
+  options: PaginateOptions = {},
+): AsyncGenerator<ShipIdeaTransitionHistory, void, undefined> {
+  return iterateOf(
+    ctx,
+    ENDPOINTS.shipIdeaTransitionHistories(ideaId),
+    {},
+    options,
+    parseShipIdeaTransitionHistory,
+  );
+}
+
+/**
+ * One state change. An unknown history id **and** a real history id that hangs off a
+ * different idea both answer 400 `100740` — the idea segment is genuinely enforced, so
+ * both are "no record at this address" and both exit 5.
+ */
+export async function getIdeaTransitionHistory(
+  ctx: Ctx,
+  ideaId: string,
+  historyId: string,
+): Promise<ShipIdeaTransitionHistory> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.shipIdeaTransitionHistory(ideaId, historyId),
+  });
+  return parseShipIdeaTransitionHistory(raw);
 }
 
 // ---------------------------------------------------------------------------

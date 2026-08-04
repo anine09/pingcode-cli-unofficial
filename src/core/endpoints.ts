@@ -309,6 +309,28 @@ export const ENDPOINTS = {
     `/v1/ship/products/${encodeURIComponent(productId)}/members`,
 
   /**
+   * 需求排期 — the requirement **schedule** a 需求 can be planned into, and the
+   * *full* record: `{id, url, product, name, assignee, start_at, end_at}` against the
+   * `{id, url, name}` that `shipIdeaPlans` below returns for the same rows
+   * (ship GOTCHA #12 — do not share one deserializer).
+   *
+   * ⚠️ **The word "plan" is three unrelated things in this API** (design D7.4): this
+   * one, testhub's 测试计划 (`testhubLibraryPlans`), and the `*_plans` **configuration
+   * schemes** such as `shipTicketStatePlans`. Only this one is a 排期.
+   *
+   * Read-only, and provably so rather than merely undocumented: `POST …/plans`,
+   * `PATCH …/plans/{id}` and `DELETE …/plans/{id}` all answer HTTP **405**
+   * `Method Not Allowed` in plain text, not JSON (live 2026-08-05, S4). An unknown
+   * product answers 400 `100701` (`产品不存在或无权访问`, deliberately unmapped — see
+   * `wire.ts`), an unknown plan 400 `100721` (`产品排期不存在`, also unmapped), and a
+   * malformed segment a real HTTP 404 `100002`.
+   */
+  shipProductPlans: (productId: string): string =>
+    `/v1/ship/products/${encodeURIComponent(productId)}/plans`,
+  shipProductPlan: (productId: string, planId: string): string =>
+    `/v1/ship/products/${encodeURIComponent(productId)}/plans/${encodeURIComponent(planId)}`,
+
+  /**
    * `POST` only. The CLI never issues `GET /v1/ship/ideas`: the simple list has no
    * assignee/date/property filters, so `…/search` is the single read path (PRD D2).
    */
@@ -316,11 +338,44 @@ export const ENDPOINTS = {
   shipIdeasSearch: '/v1/ship/ideas/search',
   shipIdea: (ideaId: string): string => `/v1/ship/ideas/${encodeURIComponent(ideaId)}`,
 
-  /** Note the **singular** `idea` segment on all four lookups (ship §J3). */
+  /**
+   * 需求流转记录 — one row per **state** change, `from_state: null` on the row every
+   * 需求 is created with. Read-only at the route level: `POST …/transition_histories`
+   * and `DELETE …/transition_histories/{id}` both answer HTTP **405**
+   * `Method Not Allowed` (live 2026-08-05, S4).
+   *
+   * ⚠️ **The `{idea}` segment here accepts the 24-hex id only.** The idea *resource*
+   * (`shipIdea` above) accepts `id`, `short_id` **and** `identifier` — all three
+   * answered 200 live — but this sub-collection answers a real HTTP 404 `100002`
+   * `资源路径错误` for `HxUyPHCz` or `PD-YYHC-1`. The command layer therefore resolves
+   * the reference to an id first, which `resolveShipRef` already does.
+   *
+   * Unlike pjm's link list, this one **validates its parent**: an unknown idea answers
+   * 400 `100725` (already mapped → exit 5), so there is no 200-with-zero-rows trap
+   * here. An unknown history id — and a real history id addressed under a *different*
+   * idea — both answer 400 `100740`, i.e. the idea segment is genuinely enforced.
+   *
+   * A third `transition_histories` shape, sharing nothing but the name with pjm's:
+   * the parent key is **`idea`** (a rich embed carrying `identifier`, `title`,
+   * `short_id` and `html_url`), not `work_item`. See `ShipIdeaTransitionHistory`.
+   */
+  shipIdeaTransitionHistories: (ideaId: string): string =>
+    `/v1/ship/ideas/${encodeURIComponent(ideaId)}/transition_histories`,
+  shipIdeaTransitionHistory: (ideaId: string, historyId: string): string =>
+    `/v1/ship/ideas/${encodeURIComponent(ideaId)}/transition_histories/${encodeURIComponent(historyId)}`,
+
+  /** Note the **singular** `idea` segment on all five lookups (ship §J3). */
   shipIdeaStates: '/v1/ship/idea/states',
   shipIdeaPriorities: '/v1/ship/idea/priorities',
   shipIdeaSuites: '/v1/ship/idea/suites',
   shipIdeaProperties: '/v1/ship/idea/properties',
+  /**
+   * The values `idea update --plan-id` takes, and the **thin** half of ship GOTCHA
+   * #12: documented as `{id, url, name}` only, where `shipProductPlans` returns the
+   * full 排期 record for the same rows. `?product_id=` is required (400 `100008`
+   * without it).
+   */
+  shipIdeaPlans: '/v1/ship/idea/plans',
 
   /** `POST` only, for the same reason as `shipIdeas` (PRD D10/R11). */
   shipTickets: '/v1/ship/tickets',
