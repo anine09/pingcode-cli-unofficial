@@ -12,16 +12,21 @@
 
 import type {
   TestCase,
+  TestCaseBulkItem,
   TestCaseHistoryItem,
   TestCaseImportantLevel,
+  TestCaseProperty,
+  TestCasePropertyOption,
   TestCaseState,
   TestCaseStep,
   TestCaseType,
   TestLibrary,
   TestPlan,
   TestPlanRef,
+  TestPlanState,
   TestPlanType,
   TestRun,
+  TestRunBulkItem,
   TestRunBulkResult,
   TestRunHistoryItem,
   TestRunStatus,
@@ -330,6 +335,8 @@ export function parseTestRunHistoryItem(raw: unknown): TestRunHistoryItem {
     plan: parseTestPlanRef(record.plan),
     case: parseRef(record.case),
     executed_status: parseRef(record.executed_status),
+    // Undocumented on this side, present live — the flat slug beside the object.
+    status: asString(record.status),
     remark: asString(record.remark),
     executed_at: asNumber(record.executed_at),
     executed_by: parseRef(record.executed_by),
@@ -338,9 +345,20 @@ export function parseTestRunHistoryItem(raw: unknown): TestRunHistoryItem {
 }
 
 /**
- * `/cases/{id}/histories` items: a flat `status` **string** and no `remark` at
- * all (GOTCHA #3). Sharing `parseTestRunHistoryItem` would read
- * `executed_status` off a payload that has none. No wrapper in this slice.
+ * `/cases/{id}/histories` items — the latest result of each run of one case.
+ *
+ * **Corrected in S3 against the live API (2026-08-04).** GOTCHA #3 said this side
+ * carries a flat `status` string and *no* `executed_status` and *no* `remark`, and
+ * warned that sharing the run-side parser would read a field that is not there.
+ * The opposite is true: the payload carries all three, and each item is the very
+ * same record the run-side read returns (same `id`, and a `url` pointing at
+ * `/runs/{run_id}/histories/{id}`). So the fields are read here too — dropping
+ * them was the actual bug.
+ *
+ * The parser is still **separate** from `parseTestRunHistoryItem` rather than
+ * merged: the vendor documents two different field sets, one tenant is not a
+ * contract, and two small parsers cost less than one wrong assumption. If they
+ * ever diverge again, they diverge in the file that already expects it.
  */
 export function parseTestCaseHistoryItem(raw: unknown): TestCaseHistoryItem {
   const record = asRecord(raw);
@@ -353,10 +371,112 @@ export function parseTestCaseHistoryItem(raw: unknown): TestCaseHistoryItem {
     plan: parseTestPlanRef(record.plan),
     case: parseRef(record.case),
     status: asString(record.status),
+    executed_status: parseRef(record.executed_status),
+    remark: asString(record.remark),
     executed_at: asNumber(record.executed_at),
     executed_by: parseRef(record.executed_by),
     steps: Array.isArray(record.steps) ? record.steps.map(parseTestRunStep) : [],
   };
+}
+
+/**
+ * `GET /v1/testhub/plan_states[/{id}]` — the plan lifecycle vocabulary.
+ *
+ * `is_system` arrives as an integer here and every row reports `1`, unlike the
+ * library-scoped run-status list which omits the field entirely ([th#57]) — so it
+ * is normalised when present and left absent otherwise, the module-wide rule.
+ */
+export function parseTestPlanState(raw: unknown): TestPlanState {
+  const record = asRecord(raw);
+  const state: TestPlanState = {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    type: asString(record.type),
+  };
+  state.is_system = record.is_system === undefined ? undefined : asBooleanFlag(record.is_system);
+  return state;
+}
+
+/** One option of a select-typed case property; `_id` is what a write sends, not `text`. */
+function parseTestCasePropertyOption(raw: unknown): TestCasePropertyOption {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    _id: asString(record._id),
+    text: asString(record.text),
+    parent_id: asString(record.parent_id),
+  };
+}
+
+/**
+ * `GET /v1/testhub/case/properties?library_id=` ([th#23]).
+ *
+ * The `id` is the property **key**, and on this tenant every row is a built-in
+ * field rather than a custom property (live 2026-08-04) — which is why the three
+ * `is_*` booleans are parsed: they are the only signal in the payload that
+ * separates a removable custom property from a fixed built-in one.
+ */
+export function parseTestCaseProperty(raw: unknown): TestCaseProperty {
+  const record = asRecord(raw);
+  const property: TestCaseProperty = {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    type: asString(record.type),
+    options: Array.isArray(record.options) ? record.options.map(parseTestCasePropertyOption) : [],
+  };
+  for (const key of ['is_removable', 'is_name_editable', 'is_options_editable'] as const) {
+    property[key] = record[key] === undefined ? undefined : asBooleanFlag(record[key]);
+  }
+  return property;
+}
+
+/**
+ * One element of the two `cases/bulk` responses, which are **bare arrays** rather
+ * than paged envelopes (testhub §3.6, confirmed live 2026-08-04).
+ */
+export function parseTestCaseBulkItem(raw: unknown): TestCaseBulkItem {
+  const record = asRecord(raw);
+  const item: TestCaseBulkItem = {
+    ...record,
+    state: asString(record.state),
+    message: asString(record.message),
+  };
+  // Absent on a `failure` row, so it must not be invented: `parseTestCase` would
+  // happily return a case whose every field is undefined.
+  item.case = record.case === undefined || record.case === null ? undefined : parseTestCase(record.case);
+  return item;
+}
+
+/**
+ * One element of the two `runs/bulk` responses. Same bare-array shape, and the
+ * `POST` half really does report per-element failures under HTTP 200 —
+ * `{state: 'failure', message: '创建失败或已创建'}` for a case already in the plan
+ * (live 2026-08-04).
+ */
+export function parseTestRunBulkItem(raw: unknown): TestRunBulkItem {
+  const record = asRecord(raw);
+  const item: TestRunBulkItem = {
+    ...record,
+    state: asString(record.state),
+    message: asString(record.message),
+  };
+  item.run = record.run === undefined || record.run === null ? undefined : parseTestRun(record.run);
+  return item;
+}
+
+/**
+ * A bare-array response, parsed element by element.
+ *
+ * The four bulk endpoints answer with a JSON array instead of the platform's
+ * `{page_index, page_size, total, values}` envelope, so `fetchPageOf` cannot be
+ * used and `values` cannot be read. A non-array body yields an empty list rather
+ * than a throw: the caller's own `state`/`message` rendering is a better place to
+ * notice an unexpected shape than a parse error with no context.
+ */
+export function parseBareArray<T>(raw: unknown, parse: (item: unknown) => T): T[] {
+  return Array.isArray(raw) ? raw.map(parse) : [];
 }
 
 /** Counts only — the created runs' ids are not returned ([th#49]). */

@@ -353,6 +353,12 @@ export type TestRunHistoryItem = {
   case?: Ref | undefined;
   /** An **object** `{id, url, name}` — the distinguishing field. */
   executed_status?: Ref | undefined;
+  /**
+   * The flat slug (`pass`, `block`, …), undocumented on this side ([th#55] lists
+   * only `executed_status`) but always present live (2026-08-04). Carried so a
+   * renderer can fall back to it when the localized object is absent.
+   */
+  status?: string | undefined;
   remark?: string | undefined;
   executed_at?: number | undefined;
   executed_by?: Ref | undefined;
@@ -361,13 +367,26 @@ export type TestRunHistoryItem = {
 };
 
 /**
- * One item of `GET /v1/testhub/cases/{case_id}/histories` ([th#26]).
+ * One item of `GET /v1/testhub/cases/{case_id}/histories` ([th#26]) — the
+ * **latest** result record of each run of that case.
  *
- * The other half of GOTCHA #3: a flat **`status` string** instead of an
- * `executed_status` object, and **no `remark`** at all. Also the only read
- * endpoint in the module that declares a *write* scope (GOTCHA #1).
+ * > **Live 2026-08-04 (S3): [TH§11]/GOTCHA #3 is falsified.** The docs describe
+ * > this as a reduced shape — a flat `status` string and no `remark` — and the
+ * > research told implementors never to share a deserializer with the run side
+ * > because of it. On the live API the items carry **`status` *and*
+ * > `executed_status` *and* `remark`**, i.e. the run-side shape, and each item's
+ * > `url` points at `/runs/{run_id}/histories/{id}` with the *same* `id` the
+ * > run-side read returns. It is one resource reachable through two paths.
+ * >
+ * > The two types and their two parsers are nevertheless kept apart, which is a
+ * > deliberate choice rather than an oversight: the vendor documents different
+ * > field sets for the two endpoints, only one tenant has been measured, and the
+ * > cost of keeping them separate is a few lines while the cost of merging them
+ * > and being wrong is a silently `undefined` field. What *is* fixed here is the
+ * > content — this type no longer claims the fields do not exist.
  *
- * No wrapper is exposed in this slice.
+ * Also the only read endpoint in the module that declares a *write* scope
+ * (GOTCHA #1); see `endpoints.ts` for why that could not be settled live.
  */
 export type TestCaseHistoryItem = {
   id: string;
@@ -376,11 +395,96 @@ export type TestCaseHistoryItem = {
   library?: Ref | undefined;
   plan?: TestPlanRef | undefined;
   case?: Ref | undefined;
-  /** A flat **string** slug — not an object, and there is no `remark` sibling. */
+  /** The flat slug the docs promise: `not_start` | `pass` | `block` | `failure` | `skip`. */
   status?: string | undefined;
+  /** Undocumented here but always present live — the localized `{id, url, name}`. */
+  executed_status?: Ref | undefined;
+  /** Undocumented here but present live, `null` when the result carried no note. */
+  remark?: string | undefined;
   executed_at?: number | undefined;
   executed_by?: Ref | undefined;
   steps: TestRunStep[];
+  [key: string]: unknown;
+};
+
+/**
+ * `GET /v1/testhub/plan_states[/{state_id}]` ([th#63]/[th#64]) — the **plan**
+ * lifecycle, organisation-level.
+ *
+ * Three system rows on this tenant (未开始 / 进行中 / 已完成), and their ids are
+ * what `PATCH …/plans/{plan_id}` takes as `state_id` (live 2026-08-04). Not to be
+ * confused with `TestCaseState` (用例状态) or `TestRunStatus` (执行结果).
+ */
+export type TestPlanState = {
+  id: string;
+  name?: string | undefined;
+  /** `pending` | `in_progress` | `completed` (testhub §8). */
+  type?: string | undefined;
+  /** Normalised from `0/1`. Every row is `1` here, unlike run statuses. */
+  is_system?: boolean | undefined;
+  [key: string]: unknown;
+};
+
+/** One option of a select-typed case property ([th#32]); `_id` is the value a write sends. */
+export type TestCasePropertyOption = {
+  _id?: string | undefined;
+  text?: string | undefined;
+  parent_id?: string | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * `GET /v1/testhub/case/properties?library_id=` ([th#23]) — the fields effective
+ * in one library.
+ *
+ * ⚠️ **The `id` is a field key, and most rows are built-in fields, not custom
+ * properties.** Live 2026-08-04 (S3) all 8 rows on this tenant are built-ins
+ * (`state_id`, `description`, `steps`, `type`, `important_level`,
+ * `maintenance_uid`, `precondition`, `test_type`), and pushing one of those
+ * through the `properties` map either answers HTTP 500 or rewrites the top-level
+ * field of the same name. Only rows that are genuinely custom are `--set` keys —
+ * see `endpoints.ts` and `modules/testhub.md`.
+ */
+export type TestCaseProperty = {
+  id: string;
+  name?: string | undefined;
+  /** `text`|`textarea`|`select`|…|`link`, plus the undocumented `system` for built-ins. */
+  type?: string | undefined;
+  options: TestCasePropertyOption[];
+  is_removable?: boolean | undefined;
+  is_name_editable?: boolean | undefined;
+  is_options_editable?: boolean | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * One element of `POST`/`PATCH /v1/testhub/cases/bulk` ([th#18]/[th#19]).
+ *
+ * The response is a **bare JSON array**, one element per input row, exactly as
+ * testhub §3.6 predicted from the examples (confirmed live 2026-08-04). `state`
+ * is `success` or `failure`; `case` is present on success. No `message` field was
+ * observed on this half — a rejected *field* fails the whole request with a 400
+ * instead, so a `failure` element here is rare.
+ */
+export type TestCaseBulkItem = {
+  state?: string | undefined;
+  case?: TestCase | undefined;
+  message?: string | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * One element of `POST`/`PATCH /v1/testhub/runs/bulk` ([th#48]/[th#50]).
+ *
+ * Also a bare array. The `POST` half really is per-element: live 2026-08-04 a
+ * three-row batch with one already-added case returned two `success` rows and one
+ * `{state: 'failure', message: '创建失败或已创建'}` under HTTP 200. The `PATCH`
+ * half is atomic instead, so its array is all-`success` or absent entirely.
+ */
+export type TestRunBulkItem = {
+  state?: string | undefined;
+  run?: TestRun | undefined;
+  message?: string | undefined;
   [key: string]: unknown;
 };
 
@@ -391,6 +495,7 @@ export type TestCaseHistoryItem = {
  * caller that needs them has to re-query the plan (testhub §3.6).
  */
 export type TestRunBulkResult = {
+
   inserts?: number | undefined;
   updates?: number | undefined;
   deletes?: number | undefined;

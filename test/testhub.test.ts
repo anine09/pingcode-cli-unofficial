@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  parseBareArray,
   parseTestCase,
+  parseTestCaseBulkItem,
   parseTestCaseHistoryItem,
+  parseTestCaseProperty,
   parseTestCaseState,
   parseTestCaseStep,
   parseTestCaseType,
   parseTestLibrary,
   parseTestPlan,
   parseTestPlanRef,
+  parseTestPlanState,
   parseTestRun,
+  parseTestRunBulkItem,
   parseTestRunBulkResult,
   parseTestRunStatus,
   parseTestRunHistoryItem,
@@ -16,33 +21,47 @@ import {
   parseTestSuite,
 } from '../src/api/parse';
 import {
+  bulkCreateCases,
+  bulkCreateRuns,
   bulkRuns,
+  bulkUpdateCases,
+  bulkUpdateRuns,
+  caseProperties,
   caseStates,
   caseTypes,
   createCase,
   createLibrary,
   createPlan,
+  createRun,
+  deleteCase,
   getCase,
   getLibrary,
   getPlan,
   getRun,
+  getRunHistory,
   importantLevels,
+  iterateCaseHistories,
   iterateCases,
   iterateLibraries,
   iteratePlans,
+  iterateRunHistories,
   iterateRuns,
   iterateSuites,
+  listCaseHistories,
   listLibraries,
   listPlans,
+  listRunHistories,
   patchRun,
+  planStates,
   planTypes,
   runStatuses,
   searchCases,
   searchRuns,
   updateCase,
+  updatePlan,
 } from '../src/api/testhub';
 import { THIRTY_DAYS_MS } from '../src/core/auth';
-import { DryRunHalt } from '../src/core/errors';
+import { ApiError, DryRunHalt, NotFoundError } from '../src/core/errors';
 import { collect } from '../src/core/paginate';
 import { createFakeFetch, createTestContext, jsonResponse } from './helpers/fake';
 
@@ -190,21 +209,89 @@ describe('testhub normalisation', () => {
     expect(run.plan?.state).toBeUndefined();
   });
 
-  it('keeps the two history shapes on separate deserializers (GOTCHA #3)', () => {
+  it('keeps the two history shapes on separate deserializers (GOTCHA #3, corrected in S3)', () => {
+    // Two parsers, still — but the *reason* changed. GOTCHA #3 said the case side
+    // carries a flat `status` and neither `executed_status` nor `remark`; live
+    // 2026-08-04 it carries all three, and the record is literally the run-side one
+    // (same id, and a `url` under /runs/{id}/histories). So both parsers now read
+    // both spellings, and what is asserted is that each keeps whatever the wire sent.
     const runHistory = parseTestRunHistoryItem({
       id: 'h1',
+      status: 'pass',
       executed_status: { id: 'rs1', name: '通过' },
       remark: 'retested',
       steps: [{ step_id: 's1', status: 'pass' }],
     });
     expect(runHistory.executed_status?.name).toBe('通过');
+    expect(runHistory.status).toBe('pass');
     expect(runHistory.remark).toBe('retested');
 
-    const caseHistory = parseTestCaseHistoryItem({ id: 'h2', status: 'pass' });
-    // Flat string, no `executed_status`, and no `remark` sibling exists at all.
+    // The shape the live API returns on the case side: identical to the above.
+    const caseHistory = parseTestCaseHistoryItem({
+      id: 'h1',
+      status: 'pass',
+      executed_status: { id: 'rs1', name: '通过' },
+      remark: 'retested',
+    });
     expect(caseHistory.status).toBe('pass');
-    expect(caseHistory.executed_status).toBeUndefined();
-    expect(caseHistory.remark).toBeUndefined();
+    expect(caseHistory.executed_status?.name).toBe('通过');
+    expect(caseHistory.remark).toBe('retested');
+
+    // The shape the docs promise, which must not gain invented fields.
+    const asDocumented = parseTestCaseHistoryItem({ id: 'h2', status: 'pass' });
+    expect(asDocumented.executed_status).toBeUndefined();
+    expect(asDocumented.remark).toBeUndefined();
+
+    // And they remain two functions: the case-side parser is not the run-side one.
+    expect(parseTestCaseHistoryItem).not.toBe(parseTestRunHistoryItem);
+  });
+
+  it('parses a bare-array bulk response, and never invents a resource on a failure row', () => {
+    // The four bulk endpoints answer with a JSON array, not the platform envelope
+    // (testhub §3.6, confirmed live 2026-08-04) — so `values` cannot be read.
+    const cases = parseBareArray(
+      [
+        { state: 'success', case: { id: 'c1', identifier: 'LIB-1', is_archived: 0 } },
+        { state: 'failure', message: '创建失败或已创建' },
+      ],
+      parseTestCaseBulkItem,
+    );
+    expect(cases[0]?.case?.identifier).toBe('LIB-1');
+    expect(cases[1]?.case).toBeUndefined();
+    expect(cases[1]?.message).toBe('创建失败或已创建');
+
+    const runs = parseBareArray(
+      [{ state: 'failure', message: '创建失败或已创建' }],
+      parseTestRunBulkItem,
+    );
+    expect(runs[0]?.run).toBeUndefined();
+
+    // A non-array body yields nothing rather than throwing: the caller's own
+    // state/message rendering is a better place to notice an unexpected shape.
+    expect(parseBareArray({ nope: true }, parseTestCaseBulkItem)).toEqual([]);
+  });
+
+  it('parses plan states and keeps them distinct from case states and run results', () => {
+    const state = parseTestPlanState({ id: 'ps1', name: '进行中', type: 'in_progress', is_system: 1 });
+    expect(state).toMatchObject({ name: '进行中', type: 'in_progress', is_system: true });
+    // Absent stays absent, the module-wide rule for is_system ([th#57]).
+    expect(parseTestPlanState({ id: 'ps2' }).is_system).toBeUndefined();
+  });
+
+  it('parses a case property and its select options ([th#23])', () => {
+    const property = parseTestCaseProperty({
+      id: 'severity',
+      name: '严重程度',
+      type: 'select',
+      options: [{ _id: 'o1', text: 'blocker' }],
+      is_removable: 1,
+    });
+    // The id is the property KEY, which is also why most rows on a real tenant are
+    // built-in field names rather than custom keys.
+    expect(property.id).toBe('severity');
+    expect(property.options[0]?._id).toBe('o1');
+    expect(property.is_removable).toBe(true);
+    expect(parseTestCaseProperty({ id: 'state_id' }).options).toEqual([]);
   });
 
   it('keeps timestamps raw and preserves unknown fields and custom properties', () => {
@@ -715,6 +802,252 @@ describe('library-scoped configuration lookups', () => {
   });
 });
 
+describe('cases bulk / delete / history api (S3)', () => {
+  it('posts a bare `cases` array and reads the bare array back', async () => {
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse([{ state: 'success', case: { id: 'c1', identifier: 'LIB-9' } }]),
+    ]);
+    const items = await bulkCreateCases(ctx, {
+      cases: [{ test_library_id: 'lib-1', title: 'imported', type_id: 'ct1' }],
+    });
+    expect(items[0]?.case?.identifier).toBe('LIB-9');
+    expect(fake.calls[0]?.method).toBe('POST');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/cases/bulk');
+    // `type_id` is undeclared upstream and verified to work live, so it is forwarded.
+    expect(fake.calls[0]?.body).toEqual({
+      cases: [{ test_library_id: 'lib-1', title: 'imported', type_id: 'ct1' }],
+    });
+  });
+
+  it('drops undefined entry fields rather than sending nulls', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse([])]);
+    await bulkCreateCases(ctx, {
+      cases: [
+        { test_library_id: 'lib-1', title: 'a', description: undefined, important_level_id: 'l1' },
+      ],
+    });
+    expect(fake.calls[0]?.body).toEqual({
+      cases: [{ test_library_id: 'lib-1', title: 'a', important_level_id: 'l1' }],
+    });
+  });
+
+  it('patches a bare `cases` array (PATCH, same path)', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse([{ state: 'success', case: { id: 'c1' } }])]);
+    await bulkUpdateCases(ctx, { cases: [{ case_id: 'c1', state_id: 'cs2' }] });
+    expect(fake.calls[0]?.method).toBe('PATCH');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/cases/bulk');
+    expect(fake.calls[0]?.body).toEqual({ cases: [{ case_id: 'c1', state_id: 'cs2' }] });
+  });
+
+  it('deletes a case and returns the case body it answered with', async () => {
+    const { ctx, fake } = ctxFor([
+      () => jsonResponse({ id: 'c1', identifier: 'LIB-9', is_deleted: 1, is_archived: 0 }),
+    ]);
+    const deleted = await deleteCase(ctx, 'c1');
+    // The response carries the whole case, which is what lets the command echo it —
+    // and `is_deleted` comes back as 1, normalised here.
+    expect(deleted).toMatchObject({ identifier: 'LIB-9', is_deleted: true });
+    expect(fake.calls[0]?.method).toBe('DELETE');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/cases/c1');
+    expect(fake.calls[0]?.body).toBeUndefined();
+  });
+
+  it('lists case histories with paging, and iterates them', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 1,
+          page_size: 2,
+          total: 3,
+          values: [{ id: 'h1', status: 'pass', executed_status: { id: 'rs1', name: '通过' } }],
+        }),
+    ]);
+    const page = await listCaseHistories(ctx, 'c1', { pageIndex: 1, pageSize: 2 });
+    expect(page.values[0]?.executed_status?.name).toBe('通过');
+    const url = new URL(fake.urls()[0] ?? '');
+    expect(url.pathname).toBe('/v1/testhub/cases/c1/histories');
+    expect(url.searchParams.get('page_index')).toBe('1');
+
+    const { ctx: ctx2 } = ctxFor([
+      () => jsonResponse({ page_index: 0, page_size: 2, total: 2, values: [{ id: 'h1' }] }),
+    ]);
+    expect((await collect(iterateCaseHistories(ctx2, 'c1', { pageSize: 2 }))).length).toBe(1);
+  });
+});
+
+describe('runs create / bulk / history api (S3)', () => {
+  it('creates one run from three ids', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'r1', status: 'not_start' })]);
+    const run = await createRun(ctx, {
+      library_id: 'lib-1',
+      plan_id: 'p1',
+      case_id: 'c1',
+      executor_id: 'u1',
+    });
+    expect(run.status).toBe('not_start');
+    expect(fake.calls[0]?.method).toBe('POST');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/runs');
+    expect(fake.calls[0]?.body).toEqual({
+      library_id: 'lib-1',
+      plan_id: 'p1',
+      case_id: 'c1',
+      executor_id: 'u1',
+    });
+  });
+
+  it('omits executor_id when the caller has none — the run is left unassigned', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'r1' })]);
+    await createRun(ctx, { library_id: 'lib-1', plan_id: 'p1', case_id: 'c1' });
+    expect(fake.calls[0]?.body).toEqual({ library_id: 'lib-1', plan_id: 'p1', case_id: 'c1' });
+  });
+
+  it('bulk-creates runs under a `runs` key and reports per-element state', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse([
+          { state: 'success', run: { id: 'r1' } },
+          { state: 'failure', message: '创建失败或已创建' },
+        ]),
+    ]);
+    const items = await bulkCreateRuns(ctx, {
+      runs: [
+        { library_id: 'lib-1', plan_id: 'p1', case_id: 'c1' },
+        { library_id: 'lib-1', plan_id: 'p1', case_id: 'c2' },
+      ],
+    });
+    // Per-element best effort under HTTP 200: one landed, one did not.
+    expect(items.map((item) => item.state)).toEqual(['success', 'failure']);
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/runs/bulk');
+    expect(fake.calls[0]?.method).toBe('POST');
+  });
+
+  it('bulk-updates runs with PATCH on the same path', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse([{ state: 'success', run: { id: 'r1' } }])]);
+    await bulkUpdateRuns(ctx, {
+      runs: [{ run_id: 'r1', status_id: 'rs1', remark: 'ok', executor_id: undefined }],
+    });
+    expect(fake.calls[0]?.method).toBe('PATCH');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/runs/bulk');
+    // An omitted executor preserves the run's current one, so it is not sent as null.
+    expect(fake.calls[0]?.body).toEqual({ runs: [{ run_id: 'r1', status_id: 'rs1', remark: 'ok' }] });
+  });
+
+  it('lists and gets run histories on the id-only paths', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 30,
+          total: 1,
+          values: [{ id: 'h1', executed_status: { id: 'rs1', name: '失败' }, remark: 'r' }],
+        }),
+      () => jsonResponse({ id: 'h1', executed_status: { id: 'rs1', name: '失败' } }),
+    ]);
+    const page = await listRunHistories(ctx, 'r1');
+    expect(page.values[0]?.remark).toBe('r');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/runs/r1/histories');
+
+    const row = await getRunHistory(ctx, 'r1', 'h1');
+    expect(row.executed_status?.name).toBe('失败');
+    expect(new URL(fake.urls()[1] ?? '').pathname).toBe('/v1/testhub/runs/r1/histories/h1');
+  });
+
+  it('iterates run histories across pages', async () => {
+    const { ctx } = ctxFor([
+      () => jsonResponse({ page_index: 0, page_size: 2, total: 3, values: [{ id: 'h1' }, { id: 'h2' }] }),
+      () => jsonResponse({ page_index: 1, page_size: 2, total: 3, values: [{ id: 'h3' }] }),
+    ]);
+    const rows = await collect(iterateRunHistories(ctx, 'r1', { pageSize: 2 }));
+    expect(rows.map((row) => row.id)).toEqual(['h1', 'h2', 'h3']);
+  });
+});
+
+describe('plan update and the two new lookups (S3)', () => {
+  it('patches a plan under its library, sending only what it was given', async () => {
+    const { ctx, fake } = ctxFor([() => jsonResponse({ id: 'p1', name: 'renamed' })]);
+    await updatePlan(ctx, 'lib-1', 'p1', { name: 'renamed', state_id: 'ps2', summary: undefined });
+    expect(fake.calls[0]?.method).toBe('PATCH');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/testhub/libraries/lib-1/plans/p1');
+    expect(fake.calls[0]?.body).toEqual({ name: 'renamed', state_id: 'ps2' });
+  });
+
+  it('reads plan states from the ORGANISATION-level path, with no library_id', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 100,
+          total: 1,
+          values: [{ id: 'ps1', name: '未开始', type: 'pending', is_system: 1 }],
+        }),
+    ]);
+    expect((await planStates(ctx))[0]?.name).toBe('未开始');
+    const url = new URL(fake.urls()[0] ?? '');
+    expect(url.pathname).toBe('/v1/testhub/plan_states');
+    expect(url.searchParams.get('library_id')).toBeNull();
+  });
+
+  it('reads case properties from the SINGULAR `case` segment with a required library_id', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 100,
+          total: 1,
+          values: [{ id: 'state_id', name: '状态', type: 'system' }],
+        }),
+    ]);
+    expect((await caseProperties(ctx, 'lib-1'))[0]?.id).toBe('state_id');
+    const url = new URL(fake.urls()[0] ?? '');
+    // Singular `case`, plural `cases` is the resource — the module's oldest trap.
+    expect(url.pathname).toBe('/v1/testhub/case/properties');
+    expect(url.searchParams.get('library_id')).toBe('lib-1');
+  });
+});
+
+describe('the two S3 error codes map to exit 5', () => {
+  it('maps 100602 (missing plan) on a GET and on a PATCH', async () => {
+    for (const call of [
+      (ctx: ReturnType<typeof ctxFor>['ctx']) => getPlan(ctx, 'lib-1', 'nope'),
+      (ctx: ReturnType<typeof ctxFor>['ctx']) => updatePlan(ctx, 'lib-1', 'nope', { name: 'x' }),
+    ]) {
+      const { ctx } = ctxFor([
+        () => jsonResponse({ code: '100602', message: '测试计划不存在或无权限访问' }, { status: 400 }),
+      ]);
+      const error = await call(ctx).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundError);
+    }
+  });
+
+  it('maps 100642 (missing run history) but leaves 100643 (mismatched pair) on exit 7', async () => {
+    const { ctx } = ctxFor([
+      () => jsonResponse({ code: '100642', message: '执行历史不存在' }, { status: 400 }),
+    ]);
+    expect(
+      await getRunHistory(ctx, 'r1', 'nope').catch((caught: unknown) => caught),
+    ).toBeInstanceOf(NotFoundError);
+
+    const { ctx: other } = ctxFor([
+      () => jsonResponse({ code: '100643', message: '执行历史和测试用例不匹配' }, { status: 400 }),
+    ]);
+    const mismatch = await getRunHistory(other, 'r1', 'h-of-another-run').catch(
+      (caught: unknown) => caught,
+    );
+    expect(mismatch).toBeInstanceOf(ApiError);
+    expect(mismatch).not.toBeInstanceOf(NotFoundError);
+  });
+
+  it('leaves 100619 (unknown run OR a rejected batch) on exit 7', async () => {
+    // One code, two meanings — so it is mapped to neither (error-handling.md).
+    const { ctx } = ctxFor([
+      () => jsonResponse({ code: '100619', message: '执行用例不存在' }, { status: 400 }),
+    ]);
+    const error = await listRunHistories(ctx, 'nope').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).not.toBeInstanceOf(NotFoundError);
+  });
+});
+
 describe('the api layer neither logs nor sends under --dry-run', () => {
   it('logs nothing beyond transport debug lines', async () => {
     const { ctx } = ctxFor([() => jsonResponse({ id: 'c1' })]);
@@ -742,6 +1075,28 @@ describe('the api layer neither logs nor sends under --dry-run', () => {
       ],
       ['patchRun', (ctx) => patchRun(ctx, 'r1', { status_id: 'rs1', executor_id: 'u1' })],
       ['bulkRuns', (ctx) => bulkRuns(ctx, 'lib-1', 'p1', { deletes: ['r9'] })],
+      // S3's six writes. `deleteCase` matters most here: it cascades to the case's
+      // runs, so a dry run that leaked would be the worst possible one to leak.
+      [
+        'bulkCreateCases',
+        (ctx) => bulkCreateCases(ctx, { cases: [{ test_library_id: 'lib-1', title: 't' }] }),
+      ],
+      ['bulkUpdateCases', (ctx) => bulkUpdateCases(ctx, { cases: [{ case_id: 'c1', title: 't' }] })],
+      ['deleteCase', (ctx) => deleteCase(ctx, 'c1')],
+      [
+        'createRun',
+        (ctx) => createRun(ctx, { library_id: 'lib-1', plan_id: 'p1', case_id: 'c1' }),
+      ],
+      [
+        'bulkCreateRuns',
+        (ctx) =>
+          bulkCreateRuns(ctx, { runs: [{ library_id: 'lib-1', plan_id: 'p1', case_id: 'c1' }] }),
+      ],
+      [
+        'bulkUpdateRuns',
+        (ctx) => bulkUpdateRuns(ctx, { runs: [{ run_id: 'r1', status_id: 'rs1' }] }),
+      ],
+      ['updatePlan', (ctx) => updatePlan(ctx, 'lib-1', 'p1', { name: 'renamed' })],
     ];
 
     for (const [label, call] of writes) {

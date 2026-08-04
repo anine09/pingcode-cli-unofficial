@@ -403,6 +403,63 @@ const TABLE = {
     hint: 'list the types configured for this library with `pingcode testhub meta plan-types --library <library>`',
   },
 
+  /**
+   * The `state_id` `PATCH …/plans/{plan_id}` takes, and the **only row S3 adds**.
+   *
+   * It is org-level, so it has no parent — the same shape as
+   * `testhub-case-important-level` and for the same reason, but verified rather than
+   * inferred: `GET /v1/testhub/plan_states` takes no parameters at all, there is no
+   * `?library_id=` variant anywhere in the module, and the three ids it returns are
+   * exactly what a plan PATCH accepts (live 2026-08-04).
+   *
+   * It passes the tests a row is judged by:
+   *
+   *  - **the names are unique and they are keys**: 未开始 / 进行中 / 已完成, one per
+   *    `type` (`pending` / `in_progress` / `completed`);
+   *  - **it is configuration, and as static as it gets**: all three rows report
+   *    `is_system: 1`, so a 24 h cache cannot go stale in any way that matters;
+   *  - **the whole list is loaded** — the endpoint has no name filter to be tempted
+   *    by, so a failed lookup prints the real candidates.
+   *
+   * The kind is spelled `testhub-plan-state` rather than `plan-state` because
+   * "state" is this module's most overloaded word: a *case* state (设计/就绪/废弃), a
+   * *plan* state (this one) and a *run* result (通过/失败/…) are three different
+   * vocabularies behind three endpoints, and `pingcode resolve` prints the kind
+   * names.
+   *
+   * **S3 deliberately adds no `testhub-case-property` row**, although
+   * `GET /v1/testhub/case/properties?library_id=` looks exactly like the
+   * product-scoped `ship-idea-property` / `ship-ticket-property` rows it would
+   * mirror. Live 2026-08-04 killed it on the only test that matters — *would the
+   * answer be usable?*
+   *
+   *  - **the rows are built-in fields, not custom properties.** All 8 on this tenant
+   *    are, and their `id`s are the field keys themselves: `state_id`, `description`,
+   *    `steps`, `type`, `important_level`, `maintenance_uid`, `precondition`,
+   *    `test_type`.
+   *  - **resolving a name to one of those ids would produce a harmful write.** The
+   *    only consumer would be `--set`, which builds the `properties` map, and
+   *    `properties: {important_level: …}` answers **HTTP 500** while
+   *    `properties: {description: 'x'}` answers 200 and rewrites the **top-level**
+   *    `description` — i.e. the resolver would hand `--set` a key that silently
+   *    edits a different field. Ship's equivalent is safe because its rows really
+   *    are custom properties.
+   *  - **an unknown `properties` key is already refused upstream** (400 `100043`),
+   *    so the client-side lookup buys no error-quality either.
+   *
+   * `testhub meta case-properties` therefore exists as a *read* only, and its help
+   * says which rows are `--set`-able. Same judgement S2b made for work-item tags:
+   * a lookup that cannot honour "a name in this scope → an id valid in that scope"
+   * does not get a row.
+   */
+  'testhub-plan-state': {
+    label: 'plan state',
+    path: ENDPOINTS.testhubPlanStates,
+    hint:
+      'plan states are organisation-wide (未开始 / 进行中 / 已完成) and are not case states or ' +
+      'run results — list them with `pingcode testhub meta plan-states`',
+  },
+
   // ---- scm (源码管理): the parent is a hosting platform ------------------------
   //
   // Same substitution again — a project for pjm, a product for ship, a library for

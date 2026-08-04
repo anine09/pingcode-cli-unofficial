@@ -376,8 +376,45 @@ export const ENDPOINTS = {
    */
   testhubCases: '/v1/testhub/cases',
   testhubCasesSearch: '/v1/testhub/cases/search',
+  /**
+   * `POST` = bulk create, `PATCH` = bulk partial update ([th#18]/[th#19]).
+   *
+   * **The array cap is 100, not the 50 the docs' sibling endpoint declares**, and
+   * the server says so itself: 101 entries answer 400 `100039`
+   * `cases 数组的长度必须小于等于 100`, checked *before* any field validation
+   * (live 2026-08-04, S3). That holds for the `PATCH` half too, which documents no
+   * limit at all.
+   *
+   * Two fields are **accepted and silently dropped** on both halves: `suite_id`
+   * (documented, [TH§7] GOTCHA #16) and `state_id` on the create half — a bulk
+   * create with `state_id` answers 200 and leaves the case in the library default
+   * (live 2026-08-04). `type_id` is *undeclared* on the create half yet **works**,
+   * which is the same measurement in the opposite direction. The command layer
+   * therefore refuses the two dropped keys and accepts `type`.
+   */
+  testhubCasesBulk: '/v1/testhub/cases/bulk',
   /** Accepts **`id` or `short_id`** on GET ([th#21]); PATCH documents only `id` (GOTCHA #19). */
   testhubCase: (caseId: string): string => `/v1/testhub/cases/${encodeURIComponent(caseId)}`,
+  /**
+   * The **latest** result record of every run of one case ([th#26]).
+   *
+   * Live 2026-08-04 (S3) contradicts [TH§11] twice, and both corrections matter:
+   *
+   *  - the items are **the run-side shape** — `executed_status` object *and*
+   *    `remark` *and* the flat `status` slug — not the reduced
+   *    `status`-string-only shape the docs' example shows. The `url` on each item
+   *    points at `/runs/{run_id}/histories/{id}`, and the ids are literally the
+   *    same records: one resource, two query paths.
+   *  - the path is **id-only**: a `short_id` answers HTTP 404 `100002`, so a
+   *    reference has to be resolved first.
+   *
+   * The declared scope is **`pcp:write:testhub:testcase`** — the only read in the
+   * module that declares a write scope ([TH§7] GOTCHA #1). Whether that is
+   * enforced could not be decided on this tenant: every scope is granted, and no
+   * endpoint reports which ones a token holds (design §D17).
+   */
+  testhubCaseHistories: (caseId: string): string =>
+    `/v1/testhub/cases/${encodeURIComponent(caseId)}/histories`,
 
   /** Singular `case` segment. **Scope `pcp:read:testhub:configuration`** ([th#25], GOTCHA #2). */
   testhubCaseStates: '/v1/testhub/case/states',
@@ -403,6 +440,18 @@ export const ENDPOINTS = {
   testhubLibraryPlan: (libraryId: string, planId: string): string =>
     `/v1/testhub/libraries/${encodeURIComponent(libraryId)}/plans/${encodeURIComponent(planId)}`,
   /**
+   * Plan states ([th#63]/[th#64]) — **organisation-level**, no `?library_id=`.
+   *
+   * Live 2026-08-04 (S3): three system rows (未开始 / 进行中 / 已完成, all
+   * `is_system: 1`), paging honoured, and their ids are exactly what
+   * `PATCH …/plans/{plan_id}` accepts as `state_id`. This is the *plan* lifecycle
+   * and has nothing to do with `case/states` (用例状态) or `run/statuses`
+   * (执行结果) — three different vocabularies, three endpoints.
+   */
+  testhubPlanStates: '/v1/testhub/plan_states',
+  testhubPlanState: (stateId: string): string =>
+    `/v1/testhub/plan_states/${encodeURIComponent(stateId)}`,
+  /**
    * The **only** way to delete a run ([th#49], GOTCHA #13). One call carries
    * `inserts[]` / `updates[]` / `deletes[]`, each capped at 50, and returns
    * counts only — never the ids of the runs it created.
@@ -412,10 +461,72 @@ export const ENDPOINTS = {
 
   /** `POST` only, for the same reason as `testhubCases` ([th#51]/[th#56]). */
   testhubRunsSearch: '/v1/testhub/runs/search',
+  /**
+   * `POST` = add one case to a plan as a run ([th#46]). Body is three ids —
+   * `library_id`, `plan_id`, `case_id` — plus an optional `executor_id`, and it
+   * returns the run object itself.
+   *
+   * Adding a case that is already in the plan is refused with 400 `100605`
+   * `创建执行用例失败` (live 2026-08-04, S3): a conflict, not an absence, so it
+   * keeps exit 7.
+   */
+  testhubRuns: '/v1/testhub/runs',
+  /**
+   * `POST` = bulk create runs, `PATCH` = bulk record results ([th#48]/[th#50]).
+   *
+   * **The two halves have opposite failure semantics**, measured live 2026-08-04
+   * (S3), and nothing in the docs says so:
+   *
+   *  - `POST` is **per-element best effort**: HTTP 200 with one
+   *    `{state: 'success'|'failure', run?, message?}` per input row, so a batch
+   *    containing an already-added case lands the rest and reports
+   *    `创建失败或已创建` for that one.
+   *  - `PATCH` is **atomic**: a single unknown `run_id` rejects the whole batch
+   *    with 400 `100016` `存在无效run_id` and nothing is applied (verified by
+   *    reading the valid run back afterwards).
+   *
+   * Both enforce a cap of **100** entries (400 `100039`), including the `PATCH`
+   * half that documents no limit. An omitted `executor_id` preserves the run's
+   * current executor on the `PATCH` half, exactly as on the single PATCH.
+   */
+  testhubRunsBulk: '/v1/testhub/runs/bulk',
   /** GET accepts id or short_id ([th#52]); PATCH is id-only and **requires `status_id`** ([th#61]). */
   testhubRun: (runId: string): string => `/v1/testhub/runs/${encodeURIComponent(runId)}`,
+  /**
+   * Every result ever recorded on one run ([th#55]/[th#58]), oldest first.
+   *
+   * Live 2026-08-04 (S3): paging is honoured and pages are disjoint; a bulk
+   * `PATCH /runs/bulk` **does** append a row here (so a bulk result is auditable,
+   * unlike a pjm bulk update, which appears in no feed); the path is **id-only**
+   * (a `short_id` answers 404 `100002`); an unknown *run* answers `100619`
+   * `执行用例不存在` and an unknown *history* answers `100642` `执行历史不存在`.
+   */
+  testhubRunHistories: (runId: string): string =>
+    `/v1/testhub/runs/${encodeURIComponent(runId)}/histories`,
+  /**
+   * One result record. A history id that exists but hangs off a **different** run
+   * answers 400 `100643` `执行历史和测试用例不匹配` — a mismatch rather than an
+   * absence, which is why only `100642` is mapped to exit 5 (see `wire.ts`).
+   */
+  testhubRunHistory: (runId: string, historyId: string): string =>
+    `/v1/testhub/runs/${encodeURIComponent(runId)}/histories/${encodeURIComponent(historyId)}`,
   /** Singular `run` segment. **Scope `pcp:read:testhub:configuration`** ([th#57], GOTCHA #2). */
   testhubRunStatuses: '/v1/testhub/run/statuses',
+  /**
+   * Singular `case` segment, `?library_id=` **required** ([th#23]).
+   *
+   * ⚠️ **These are not `--set` keys.** Live 2026-08-04 (S3) this tenant returns 8
+   * rows and every one of them is a *built-in field* descriptor whose `id` is the
+   * field's own name: `maintenance_uid`, `state_id`, `type`, `important_level`,
+   * `precondition`, `steps`, `description`, `test_type`. Writing one of them
+   * through the `properties` map is actively harmful, not merely useless:
+   * `properties: {important_level: …}` answers **HTTP 500** `100000`, and
+   * `properties: {description: 'x'}` answers 200 and rewrites the **top-level**
+   * `description`. Only genuinely custom properties belong in `properties`, and an
+   * unknown key there is refused with 400 `100043` rather than dropped. That is
+   * why there is no `testhub-case-property` resolver kind.
+   */
+  testhubCaseProperties: '/v1/testhub/case/properties',
 
   // -------------------------------------------------------------------------
   // Cross-object (通用) — relations / comments / attachments / activities

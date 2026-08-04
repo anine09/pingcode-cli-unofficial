@@ -55,6 +55,7 @@ Commands:
                                                           (/v1/testhub/libraries/{parent}/plans)
   testhub-plan-type [options] <name>                      plan type → id
                                                           (/v1/testhub/libraries/{parent}/plan_types)
+  testhub-plan-state [options] <name>                     plan state → id (/v1/testhub/plan_states)
   scm-platform [options] <name>                           hosting platform → id (/v1/scm/products)
   scm-repo [options] <name>                               repo → id
                                                           (/v1/scm/products/{parent}/repositories)

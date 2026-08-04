@@ -542,6 +542,23 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100351': 'not_found',
       '1003108': 'not_found',
       '100405': 'not_found',
+      // S3: 测试计划 / 执行历史 (S3 smoke, 2026-08-04, design §D17). `100602` was observed
+      // on GET **and PATCH** of a plan, for an unknown 24-hex id, an unknown
+      // short_id-shaped id, and a real plan addressed under the wrong library — the
+      // library segment is validated there, so all three are "no plan at this address".
+      // `100642` on GET of an unknown history under a valid run.
+      // Behaviour is asserted through the wrappers in `test/testhub.test.ts`.
+      //
+      // Four codes from the same smoke are deliberately absent, and two of them are
+      // instructive: `100619` (`执行用例不存在`) really does mean "no such run" on
+      // `GET /runs/{unknown}/histories`, but the same code rejects a whole `runs/bulk`
+      // batch, so exit 5 would imply the valid entries landed; and `100643`
+      // (`执行历史和测试用例不匹配`) is the mirror image of `100222` above — the vendor
+      // calls the mismatched pair a mismatch rather than an absence, and the CLI reports
+      // what the API says. `100016` is another batch-level refusal and `100605` a
+      // uniqueness conflict.
+      '100602': 'not_found',
+      '100642': 'not_found',
     });
   });
 

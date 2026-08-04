@@ -15,7 +15,7 @@ Commands:
   plans           test plans 测试计划 (scope pcp:read:testhub:testplan)
   runs            test runs 执行用例 (scopes pcp:read:testhub:testplan / pcp:write:testhub:testplan)
   meta            ids you need before writing: case states, types, importance levels, run results,
-                  plan types, modules
+                  plan types, plan states, case fields, modules
   help [command]  display help for command
 "
 `;
@@ -33,11 +33,66 @@ Commands:
   get [options] <case>     show one case (accepts an id or a short_id)
   create [options]         create a case (only the library and --title are required)
   update [options] <case>  patch a case — only the fields you pass are sent, and they replace
+  bulk-create [options]    import many cases from a JSON file in one call (POST
+                           /v1/testhub/cases/bulk)
+  bulk-update [options]    patch many cases in one call — either --case … with shared fields, or
+                           --file
+  delete [options] <case>  delete a case — and every execution record it has in every plan
+  history                  执行历史 the latest result of every run of one case (read-only)
   relation                 关联 cross-kind links of a test case (principal_type=test_case)
   comment                  评论 comments on a test case (principal_type=test_case)
   attachment               附件 attachments of a test case (principal_type=test_case)
   activity                 活动记录 audit trail of a test case (principal_type=test_case)
   help [command]           display help for command
+"
+`;
+
+exports[`testhub --help > testhub cases bulk-create 1`] = `
+"Usage: pingcode testhub cases bulk-create [options]
+
+import many cases from a JSON file in one call (POST /v1/testhub/cases/bulk)
+
+Options:
+  --file <path|->              JSON array of case entries, or - to read it from stdin
+  --library <name|id>          test library name, identifier such as LIB, or id
+  --library-id <id>            test library name, identifier such as LIB, or id (an id, sent
+                               unchanged with no lookup)
+  --type <name|id>             case type applied to every entry that names none
+  --type-id <id>               case type applied to every entry that names none (an id, sent
+                               unchanged with no lookup)
+  --important-level <name|id>  importance level applied to every entry that names none
+  --important-level-id <id>    importance level applied to every entry that names none (an id, sent
+                               unchanged with no lookup)
+  -h, --help                   display help for command
+"
+`;
+
+exports[`testhub --help > testhub cases bulk-update 1`] = `
+"Usage: pingcode testhub cases bulk-update [options]
+
+patch many cases in one call — either --case … with shared fields, or --file
+
+Options:
+  --case <ref>                 case to change, repeatable: id or short_id
+  --case-id <id>               case to change, repeatable: an id, sent with no lookup
+  --file <path|->              JSON array of per-case entries, or - for stdin
+  --title <text>               new title for every named case
+  --description <text>         new description for every named case (replaces)
+  --precondition <text>        new precondition for every named case (replaces)
+  --library <name|id>          test library name, identifier such as LIB, or id (needed to resolve
+                               names)
+  --library-id <id>            test library name, identifier such as LIB, or id (needed to resolve
+                               names) (an id, sent unchanged with no lookup)
+  --state <name|id>            new case state for every named case
+  --state-id <id>              new case state for every named case (an id, sent unchanged with no
+                               lookup)
+  --type <name|id>             new case type for every named case
+  --type-id <id>               new case type for every named case (an id, sent unchanged with no
+                               lookup)
+  --important-level <name|id>  new importance level for every named case
+  --important-level-id <id>    new importance level for every named case (an id, sent unchanged
+                               with no lookup)
+  -h, --help                   display help for command
 "
 `;
 
@@ -61,8 +116,8 @@ Commands:
 exports[`testhub --help > testhub meta 1`] = `
 "Usage: pingcode testhub meta [options] [command]
 
-ids you need before writing: case states, types, importance levels, run results, plan types,
-modules
+ids you need before writing: case states, types, importance levels, run results, plan types, plan
+states, case fields, modules
 
 Options:
   -h, --help                  display help for command
@@ -78,6 +133,11 @@ Commands:
                               scope pcp:read:testhub:configuration
   plan-types [options]        plan types of a library (values for --type on \`plans create\`) — scope
                               pcp:read:testhub:testplan
+  plan-states [options]       plan states 计划状态 (values for --state on \`plans update\`) —
+                              organisation-wide, so this takes no library; scope
+                              pcp:read:testhub:configuration
+  case-properties [options]   case fields effective in a library — the keys behind --set; scope
+                              pcp:read:testhub:testcase
   suites [options]            case modules 模块 of a library (values for --suite) — a tree, listed
                               flat with the full path; scope pcp:read:testhub:library
   help [command]              display help for command
@@ -90,13 +150,45 @@ exports[`testhub --help > testhub plans 1`] = `
 test plans 测试计划 (scope pcp:read:testhub:testplan)
 
 Options:
-  -h, --help            display help for command
+  -h, --help               display help for command
 
 Commands:
-  list [options]        list the plans of a library
-  get [options] <plan>  show one plan (accepts an id or a short_id)
-  create [options]      create a test plan (the name must be unique within the library)
-  help [command]        display help for command
+  list [options]           list the plans of a library
+  get [options] <plan>     show one plan (accepts an id or a short_id)
+  create [options]         create a test plan (the name must be unique within the library)
+  update [options] <plan>  patch a plan — the only way to move its state or write the report
+                           summary
+  help [command]           display help for command
+"
+`;
+
+exports[`testhub --help > testhub plans update 1`] = `
+"Usage: pingcode testhub plans update [options] <plan>
+
+patch a plan — the only way to move its state or write the report summary
+
+Arguments:
+  plan                  plan id, short_id or name
+
+Options:
+  --name <text>         new plan name (unique within the library)
+  --start <date>        new start — YYYY-MM-DD, or a 10-digit unix seconds value used verbatim, at
+                        00:00:00 local
+  --end <date>          new end — YYYY-MM-DD, or a 10-digit unix seconds value used verbatim, at
+                        23:59:59 local
+  --summary <text>      test-report summary 总结 (replaces the old one)
+  --library <name|id>   test library name, identifier such as LIB, or id
+  --library-id <id>     test library name, identifier such as LIB, or id (an id, sent unchanged
+                        with no lookup)
+  --state <name|id>     new plan state 状态; organisation-level, see \`meta plan-states\`
+  --state-id <id>       new plan state 状态; organisation-level, see \`meta plan-states\` (an id, sent
+                        unchanged with no lookup)
+  --type <name|id>      new plan type; see \`meta plan-types\`
+  --type-id <id>        new plan type; see \`meta plan-types\` (an id, sent unchanged with no lookup)
+  --assignee <name|id>  new plan owner 负责人, from the organisation directory
+  --assignee-id <id>    new plan owner 负责人, from the organisation directory (an id, sent unchanged
+                        with no lookup)
+  -h, --help            display help for command
 "
 `;
 
@@ -112,14 +204,42 @@ Commands:
   list [options]         search runs (POST /v1/testhub/runs/search) — run search cannot filter by
                          library.id — it is on the API exclusion list, so scope runs with --plan
                          instead
+  create [options]       add one case to a plan as a run (POST /v1/testhub/runs)
   patch [options] <run>  record a result on a run — always sends status_id, and re-sends the run's
                          own executor unless you name another one
+  bulk-create [options]  add many cases to a plan as runs in one call (POST /v1/testhub/runs/bulk)
+  bulk-update [options]  record results on many runs in one call, across plans and libraries
   bulk [options]         insert, update and delete the runs of one plan in a single call — the only
                          way to delete a run. Each list is capped at 50, checked before the request
+  history                执行历史 every result ever recorded on one run (read-only)
   relation               关联 cross-kind links of a test run (principal_type=test_run)
   comment                评论 comments on a test run (principal_type=test_run)
   attachment             附件 attachments of a test run (principal_type=test_run)
   activity               活动记录 audit trail of a test run (principal_type=test_run)
   help [command]         display help for command
+"
+`;
+
+exports[`testhub --help > testhub runs bulk-update 1`] = `
+"Usage: pingcode testhub runs bulk-update [options]
+
+record results on many runs in one call, across plans and libraries
+
+Options:
+  --run <id|short_id>   run to update, repeatable
+  --run-id <id>         run to update, repeatable: an id, sent with no lookup
+  --file <path|->       JSON array of per-run entries, or - for stdin
+  --remark <text>       remark 备注 applied to every named run (replaces)
+  --library <name|id>   test library name, identifier such as LIB, or id (needed to resolve a
+                        status by name)
+  --library-id <id>     test library name, identifier such as LIB, or id (needed to resolve a
+                        status by name) (an id, sent unchanged with no lookup)
+  --status <name|id>    run result 执行结果 applied to every named run
+  --status-id <id>      run result 执行结果 applied to every named run (an id, sent unchanged with no
+                        lookup)
+  --executor <name|id>  executor 执行人 applied to every named run
+  --executor-id <id>    executor 执行人 applied to every named run (an id, sent unchanged with no
+                        lookup)
+  -h, --help            display help for command
 "
 `;

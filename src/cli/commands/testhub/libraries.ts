@@ -316,6 +316,18 @@ export function registerLibraryCommands(parent: Command): void {
       .option(
         '--visibility <public|private>',
         'who can see the library; the API defaults to private',
+      )
+      // The asymmetry, stated where a reader is rather than only after the deed. It
+      // matters that the two halves point in *opposite* directions: one capability
+      // does not exist upstream at all, the other exists and is simply not wrapped —
+      // the same distinction `release --help` draws (design D14.3).
+      .addHelpText(
+        'after',
+        '\nA library is PERMANENT: this API publishes no library delete at all, so anything\n' +
+          'created here stays. Mark and timestamp a scratch library, as this CLI\'s own smoke runs\n' +
+          'do, because you will not be able to remove it.\n' +
+          'A library PATCH, by contrast, DOES exist upstream and is simply not wrapped yet:\n' +
+          '  pingcode api PATCH /v1/testhub/libraries/<id> --set name="…"\n',
       ),
     { hidden: true },
   ).action(async (flags: LibraryCreateFlags, command: Command) => {

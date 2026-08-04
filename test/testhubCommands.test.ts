@@ -1726,6 +1726,548 @@ describe('testhub meta', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// S3: bulk import, delete, history, plan update, the two new lookups
+// ---------------------------------------------------------------------------
+
+const planStatesPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 3,
+    values: [
+      { id: 'ps-todo', name: '未开始', type: 'pending', is_system: 1 },
+      { id: 'ps-doing', name: '进行中', type: 'in_progress', is_system: 1 },
+      { id: 'ps-done', name: '已完成', type: 'completed', is_system: 1 },
+    ],
+  });
+
+const casePropertiesPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 2,
+    values: [
+      { id: 'state_id', name: '状态', type: 'system', is_removable: 0 },
+      { id: 'severity', name: '严重程度', type: 'select', options: [{ _id: 'o1', text: 'S1' }], is_removable: 1 },
+    ],
+  });
+
+/** The bare array both `cases/bulk` halves answer with. */
+const caseBulkResult = () =>
+  jsonResponse([
+    { state: 'success', case: { id: 'case-9', identifier: 'LIB-9', title: 'imported', is_archived: 0 } },
+  ]);
+
+const runBulkResult = () =>
+  jsonResponse([
+    { state: 'success', run: { id: 'run-9', short_id: 'r9', case: { id: 'case-1', name: 'c' }, is_archived: 0 } },
+    { state: 'failure', message: '创建失败或已创建' },
+  ]);
+
+function entryFile(body: unknown): string {
+  const file = path.join(dir, `entries-${Math.random().toString(36).slice(2)}.json`);
+  writeFileSync(file, JSON.stringify(body), { mode: 0o600 });
+  return file;
+}
+
+describe('testhub cases bulk-create', () => {
+  it('resolves names once per batch and posts one `cases` array', async () => {
+    const file = entryFile({
+      cases: [
+        { title: '[CLI] a', description: 'd', steps: [{ description: 's', expected_value: 'e' }] },
+        { title: '[CLI] b', type: '功能测试' },
+      ],
+    });
+    const run = await runCli(
+      ['testhub', 'cases', 'bulk-create', '--library', 'LIB', '--important-level', '高', '--file', file, '--json'],
+      [librariesPage, importantLevelsPage, caseTypesPage, caseBulkResult],
+    );
+    expect(run.exit).toBe(0);
+    expect(parseStdout(run)).toMatchObject({ count: 1, values: [{ state: 'success' }] });
+
+    const post = mutations(run)[0];
+    expect(pathOf(post)).toBe('/v1/testhub/cases/bulk');
+    expect(post?.body).toEqual({
+      cases: [
+        {
+          test_library_id: 'lib-1',
+          title: '[CLI] a',
+          important_level_id: 'il-high',
+          description: 'd',
+          steps: [{ description: 's', expected_value: 'e' }],
+        },
+        {
+          test_library_id: 'lib-1',
+          title: '[CLI] b',
+          // The entry's own type wins over the shared --important-level's sibling flag.
+          type_id: 'ct-func',
+          important_level_id: 'il-high',
+        },
+      ],
+    });
+  });
+
+  it('refuses suite_id and state_id, because the API accepts them and lands nothing', async () => {
+    for (const [key, value] of [
+      ['suite_id', 'su-login'],
+      ['suite', '登录'],
+      ['state_id', 'cs-ready'],
+      ['state', '已评审'],
+    ] as const) {
+      const file = entryFile([{ title: 't', [key]: value }]);
+      const run = await runCli(
+        ['testhub', 'cases', 'bulk-create', '--library-id', 'lib-1', '--file', file],
+        [],
+      );
+      expect(run.exit, key).toBe(2);
+      expect(run.stderr, key).toContain(key);
+      expect(run.calls, key).toHaveLength(0);
+    }
+  });
+
+  it('refuses an unknown entry key rather than letting the server drop it', async () => {
+    const file = entryFile([{ title: 't', titel: 'typo' }]);
+    const run = await runCli(
+      ['testhub', 'cases', 'bulk-create', '--library-id', 'lib-1', '--file', file],
+      [],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('titel');
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('caps the batch at 100 — the API’s own limit — before sending anything', async () => {
+    const file = entryFile(Array.from({ length: 101 }, (_, index) => ({ title: `t${index}` })));
+    const run = await runCli(
+      ['testhub', 'cases', 'bulk-create', '--library-id', 'lib-1', '--file', file],
+      [],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('100');
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('requires --file, and refuses an empty array', async () => {
+    const missing = await runCli(['testhub', 'cases', 'bulk-create', '--library-id', 'lib-1'], []);
+    expect(missing.exit).toBe(2);
+    expect(missing.stderr).toContain('--file');
+
+    const empty = await runCli(
+      ['testhub', 'cases', 'bulk-create', '--library-id', 'lib-1', '--file', entryFile([])],
+      [],
+    );
+    expect(empty.exit).toBe(2);
+    expect(empty.calls).toHaveLength(0);
+  });
+
+  it('sends nothing under --dry-run and prints the plan on stdout with --json', async () => {
+    const file = entryFile([{ title: 't' }]);
+    const run = await runCli(
+      ['testhub', 'cases', 'bulk-create', '--library-id', 'lib-1', '--file', file, '--dry-run', '--json'],
+      [],
+    );
+    expect(run.exit).toBe(0);
+    expect(parseStdout(run)).toMatchObject({ dry_run: true, request: { method: 'POST' } });
+    expect(mutations(run)).toHaveLength(0);
+  });
+});
+
+describe('testhub cases bulk-update', () => {
+  it('applies one shared field to every --case, resolving each reference to an id', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'bulk-update', '--case', 'c9y3', '--case-id', 'case-2', '--library', 'LIB', '--state', '已评审', '--json'],
+      [caseDetail, librariesPage, caseStatesPage, caseBulkResult],
+    );
+    expect(run.exit).toBe(0);
+    // Only the `--case` short_id was read (writes are id-only); `--case-id` cost nothing.
+    expect(pathOf(run.calls[0])).toBe('/v1/testhub/cases/c9y3');
+    expect(run.calls.filter((call) => call.url.includes('/cases/case-2'))).toHaveLength(0);
+    const patch = mutations(run).at(-1);
+    expect(patch?.method).toBe('PATCH');
+    expect(pathOf(patch)).toBe('/v1/testhub/cases/bulk');
+    expect(patch?.body).toEqual({
+      cases: [
+        { case_id: 'case-1', state_id: 'cs-ready' },
+        { case_id: 'case-2', state_id: 'cs-ready' },
+      ],
+    });
+  });
+
+  it('refuses --case with no field flag, and --file with a shared field flag', async () => {
+    const noField = await runCli(['testhub', 'cases', 'bulk-update', '--case-id', 'case-1'], []);
+    expect(noField.exit).toBe(2);
+    expect(noField.calls).toHaveLength(0);
+
+    const both = await runCli(
+      ['testhub', 'cases', 'bulk-update', '--file', entryFile([{ case_id: 'c', title: 't' }]), '--title', 'x'],
+      [],
+    );
+    expect(both.exit).toBe(2);
+    expect(both.stderr).toContain('--file');
+  });
+
+  it('refuses --file together with --case', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'bulk-update', '--case-id', 'case-1', '--file', entryFile([{ case_id: 'c' }])],
+      [],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('takes per-entry values from --file, and refuses an entry that names no field', async () => {
+    const ok = await runCli(
+      ['testhub', 'cases', 'bulk-update', '--library-id', 'lib-1', '--file', entryFile([
+        { case_id: 'case-1', title: 'renamed' },
+        { case_id: 'case-2', state_id: 'cs-ready', properties: { severity: 'S1' } },
+      ]), '--json'],
+      [caseBulkResult],
+    );
+    expect(ok.exit).toBe(0);
+    expect(mutations(ok)[0]?.body).toEqual({
+      cases: [
+        { case_id: 'case-1', title: 'renamed' },
+        { case_id: 'case-2', state_id: 'cs-ready', properties: { severity: 'S1' } },
+      ],
+    });
+
+    const bare = await runCli(
+      ['testhub', 'cases', 'bulk-update', '--library-id', 'lib-1', '--file', entryFile([{ case_id: 'case-1' }])],
+      [],
+    );
+    expect(bare.exit).toBe(2);
+    expect(bare.calls).toHaveLength(0);
+  });
+
+  it('needs --library only when a name has to be resolved', async () => {
+    const byName = await runCli(
+      ['testhub', 'cases', 'bulk-update', '--case-id', 'case-1', '--state', '已评审'],
+      [],
+    );
+    expect(byName.exit).toBe(2);
+    expect(byName.stderr).toContain('--library');
+    expect(byName.calls).toHaveLength(0);
+
+    const byId = await runCli(
+      ['testhub', 'cases', 'bulk-update', '--case-id', 'case-1', '--state-id', 'cs-ready', '--json'],
+      [caseBulkResult],
+    );
+    expect(byId.exit).toBe(0);
+    expect(mutations(byId)[0]?.body).toEqual({ cases: [{ case_id: 'case-1', state_id: 'cs-ready' }] });
+  });
+});
+
+describe('testhub cases delete', () => {
+  it('refuses without --yes, naming the case and counting the runs it would destroy', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'delete', 'c9y3'],
+      [
+        caseDetail,
+        () => jsonResponse({ page_index: 0, page_size: 1, total: 2, values: [] }),
+      ],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('LIB-10');
+    expect(run.stderr).toContain('短信验证码登录');
+    // The number is the point: a delete cascades to the case's runs.
+    expect(run.stderr).toContain('2 execution record(s)');
+    expect(mutations(run)).toHaveLength(0);
+  });
+
+  it('deletes with --yes, resolving a short_id first, and echoes what went with it', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'delete', 'c9y3', '--yes'],
+      [
+        caseDetail,
+        () => jsonResponse({ page_index: 0, page_size: 1, total: 1, values: [] }),
+        () => jsonResponse({ id: 'case-1', identifier: 'LIB-10', title: '短信验证码登录', is_deleted: 1, is_archived: 0 }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    const del = mutations(run)[0];
+    expect(del?.method).toBe('DELETE');
+    // The write path takes the real id, never the short_id it was given.
+    expect(pathOf(del)).toBe('/v1/testhub/cases/case-1');
+    expect(run.stderr).toContain('deleted LIB-10');
+    expect(run.stderr).toContain('1 execution record(s) went with it');
+  });
+
+  it('sends nothing under --dry-run even with --yes', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'delete', 'c9y3', '--yes', '--dry-run', '--json'],
+      [caseDetail, () => jsonResponse({ page_index: 0, page_size: 1, total: 0, values: [] })],
+    );
+    expect(run.exit).toBe(0);
+    expect(parseStdout(run)).toMatchObject({ dry_run: true, request: { method: 'DELETE' } });
+    expect(mutations(run)).toHaveLength(0);
+  });
+});
+
+describe('testhub cases history list', () => {
+  it('resolves the case reference, then reads the id-only histories path', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'history', 'list', 'c9y3', '--json'],
+      [
+        caseDetail,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 30,
+            total: 1,
+            values: [
+              {
+                id: 'h-1',
+                status: 'pass',
+                executed_status: { id: 'rs-pass', name: '通过' },
+                remark: 'ok',
+                run: { id: 'run-1', short_id: 'r4m2' },
+                plan: { id: 'plan-1', name: '2026 S1 回归', status: 'in_progress' },
+                executed_at: 1730000000,
+              },
+            ],
+          }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(pathOf(run.calls[1])).toBe('/v1/testhub/cases/case-1/histories');
+    expect(parseStdout(run)).toMatchObject({
+      values: [{ executed_status: { name: '通过' }, remark: 'ok', executed_at: 1730000000 }],
+    });
+  });
+
+  it('renders the run each row came from in human mode', async () => {
+    const run = await runCli(
+      ['testhub', 'cases', 'history', 'list', 'c9y3'],
+      [
+        caseDetail,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 30,
+            total: 1,
+            values: [{ id: 'h-1', executed_status: { id: 'rs-pass', name: '通过' }, run: { id: 'run-1', short_id: 'r4m2' } }],
+          }),
+      ],
+    );
+    expect(run.stdout).toContain('RESULT');
+    expect(run.stdout).toContain('r4m2');
+  });
+});
+
+describe('testhub plans update', () => {
+  it('refuses an empty patch before sending anything (the API answers 200 to one)', async () => {
+    const run = await runCli(['testhub', 'plans', 'update', 'p8x2k1', '--library-id', 'lib-1'], []);
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('nothing to update');
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('resolves the plan and the ORG-level state, then patches only what was given', async () => {
+    const run = await runCli(
+      ['testhub', 'plans', 'update', '2026 S1 回归', '--library', 'LIB', '--state', '进行中', '--summary', 'done', '--json'],
+      [librariesPage, plansPage, planStatesPage, () => jsonResponse({ id: 'plan-1', name: '2026 S1 回归' })],
+    );
+    expect(run.exit).toBe(0);
+    // Plan states come from the organisation-level path, with no library_id anywhere.
+    const statesUrl = new URL(run.calls[2]?.url ?? '');
+    expect(statesUrl.pathname).toBe('/v1/testhub/plan_states');
+    expect(statesUrl.searchParams.get('library_id')).toBeNull();
+
+    const patch = mutations(run)[0];
+    expect(pathOf(patch)).toBe('/v1/testhub/libraries/lib-1/plans/plan-1');
+    expect(patch?.body).toEqual({ summary: 'done', state_id: 'ps-doing' });
+  });
+
+  it('converts --start/--end with the same boundary rule as create, and rejects an inverted window', async () => {
+    const ok = await runCli(
+      ['testhub', 'plans', 'update', 'plan-1', '--library-id', 'lib-1', '--start', '2026-08-10', '--end', '2026-08-31', '--json'],
+      [plansPage, () => jsonResponse({ id: 'plan-1' })],
+    );
+    expect(ok.exit).toBe(0);
+    const body = mutations(ok)[0]?.body as { start_at: number; end_at: number };
+    // 2026-08-10 00:00:00 → 2026-08-31 23:59:59 is 22 calendar days minus one second.
+    expect(body.end_at - body.start_at).toBe(22 * 86_400 - 1);
+
+    const inverted = await runCli(
+      ['testhub', 'plans', 'update', 'plan-1', '--library-id', 'lib-1', '--start', '2026-08-31', '--end', '2026-08-10'],
+      [],
+    );
+    expect(inverted.exit).toBe(2);
+    expect(inverted.calls).toHaveLength(0);
+  });
+
+  it('requires --library, because the plan lives under it in the URL', async () => {
+    const run = await runCli(['testhub', 'plans', 'update', 'plan-1', '--name', 'x'], []);
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('--library');
+    expect(run.calls).toHaveLength(0);
+  });
+});
+
+describe('testhub runs create / bulk-create / bulk-update', () => {
+  it('creates one run from resolved library, plan and case ids', async () => {
+    const run = await runCli(
+      ['testhub', 'runs', 'create', '--library', 'LIB', '--plan', '2026 S1 回归', '--case', 'c9y3', '--executor-id', 'user-7', '--json'],
+      [librariesPage, plansPage, caseDetail, () => jsonResponse({ id: 'run-9', is_archived: 0, steps: [] })],
+    );
+    expect(run.exit).toBe(0);
+    const post = mutations(run)[0];
+    expect(pathOf(post)).toBe('/v1/testhub/runs');
+    expect(post?.body).toEqual({
+      library_id: 'lib-1',
+      plan_id: 'plan-1',
+      case_id: 'case-1',
+      executor_id: 'user-7',
+    });
+  });
+
+  it('requires --plan and --case up front', async () => {
+    const noPlan = await runCli(['testhub', 'runs', 'create', '--library-id', 'lib-1', '--case-id', 'case-1'], []);
+    expect(noPlan.exit).toBe(2);
+    expect(noPlan.calls).toHaveLength(0);
+
+    const noCase = await runCli(['testhub', 'runs', 'create', '--library-id', 'lib-1', '--plan-id', 'plan-1'], []);
+    expect(noCase.exit).toBe(2);
+    expect(noCase.calls).toHaveLength(0);
+  });
+
+  it('bulk-creates one run per case and surfaces the per-element failure', async () => {
+    const run = await runCli(
+      ['testhub', 'runs', 'bulk-create', '--library-id', 'lib-1', '--plan-id', 'plan-1', '--case-id', 'case-1', '--case-id', 'case-2'],
+      [runBulkResult],
+    );
+    expect(run.exit).toBe(0);
+    expect(mutations(run)[0]?.body).toEqual({
+      runs: [
+        { library_id: 'lib-1', plan_id: 'plan-1', case_id: 'case-1' },
+        { library_id: 'lib-1', plan_id: 'plan-1', case_id: 'case-2' },
+      ],
+    });
+    // HTTP 200 with a failed element: the warning is what makes it impossible to miss.
+    expect(run.stdout).toContain('创建失败或已创建');
+    expect(run.stderr).toContain('1 of 2 entries failed');
+  });
+
+  it('caps bulk-create at 100 cases and refuses an empty case list', async () => {
+    const many = Array.from({ length: 101 }, (_, index) => ['--case-id', `case-${index}`]).flat();
+    const capped = await runCli(
+      ['testhub', 'runs', 'bulk-create', '--library-id', 'lib-1', '--plan-id', 'plan-1', ...many],
+      [],
+    );
+    expect(capped.exit).toBe(2);
+    expect(capped.calls).toHaveLength(0);
+
+    const empty = await runCli(
+      ['testhub', 'runs', 'bulk-create', '--library-id', 'lib-1', '--plan-id', 'plan-1'],
+      [],
+    );
+    expect(empty.exit).toBe(2);
+    expect(empty.calls).toHaveLength(0);
+  });
+
+  it('bulk-updates named runs with one shared status, resolving short_ids to ids first', async () => {
+    const run = await runCli(
+      ['testhub', 'runs', 'bulk-update', '--run', 'r4m2', '--library', 'LIB', '--status', '通过', '--remark', 'ok', '--json'],
+      [runDetail, librariesPage, runStatusesPage, runBulkResult],
+    );
+    expect(run.exit).toBe(0);
+    expect(pathOf(run.calls[0])).toBe('/v1/testhub/runs/r4m2');
+    const patch = mutations(run).at(-1);
+    expect(patch?.method).toBe('PATCH');
+    expect(pathOf(patch)).toBe('/v1/testhub/runs/bulk');
+    expect(patch?.body).toEqual({
+      runs: [{ run_id: 'run-1', status_id: 'rs-pass', remark: 'ok' }],
+    });
+  });
+
+  it('requires a status: this endpoint has no remark-only mode either', async () => {
+    const run = await runCli(
+      ['testhub', 'runs', 'bulk-update', '--run-id', 'run-1', '--remark', 'ok'],
+      [],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('--status');
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it('takes per-run results from --file, and refuses an entry without a status', async () => {
+    const ok = await runCli(
+      ['testhub', 'runs', 'bulk-update', '--file', entryFile({
+        runs: [
+          { run_id: 'run-1', status_id: 'rs-pass', remark: 'a' },
+          { run_id: 'run-2', status_id: 'rs-block', executor_id: 'user-7' },
+        ],
+      }), '--json'],
+      [runBulkResult],
+    );
+    expect(ok.exit).toBe(0);
+    expect(mutations(ok)[0]?.body).toEqual({
+      runs: [
+        { run_id: 'run-1', status_id: 'rs-pass', remark: 'a' },
+        { run_id: 'run-2', status_id: 'rs-block', executor_id: 'user-7' },
+      ],
+    });
+
+    const noStatus = await runCli(
+      ['testhub', 'runs', 'bulk-update', '--file', entryFile([{ run_id: 'run-1', remark: 'a' }])],
+      [],
+    );
+    expect(noStatus.exit).toBe(2);
+    expect(noStatus.calls).toHaveLength(0);
+  });
+
+  it('refuses steps in a --file entry, pointing at `runs patch --step`', async () => {
+    const run = await runCli(
+      ['testhub', 'runs', 'bulk-update', '--file', entryFile([
+        { run_id: 'run-1', status_id: 'rs-pass', steps: [{ step_id: 'st-1', status_id: 'rs-pass' }] },
+      ])],
+      [],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('runs patch --step');
+    expect(run.calls).toHaveLength(0);
+  });
+});
+
+describe('testhub meta plan-states and case-properties', () => {
+  it('plan-states reads the org-level path and refuses --library', async () => {
+    const ok = await runCli(['testhub', 'meta', 'plan-states', '--json'], [planStatesPage]);
+    expect(ok.exit).toBe(0);
+    expect(new URL(ok.calls[0]?.url ?? '').pathname).toBe('/v1/testhub/plan_states');
+    const listed = parseStdout(ok) as { count: number; values: { name: string; is_system: boolean }[] };
+    expect(listed.count).toBe(3);
+    expect(listed.values[0]).toMatchObject({ name: '未开始', is_system: true });
+
+    const refused = await runCli(['testhub', 'meta', 'plan-states', '--library', 'LIB'], []);
+    expect(refused.exit).toBe(2);
+    expect(refused.stderr).toContain('takes no --library');
+    expect(refused.calls).toHaveLength(0);
+  });
+
+  it('case-properties is library-scoped and marks which keys are custom', async () => {
+    const run = await runCli(
+      ['testhub', 'meta', 'case-properties', '--library-id', 'lib-1'],
+      [casePropertiesPage],
+    );
+    expect(run.exit).toBe(0);
+    const url = new URL(run.calls[0]?.url ?? '');
+    expect(url.pathname).toBe('/v1/testhub/case/properties');
+    expect(url.searchParams.get('library_id')).toBe('lib-1');
+    expect(run.stdout).toContain('KEY');
+    expect(run.stdout).toContain('severity');
+    // No CUSTOM column: the library-scoped view carries no is_removable at all
+    // (live 2026-08-04), so a column derived from it would render empty on every row.
+    expect(run.stdout).not.toContain('CUSTOM');
+  });
+
+  it('case-properties requires --library, like every other library-scoped lookup', async () => {
+    const run = await runCli(['testhub', 'meta', 'case-properties'], []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+  });
+});
+
 describe('the configuration-scope trap (design §9)', () => {
   const forbidden = () =>
     jsonResponse({ code: '403', message: 'forbidden' }, { status: 403 });

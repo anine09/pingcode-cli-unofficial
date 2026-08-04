@@ -100,10 +100,13 @@ export const resolveTestPlan: ScopedResolver = scoped('testhub-plan');
 export const resolveTestPlanType: ScopedResolver = scoped('testhub-plan-type');
 
 /**
- * Org-level, not library-scoped: the one testhub lookup with no `?library_id=`
- * variant anywhere ([th#40]).
+ * The two org-level testhub lookups. Importance levels have no `?library_id=`
+ * variant anywhere ([th#40]); plan states take no parameters at all, and their ids
+ * are what a plan PATCH accepts as `state_id` (live 2026-08-04). Everything else in
+ * the module is library-scoped.
  */
 export const resolveCaseImportantLevel: RootResolver = root('testhub-case-important-level');
+export const resolveTestPlanState: RootResolver = root('testhub-plan-state');
 
 // scm (源码管理) — the parent is a hosting platform, **not** a ship product
 export const resolvePlatform: RootResolver = root('scm-platform');

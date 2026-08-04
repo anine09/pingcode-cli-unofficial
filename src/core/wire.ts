@@ -513,6 +513,46 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   '100351': 'not_found',
   '1003108': 'not_found',
   '100405': 'not_found',
+  // S3 (08-02-full-api-coverage) testhub smoke, 2026-08-04, live tenant (design §D17).
+  // Two rows, both HTTP **400**, both the same shape every row above was admitted for —
+  // one stable per-resource "this record is absent" code:
+  //   100602 "测试计划不存在或无权限访问" — GET **and PATCH**
+  //     /v1/testhub/libraries/{library}/plans/{plan}. Stable across all three ways of
+  //     being wrong: an unknown 24-hex plan id, an unknown short_id-shaped id, and a
+  //     **real plan addressed under the wrong library** (the library segment is
+  //     genuinely validated here, unlike some pjm paths). A malformed id answers a real
+  //     HTTP 404 instead, which the status branch already maps. Same 1006xx family and
+  //     the same "不存在或无权限访问" wording as 100600/100601/100603, already mapped.
+  //   100642 "执行历史不存在" — GET
+  //     /v1/testhub/runs/{run}/histories/{history}, for a well-formed but unknown
+  //     history id under a valid run. Nothing else answers it.
+  // Without these, `testhub plans get`/`update` on a missing plan exited 7 while
+  // `cases get` on a missing case exited 5 — the same mistake in the same module.
+  //
+  // Deliberately **not** mapped, from the same smoke — six of them, and the first two
+  // are the ones worth reading:
+  //  - `100619` (`执行用例不存在`) — it *does* mean "no such run" on
+  //    `GET /runs/{unknown}/histories`, and it would have been an obvious row. But it is
+  //    also what a `runs/bulk` batch answers when one entry names an unknown run, where
+  //    it rejects the **whole batch**: exit 5 would then name one run while implying the
+  //    valid entries landed, which they did not. One code cannot be two answers — the
+  //    judgement that already kept `100300` and ship's `100719`/`100702` on exit 7.
+  //  - `100643` (`执行历史和测试用例不匹配`) — a history id that exists but hangs off a
+  //    **different** run. Note this is the mirror image of S1c's `100222`, which *was*
+  //    admitted for exactly this situation: there the vendor reported the pair as absent,
+  //    here it reports it as a mismatch, and the CLI follows what the API says rather
+  //    than normalising the two. (The vendor's wording even says 测试用例 on a run path.)
+  //  - `100016` (`存在无效run_id`) — the atomic pre-flight refusal of `PATCH /runs/bulk`.
+  //    Batch-level, so the same reasoning as `100619`.
+  //  - `100605` (`创建执行用例失败`) — adding a case the plan already contains. A
+  //    uniqueness conflict, judged as `100220`/`100343`/`100105` were.
+  //  - `100039` (`cases 数组的长度必须小于等于 100`, `updates[50].run_id 必须是一个 ObjectId`)
+  //    and `100008` (`'run[0].status_id'是必填字段`) — input validation, and `100008` is
+  //    the **cross-module** required-field code that must never be mapped anywhere.
+  //  - `100000` (`内部服务错误`) — a genuine HTTP **500**, returned when a built-in field
+  //    key is pushed through the `properties` map. A server fault keeps its 500.
+  '100602': 'not_found',
+  '100642': 'not_found',
 };
 
 const NOT_FOUND_HINT =

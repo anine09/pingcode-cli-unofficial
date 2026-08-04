@@ -1,9 +1,11 @@
 import { Option, type Command } from 'commander';
 import {
+  caseProperties,
   caseStates,
   caseTypes,
   importantLevels,
   iterateSuites,
+  planStates,
   planTypes,
   runStatuses,
 } from '../../../api/testhub';
@@ -13,8 +15,10 @@ import { SUITE_PATH_SEPARATOR } from '../../../core/metadata';
 import { collect } from '../../../core/paginate';
 import type {
   TestCaseImportantLevel,
+  TestCaseProperty,
   TestCaseState,
   TestCaseType,
+  TestPlanState,
   TestPlanType,
   TestRunStatus,
   TestSuite,
@@ -60,6 +64,33 @@ const PLAN_TYPE_COLUMNS: Column<TestPlanType>[] = [
   { header: 'NAME', value: (t) => t.name ?? '', flex: true },
 ];
 
+const PLAN_STATE_COLUMNS: Column<TestPlanState>[] = [
+  { header: 'ID', value: (s) => s.id },
+  { header: 'NAME', value: (s) => s.name ?? '', flex: true },
+  { header: 'GROUP', value: (s) => s.type ?? '' },
+  { header: 'SYSTEM', value: (s) => (s.is_system === undefined ? '' : s.is_system ? 'yes' : 'no') },
+];
+
+/**
+ * No `CUSTOM` column, and that absence is a live finding rather than an omission.
+ *
+ * What a caller actually needs to know is whether a key is `--set`-able, and the
+ * **library-scoped** view cannot answer it: live 2026-08-04 every row carries exactly
+ * `{id, url, name, type, options}` — no `is_removable`, no `is_name_editable`, no
+ * `is_options_editable`. A column derived from them would render empty on every row,
+ * the same trap [th#57]'s `is_system` sets on the library-scoped run-status list.
+ *
+ * The org-level `GET /v1/testhub/case_properties` *does* carry all three (and this
+ * tenant has 43 rows there, one of them genuinely custom), so the leaf's help points
+ * at it through the generic layer rather than inventing a signal here.
+ */
+const CASE_PROPERTY_COLUMNS: Column<TestCaseProperty>[] = [
+  { header: 'KEY', value: (p) => p.id },
+  { header: 'NAME', value: (p) => p.name ?? '', flex: true },
+  { header: 'TYPE', value: (p) => p.type ?? '' },
+  { header: 'OPTIONS', value: (p) => (p.options.length === 0 ? '' : String(p.options.length)) },
+];
+
 /**
  * A suite row plus the path the resolver will accept for it.
  *
@@ -99,7 +130,7 @@ export function registerTesthubMetaCommands(parent: Command): void {
     .command('meta')
     .description(
       'ids you need before writing: case states, types, importance levels, run results, ' +
-        'plan types, modules',
+        'plan types, plan states, case fields, modules',
     );
 
   function libraryScoped<T>(
@@ -186,6 +217,76 @@ export function registerTesthubMetaCommands(parent: Command): void {
     'plan types of a library (values for --type on `plans create`) — scope pcp:read:testhub:testplan',
     planTypes,
     PLAN_TYPE_COLUMNS,
+  );
+
+  // Org-level like `important-levels`, and refused the same way if a library is
+  // typed: there is no per-library plan-state view anywhere in the module.
+  const states = meta
+    .command('plan-states')
+    .description(
+      'plan states 计划状态 (values for --state on `plans update`) — organisation-wide, so ' +
+        `this takes no library; scope ${CONFIGURATION_SCOPE}`,
+    )
+    .addOption(libraryTrap('--library <name|id>'))
+    .addOption(libraryTrap('--library-id <id>'))
+    .addHelpText(
+      'after',
+      '\nThree vocabularies in this module answer to the word "state", and they are not\n' +
+        'interchangeable:\n' +
+        '  · plan states (this one)     未开始 / 进行中 / 已完成      — organisation-wide\n' +
+        '  · case states                设计 / 就绪 / 废弃            — `meta case-states`, per library\n' +
+        '  · run results 执行结果        未测 / 通过 / 失败 / 受阻 / 跳过 — `meta run-statuses`, per library\n',
+    );
+  addGlobalOptions(states, { hidden: true }).action(
+    async (flags: LibraryFlags, command: Command) => {
+      if (flags.library !== undefined || flags.libraryId !== undefined) {
+        throw new UsageError('plan-states takes no --library', {
+          hint:
+            'plan states are organisation-wide in testhub — `GET /v1/testhub/plan_states` takes ' +
+            'no parameters at all, so the same three rows apply to every library',
+        });
+      }
+      const { ctx } = contextFor(command);
+      const values = await withConfigurationScope('plan states', () => planStates(ctx));
+      printCollection(values, PLAN_STATE_COLUMNS, modeOf(ctx));
+    },
+  );
+
+  // Library-scoped, and `pcp:read:testhub:testcase` — so no configuration hint, the
+  // same asymmetry `case-types` has (GOTCHA #2).
+  const properties = meta
+    .command('case-properties')
+    .description(
+      'case fields effective in a library — the keys behind --set; scope pcp:read:testhub:testcase',
+    )
+    .addHelpText(
+      'after',
+      '\nThese are the fields EFFECTIVE in the library — built-ins and custom properties\n' +
+        'together — and the KEY column is what a write addresses. Be careful with --set:\n' +
+        'most of these keys are BUILT-IN fields (state_id, description, steps, type,\n' +
+        'important_level, maintenance_uid, precondition, test_type) and pushing one of those\n' +
+        'through the properties map is worse than useless. Verified live:\n' +
+        '  · properties={"important_level": …}  → HTTP 500\n' +
+        '  · properties={"description": "x"}    → 200, and it rewrites the TOP-LEVEL description\n' +
+        '  · a custom property that exists org-wide but is NOT in this library\'s scheme → HTTP 500\n' +
+        '  · a key that exists nowhere            → 400, refused rather than dropped\n' +
+        'So: set built-ins with their own flags (--state / --type / --important-level /\n' +
+        '--description / --precondition), and reserve --set for a custom property that appears\n' +
+        'in THIS list.\n' +
+        'There is deliberately no CUSTOM column: this endpoint returns only\n' +
+        '{id, name, type, options}, so it cannot tell you which rows are custom. The org-level\n' +
+        'list can, and it is one call away:\n' +
+        '  pingcode api GET /v1/testhub/case_properties   # carries is_removable per row\n' +
+        'This is also why there is no `pingcode resolve testhub-case-property`: a resolved name\n' +
+        'would hand --set a key that edits a different field.\n',
+    );
+  addPairOptions(properties, 'library', LIBRARY_HELP);
+  addGlobalOptions(properties, { hidden: true }).action(
+    async (flags: LibraryFlags, command: Command) => {
+      const { ctx } = contextFor(command);
+      const library = await requireLibraryFlag(ctx, flags);
+      printCollection(await caseProperties(ctx, library.id), CASE_PROPERTY_COLUMNS, modeOf(ctx));
+    },
   );
 
   // Not through the factory: this one takes an extra flag and post-processes the

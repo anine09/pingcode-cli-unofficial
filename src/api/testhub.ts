@@ -4,15 +4,21 @@ import { request } from '../core/http';
 import type { Page, PageRequest, PaginateOptions, SearchPayload } from '../core/paginate';
 import type {
   TestCase,
+  TestCaseBulkItem,
+  TestCaseHistoryItem,
   TestCaseImportantLevel,
+  TestCaseProperty,
   TestCaseState,
   TestCaseStep,
   TestCaseType,
   TestLibrary,
   TestPlan,
+  TestPlanState,
   TestPlanType,
   TestRun,
+  TestRunBulkItem,
   TestRunBulkResult,
+  TestRunHistoryItem,
   TestRunStatus,
   TestSuite,
 } from '../types/api';
@@ -23,15 +29,22 @@ import {
   iterateOf,
   iterateSearchOf,
   listAllOf,
+  parseBareArray,
   parseTestCase,
+  parseTestCaseBulkItem,
+  parseTestCaseHistoryItem,
   parseTestCaseImportantLevel,
+  parseTestCaseProperty,
   parseTestCaseState,
   parseTestCaseType,
   parseTestLibrary,
   parseTestPlan,
+  parseTestPlanState,
   parseTestPlanType,
   parseTestRun,
+  parseTestRunBulkItem,
   parseTestRunBulkResult,
+  parseTestRunHistoryItem,
   parseTestRunStatus,
   parseTestSuite,
 } from './parse';
@@ -56,17 +69,18 @@ import {
  *  - **Nothing here formats, resolves or logs.** Names become ids in
  *    `core/metadata.ts`; rendering happens in `cli/`.
  *
- * Deliberately absent, per PRD scope: `PUT /runs/{id}` (strictly worse than
- * PATCH — it forces the whole `steps[]` array and blanks the executor when
- * `executor_id` is omitted, GOTCHA #8), `DELETE /cases/{id}` (irreversible, no
- * undelete endpoint), the `cases/bulk` and `runs/bulk` importer endpoints,
- * library / suite / plan **update** and **delete**, the library-member
- * endpoints, every configuration **write**, and the three history reads.
+ * Deliberately absent: **`PUT /runs/{id}`** — strictly worse than PATCH, since it
+ * forces the whole `steps[]` array and blanks the executor when `executor_id` is
+ * omitted (GOTCHA #8), which is the general rule for all ten of this API's `PUT`s
+ * (design D8.4). Also absent: `GET /v1/testhub/{cases,runs}` (the simple lists the
+ * docs themselves redirect away from), library / suite **update** and **delete**,
+ * the library-member endpoints, and every configuration **write**.
  *
- * Library and plan **create** were on that list until this milestone. They are
- * here now because the module could not otherwise produce the fixtures its own
- * acceptance run needs — the previous smoke had to bootstrap a library over raw
- * HTTP.
+ * S3 added the rest of the read/write surface the module was missing: the four
+ * bulk endpoints, case delete, both history reads, plan update, and the plan-state
+ * and case-property lookups. Library and plan **create** arrived in the milestone
+ * before it, because the module could not otherwise produce the fixtures its own
+ * acceptance run needs.
  */
 
 // ---------------------------------------------------------------------------
@@ -294,6 +308,148 @@ export async function updateCase(
   return parseTestCase(raw);
 }
 
+/**
+ * `POST /v1/testhub/cases/bulk` ([th#18]) — the test-import path.
+ *
+ * **Cap 100 entries, enforced by the server** (400 `100039`, before any field
+ * validation) — not the 50 the plan-scoped runs bulk documents. The command layer
+ * checks it first so the error arrives without a request.
+ *
+ * Two entry fields are accepted and **silently dropped**: `suite_id` (documented,
+ * GOTCHA #16) and `state_id` (undocumented; a bulk-created case always starts in
+ * the library default, live 2026-08-04). `type_id` is the mirror image — not
+ * declared, but it works. The command layer refuses the first two and offers the
+ * third; nothing is silently forwarded.
+ */
+export type BulkCreateCasesInput = {
+  cases: BulkCreateCaseEntry[];
+};
+
+export type BulkCreateCaseEntry = {
+  test_library_id: string;
+  title: string;
+  /** Undeclared upstream, verified to work live 2026-08-04. */
+  type_id?: string | undefined;
+  important_level_id?: string | undefined;
+  maintenance_id?: string | undefined;
+  participant_ids?: string[] | undefined;
+  /** A flat `{key: value}` map; an unknown key is **refused** (400 `100043`), not dropped. */
+  properties?: Record<string, unknown> | undefined;
+  description?: string | undefined;
+  precondition?: string | undefined;
+  steps?: TestCaseStep[] | undefined;
+};
+
+export async function bulkCreateCases(
+  ctx: Ctx,
+  input: BulkCreateCasesInput,
+): Promise<TestCaseBulkItem[]> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.testhubCasesBulk,
+    body: { cases: input.cases.map((entry) => compact(entry)) },
+  });
+  // A bare array, not a paged envelope (testhub §3.6).
+  return parseBareArray(raw, parseTestCaseBulkItem);
+}
+
+/**
+ * `PATCH /v1/testhub/cases/bulk` ([th#19]) — partial, per entry.
+ *
+ * Verified live 2026-08-04: unmentioned fields are left alone (one entry's state
+ * changed while its title, type, level, description and steps survived), and
+ * `state_id` / `type_id` / `title` / `important_level_id` all land. `suite_id` is
+ * silently dropped here as well, so the command layer refuses it.
+ */
+export type BulkUpdateCasesInput = {
+  cases: BulkUpdateCaseEntry[];
+};
+
+export type BulkUpdateCaseEntry = {
+  case_id: string;
+  title?: string | undefined;
+  state_id?: string | undefined;
+  type_id?: string | undefined;
+  important_level_id?: string | undefined;
+  maintenance_id?: string | undefined;
+  properties?: Record<string, unknown> | undefined;
+  description?: string | undefined;
+  precondition?: string | undefined;
+  steps?: TestCaseStep[] | undefined;
+};
+
+export async function bulkUpdateCases(
+  ctx: Ctx,
+  input: BulkUpdateCasesInput,
+): Promise<TestCaseBulkItem[]> {
+  const raw = await request<unknown>(ctx, {
+    method: 'PATCH',
+    path: ENDPOINTS.testhubCasesBulk,
+    body: { cases: input.cases.map((entry) => compact(entry)) },
+  });
+  return parseBareArray(raw, parseTestCaseBulkItem);
+}
+
+/**
+ * `DELETE /v1/testhub/cases/{case_id}` ([th#17]) — returns the full case body with
+ * `is_deleted: 1`, which is what lets the command echo what it destroyed.
+ *
+ * Live 2026-08-04, two facts the docs do not mention and one that matters a lot:
+ *
+ *  - it is a **soft delete**: the row is still returned by
+ *    `POST /cases/search` with `include_deleted: true`, but there is no undelete
+ *    endpoint, so from the API's side it is one-way;
+ *  - **it cascades to the case's runs.** A case with a run in a plan took the run
+ *    with it: the plan lost the row and `GET /runs/{id}` answers `100603`. This is
+ *    why the command layer counts the runs before the `--yes` gate.
+ *
+ * `short_id` is rejected here (404 `100002`), so callers must pass a real id.
+ */
+export async function deleteCase(ctx: Ctx, caseId: string): Promise<TestCase> {
+  const raw = await request<unknown>(ctx, {
+    method: 'DELETE',
+    path: ENDPOINTS.testhubCase(caseId),
+  });
+  return parseTestCase(raw);
+}
+
+/**
+ * `GET /v1/testhub/cases/{case_id}/histories` ([th#26]) — the latest result of
+ * every run of one case, so the row count is the run count, not the attempt count.
+ *
+ * Paging is honoured (live 2026-08-04) even though the record declares none, and
+ * the path is **id-only**. The items are the run-side shape despite what
+ * GOTCHA #3 says, which is recorded on `TestCaseHistoryItem` and is why this
+ * wrapper still uses its own parser.
+ */
+export async function listCaseHistories(
+  ctx: Ctx,
+  caseId: string,
+  page: PageRequest = {},
+): Promise<Page<TestCaseHistoryItem>> {
+  return await fetchPageOf(
+    ctx,
+    ENDPOINTS.testhubCaseHistories(caseId),
+    {},
+    page,
+    parseTestCaseHistoryItem,
+  );
+}
+
+export function iterateCaseHistories(
+  ctx: Ctx,
+  caseId: string,
+  options: PaginateOptions = {},
+): AsyncGenerator<TestCaseHistoryItem, void, undefined> {
+  return iterateOf(
+    ctx,
+    ENDPOINTS.testhubCaseHistories(caseId),
+    {},
+    options,
+    parseTestCaseHistoryItem,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // plans (测试计划) — the only library-scoped resource in the URL
 // ---------------------------------------------------------------------------
@@ -381,6 +537,53 @@ export async function createPlan(
     method: 'POST',
     path: ENDPOINTS.testhubLibraryPlans(libraryId),
     body: compact(input),
+  });
+  return parseTestPlan(raw);
+}
+
+/**
+ * `PATCH /v1/testhub/libraries/{library_id}/plans/{plan_id}` ([th#62]) — the only
+ * plan mutator, and the only way to write the test-report `summary` or move a plan
+ * through its lifecycle.
+ *
+ * Live 2026-08-04, four things worth knowing:
+ *
+ *  - it is genuinely **partial**: a name-only patch left state, dates, assignee
+ *    and summary untouched;
+ *  - `state_id` takes an id from the **organisation-level** `plan_states` list —
+ *    there is no library-scoped plan-state view anywhere;
+ *  - `start_at` / `end_at` are stored **verbatim**, not snapped to whole days.
+ *    That is the opposite of pjm's sprint and release windows (design D15.4), so
+ *    a mid-day timestamp survives exactly as sent;
+ *  - an **empty body answers 200** and changes nothing, so the refusal of an empty
+ *    patch has to live in the command layer.
+ *
+ * `plan_id` is id-only (a `short_id` answers 404) and the `library_id` segment is
+ * validated: a real plan under the wrong library answers `100602`.
+ */
+export type UpdatePlanInput = {
+  name?: string | undefined;
+  type_id?: string | undefined;
+  project_id?: string | undefined;
+  sprint_id?: string | undefined;
+  version_id?: string | undefined;
+  start_at?: number | undefined;
+  end_at?: number | undefined;
+  assignee_id?: string | undefined;
+  state_id?: string | undefined;
+  summary?: string | undefined;
+};
+
+export async function updatePlan(
+  ctx: Ctx,
+  libraryId: string,
+  planId: string,
+  patch: UpdatePlanInput,
+): Promise<TestPlan> {
+  const raw = await request<unknown>(ctx, {
+    method: 'PATCH',
+    path: ENDPOINTS.testhubLibraryPlan(libraryId, planId),
+    body: compact(patch),
   });
   return parseTestPlan(raw);
 }
@@ -511,6 +714,152 @@ export async function patchRun(
   return parseTestRun(raw);
 }
 
+/**
+ * `POST /v1/testhub/runs` ([th#46]) — add one case to one plan as a run.
+ *
+ * Three ids and an optional executor; the response is the run itself, starting at
+ * `status: not_start` / 未测 and inheriting the case's `steps[]` (live 2026-08-04).
+ *
+ * Two behaviours the command layer relies on:
+ *
+ *  - **a duplicate is refused**, not silently deduplicated: a case already in the
+ *    plan answers 400 `100605` `创建执行用例失败`. That is a conflict rather than an
+ *    absence, so it keeps exit 7;
+ *  - **an omitted `executor_id` leaves the run unassigned** — it is not defaulted
+ *    to the creator, matching the corrected reading of GOTCHA #8.
+ */
+export type CreateRunInput = {
+  library_id: string;
+  plan_id: string;
+  case_id: string;
+  executor_id?: string | undefined;
+};
+
+export async function createRun(ctx: Ctx, input: CreateRunInput): Promise<TestRun> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.testhubRuns,
+    body: compact(input),
+  });
+  return parseTestRun(raw);
+}
+
+/**
+ * `POST /v1/testhub/runs/bulk` ([th#48]) — the same three ids, up to **100** times.
+ *
+ * **Per-element best effort, under HTTP 200** (live 2026-08-04): every input row
+ * comes back as `{state, run?, message?}`, so a batch containing one already-added
+ * case lands the others and reports `创建失败或已创建` for that one. Callers must
+ * read the `state` of each element rather than trusting the status code — which is
+ * exactly what the command layer renders.
+ */
+export type BulkCreateRunsInput = {
+  runs: CreateRunInput[];
+};
+
+export async function bulkCreateRuns(
+  ctx: Ctx,
+  input: BulkCreateRunsInput,
+): Promise<TestRunBulkItem[]> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.testhubRunsBulk,
+    body: { runs: input.runs.map((entry) => compact(entry)) },
+  });
+  return parseBareArray(raw, parseTestRunBulkItem);
+}
+
+/**
+ * `PATCH /v1/testhub/runs/bulk` ([th#50]) — record results on up to **100** runs,
+ * anywhere: no plan and no library in the URL, unlike the plan-scoped
+ * `bulkRuns` below.
+ *
+ * **Atomic**, and that is the sharpest difference from its `POST` sibling: one
+ * unknown `run_id` rejects the whole batch with 400 `100016` `存在无效run_id` and
+ * nothing is applied (verified live 2026-08-04 by reading the valid run back).
+ * `status_id` is required on every entry (`100008` otherwise), an omitted
+ * `executor_id` preserves the run's current executor, and each applied entry
+ * appends a row to that run's history — so a bulk result is auditable, unlike a
+ * pjm bulk update.
+ */
+export type BulkUpdateRunsInput = {
+  runs: BulkUpdateRunEntry[];
+};
+
+export type BulkUpdateRunEntry = {
+  run_id: string;
+  status_id: string;
+  remark?: string | undefined;
+  executor_id?: string | undefined;
+  steps?: RunStepInput[] | undefined;
+};
+
+export async function bulkUpdateRuns(
+  ctx: Ctx,
+  input: BulkUpdateRunsInput,
+): Promise<TestRunBulkItem[]> {
+  const raw = await request<unknown>(ctx, {
+    method: 'PATCH',
+    path: ENDPOINTS.testhubRunsBulk,
+    body: { runs: input.runs.map((entry) => compact(entry)) },
+  });
+  return parseBareArray(raw, parseTestRunBulkItem);
+}
+
+/**
+ * `GET /v1/testhub/runs/{run_id}/histories` ([th#58]) — every result ever recorded
+ * on one run, oldest first. This is the missing half of a test report.
+ *
+ * Paging is honoured and pages are disjoint (live 2026-08-04). The path is
+ * id-only: a `short_id` answers 404, and an unknown run answers `100619`, which is
+ * deliberately **not** mapped to exit 5 because the same code also rejects a whole
+ * bulk batch (see `wire.ts`).
+ */
+export async function listRunHistories(
+  ctx: Ctx,
+  runId: string,
+  page: PageRequest = {},
+): Promise<Page<TestRunHistoryItem>> {
+  return await fetchPageOf(
+    ctx,
+    ENDPOINTS.testhubRunHistories(runId),
+    {},
+    page,
+    parseTestRunHistoryItem,
+  );
+}
+
+export function iterateRunHistories(
+  ctx: Ctx,
+  runId: string,
+  options: PaginateOptions = {},
+): AsyncGenerator<TestRunHistoryItem, void, undefined> {
+  return iterateOf(
+    ctx,
+    ENDPOINTS.testhubRunHistories(runId),
+    {},
+    options,
+    parseTestRunHistoryItem,
+  );
+}
+
+/**
+ * One result record ([th#55]). A history id that belongs to a **different** run
+ * answers 400 `100643` (a mismatch, kept on exit 7) while a genuinely unknown one
+ * answers `100642`, which **is** mapped to exit 5.
+ */
+export async function getRunHistory(
+  ctx: Ctx,
+  runId: string,
+  historyId: string,
+): Promise<TestRunHistoryItem> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.testhubRunHistory(runId, historyId),
+  });
+  return parseTestRunHistoryItem(raw);
+}
+
 export async function bulkRuns(
   ctx: Ctx,
   libraryId: string,
@@ -585,5 +934,36 @@ export async function runStatuses(ctx: Ctx, libraryId: string): Promise<TestRunS
     ENDPOINTS.testhubRunStatuses,
     { library_id: libraryId },
     parseTestRunStatus,
+  );
+}
+
+/**
+ * Plan states ([th#64]) — **organisation-level**, so no `library_id` at all, and
+ * the source of the `state_id` that `updatePlan` takes.
+ *
+ * Scope `pcp:read:testhub:configuration`, like `case/states` and `run/statuses`,
+ * so the command layer routes it through the same configuration-scope explanation.
+ * Three system rows on this tenant; the whole list is loaded, like every other
+ * lookup here.
+ */
+export async function planStates(ctx: Ctx): Promise<TestPlanState[]> {
+  return await listAllOf(ctx, ENDPOINTS.testhubPlanStates, {}, parseTestPlanState);
+}
+
+/**
+ * Case properties effective in one library ([th#23]) — the last piece of the
+ * `meta` surface.
+ *
+ * Scope is `pcp:read:testhub:testcase`, **not** `configuration` (GOTCHA #2), so no
+ * configuration-scope hint belongs on its 403. Read the warning on
+ * `TestCaseProperty` before using the ids for anything: on this tenant they are all
+ * built-in field keys, and only a genuinely custom row is a `--set` key.
+ */
+export async function caseProperties(ctx: Ctx, libraryId: string): Promise<TestCaseProperty[]> {
+  return await listAllOf(
+    ctx,
+    ENDPOINTS.testhubCaseProperties,
+    { library_id: libraryId },
+    parseTestCaseProperty,
   );
 }

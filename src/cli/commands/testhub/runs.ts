@@ -1,13 +1,22 @@
 import type { Command } from 'commander';
 import {
+  bulkCreateRuns,
   bulkRuns,
+  bulkUpdateRuns,
+  createRun,
+  getCase,
   getRun,
+  getRunHistory,
+  iterateRunHistories,
   iterateRuns,
+  listRunHistories,
   patchRun,
   searchRuns,
   type BulkRunInsert,
   type BulkRunUpdate,
   type BulkRunsInput,
+  type BulkUpdateRunEntry,
+  type CreateRunInput,
   type PatchRunInput,
   type RunStepInput,
 } from '../../../api/testhub';
@@ -20,7 +29,7 @@ import {
   type ResolveResult,
 } from '../../../core/metadata';
 import { collect, type SearchPayload } from '../../../core/paginate';
-import type { TestRun } from '../../../types/api';
+import type { TestRun, TestRunBulkItem, TestRunHistoryItem } from '../../../types/api';
 import { addGlobalOptions } from '../../globals';
 import { errLine, paint, type Column } from '../../output';
 import { addCrosscutting } from '../_shared/crosscutting';
@@ -56,6 +65,13 @@ import {
   type LibraryFlags,
   type PairInput,
 } from './libraries';
+import {
+  checkBulkLimit,
+  entryPair,
+  optionalEntryString,
+  readEntryFile,
+  type RawEntry,
+} from './entries';
 
 /**
  * `pingcode testhub runs …` — 执行用例, one case's placement in one plan plus its
@@ -114,6 +130,29 @@ type RunListFlags = PagingFlags &
     keywords?: string | undefined;
   };
 
+type RunCreateFlags = LibraryFlags &
+  PlanFlags &
+  ExecutorFlags & {
+    case?: string | undefined;
+    caseId?: string | undefined;
+  };
+
+type RunBulkCreateFlags = LibraryFlags &
+  PlanFlags &
+  ExecutorFlags & {
+    case?: string[] | undefined;
+    caseId?: string[] | undefined;
+  };
+
+type RunBulkUpdateFlags = LibraryFlags &
+  StatusFlags &
+  ExecutorFlags & {
+    run?: string[] | undefined;
+    runId?: string[] | undefined;
+    file?: string | undefined;
+    remark?: string | undefined;
+  };
+
 type RunPatchFlags = LibraryFlags &
   StatusFlags &
   ExecutorFlags & {
@@ -157,6 +196,29 @@ export function registerRunCommands(parent: Command): void {
     },
   );
 
+  const create = group
+    .command('create')
+    .description('add one case to a plan as a run (POST /v1/testhub/runs)')
+    .option('--case <id|short_id>', 'the case to execute')
+    .option('--case-id <id>', 'the case to execute, given as an id (no lookup)')
+    .addHelpText(
+      'after',
+      '\nThe new run starts at 未测 / not_start and inherits the case\'s steps.\n' +
+        'Adding a case the plan already contains is REFUSED (400 `100605`), not deduplicated —\n' +
+        'so this is safe to retry only after checking `runs list --plan <p>`.\n' +
+        'Without --executor the run is left UNASSIGNED; it is not defaulted to the creator.\n' +
+        'For many cases at once use `runs bulk-create`, which reports per-case failures instead\n' +
+        'of refusing the whole call.\n',
+    );
+  addPairOptions(create, 'library', LIBRARY_HELP);
+  addPairOptions(create, 'plan', 'the test plan to add the run to');
+  addPairOptions(create, 'executor', 'executor 执行人, from the organisation directory');
+  addGlobalOptions(create, { hidden: true }).action(
+    async (flags: RunCreateFlags, command: Command) => {
+      await runRunCreate(flags, command);
+    },
+  );
+
   const patch = group
     .command('patch')
     .description(
@@ -181,6 +243,62 @@ export function registerRunCommands(parent: Command): void {
     },
   );
 
+  const bulkCreate = group
+    .command('bulk-create')
+    .description('add many cases to a plan as runs in one call (POST /v1/testhub/runs/bulk)')
+    .option('--case <id|short_id>', 'case to add, repeatable', collectValue)
+    .option('--case-id <id>', 'case to add, repeatable: an id, sent with no lookup', collectValue)
+    .addHelpText(
+      'after',
+      '\nPER-ELEMENT BEST EFFORT, and that is the reason to prefer this over a loop of\n' +
+        '`runs create`: the call answers HTTP 200 and reports one row per case, so a batch that\n' +
+        'contains an already-added case still lands the rest and marks that one failure\n' +
+        '("创建失败或已创建"). Read the STATE column, not the exit code.\n' +
+        'Up to 100 cases per call. Each --case costs one read to resolve the reference; use\n' +
+        '--case-id to skip it when you already hold ids.\n',
+    );
+  addPairOptions(bulkCreate, 'library', LIBRARY_HELP);
+  addPairOptions(bulkCreate, 'plan', 'the test plan to add the runs to');
+  addPairOptions(bulkCreate, 'executor', 'executor 执行人 applied to every added run');
+  addGlobalOptions(bulkCreate, { hidden: true }).action(
+    async (flags: RunBulkCreateFlags, command: Command) => {
+      await runRunBulkCreate(flags, command);
+    },
+  );
+
+  const bulkUpdate = group
+    .command('bulk-update')
+    .description('record results on many runs in one call, across plans and libraries')
+    .option('--run <id|short_id>', 'run to update, repeatable', collectValue)
+    .option('--run-id <id>', 'run to update, repeatable: an id, sent with no lookup', collectValue)
+    .option('--file <path|->', 'JSON array of per-run entries, or - for stdin')
+    .option('--remark <text>', 'remark 备注 applied to every named run (replaces)')
+    .addHelpText(
+      'after',
+      '\nATOMIC — the opposite of `runs bulk-create`, and undocumented: one unknown run id\n' +
+        'rejects the WHOLE batch (400 `100016` 存在无效run_id) and nothing is applied. Verified\n' +
+        'live by reading the valid run back afterwards.\n' +
+        'Two forms, mutually exclusive:\n' +
+        '  · --run/--run-id (repeatable) plus --status, one result for all;\n' +
+        '  · --file, when each run needs its own. Entry keys: run | run_id (one required),\n' +
+        '    status | status_id (required), remark, executor | executor_id.\n' +
+        'status_id is required on every entry — the API has no "remark only" mode here either.\n' +
+        'An omitted executor preserves each run\'s current one. Every applied entry appends a\n' +
+        'row to that run\'s history, so a bulk result stays auditable.\n' +
+        'Steps are deliberately not settable here: a step array replaces wholesale and a step\n' +
+        'sent without its status would be re-created. Use `runs patch --step` per run.\n' +
+        'Unlike `runs bulk`, this endpoint carries no plan or library in its URL, so it can span\n' +
+        'plans — and it cannot delete anything.\n',
+    );
+  addPairOptions(bulkUpdate, 'library', `${LIBRARY_HELP} (needed to resolve a status by name)`);
+  addPairOptions(bulkUpdate, 'status', 'run result 执行结果 applied to every named run');
+  addPairOptions(bulkUpdate, 'executor', 'executor 执行人 applied to every named run');
+  addGlobalOptions(bulkUpdate, { hidden: true }).action(
+    async (flags: RunBulkUpdateFlags, command: Command) => {
+      await runRunBulkUpdate(flags, command);
+    },
+  );
+
   const bulk = group
     .command('bulk')
     .description(
@@ -202,6 +320,8 @@ export function registerRunCommands(parent: Command): void {
       await runRunBulk(flags, command);
     },
   );
+
+  registerRunHistoryCommands(group);
 
   // `principal_type=test_run`, all four families live-verified 2026-08-03.
   //
@@ -604,4 +724,429 @@ function printRun(run: TestRun, ctx: Ctx, verb?: string): void {
   if (!mode.json && verb !== undefined) {
     errLine(paint.green(`${verb} ${run.short_id ?? run.id}`));
   }
+}
+
+// ---------------------------------------------------------------------------
+// create / bulk-create / bulk-update
+// ---------------------------------------------------------------------------
+
+const RUN_BULK_COLUMNS: Column<TestRunBulkItem>[] = [
+  { header: 'STATE', value: (row) => row.state ?? '' },
+  { header: 'RUN', value: (row) => row.run?.short_id ?? row.run?.id ?? '' },
+  { header: 'CASE', value: (row) => refName(row.run?.case), flex: true },
+  { header: 'STATUS', value: (row) => refName(row.run?.latest_executed_status) || (row.run?.status ?? '') },
+  { header: 'EXECUTOR', value: (row) => refName(row.run?.executor) },
+  { header: 'MESSAGE', value: (row) => row.message ?? '', flex: true },
+];
+
+/**
+ * `POST /v1/testhub/runs` — three ids, so no `--file` form and nothing to merge.
+ *
+ * The case reference is resolved through a read because a `short_id` is a legitimate
+ * thing to hold and the write takes ids only; `--case-id` skips it.
+ */
+async function runRunCreate(flags: RunCreateFlags, command: Command): Promise<void> {
+  const { ctx } = contextFor(command);
+
+  const planPair = readPair('plan', flags.plan, flags.planId);
+  const executorPair = readPair('executor', flags.executor, flags.executorId);
+  const casePair = readPair('case', flags.case, flags.caseId);
+  if (planPair === undefined) {
+    throw new UsageError('--plan <name|id> is required', {
+      hint: 'a run is a case inside a plan — list the plans with `pingcode testhub plans list --library <l>`',
+    });
+  }
+  if (casePair === undefined) {
+    throw new UsageError('--case <id|short_id> is required', {
+      hint: 'list the cases of the library with `pingcode testhub cases list --library <l>`',
+    });
+  }
+
+  const library = await requireLibraryFlag(ctx, flags);
+  const plan = await resolvePair('testhub-plan', planPair, (input) =>
+    resolveTestPlan(ctx, library.id, input),
+  );
+  if (plan === undefined) throw new UsageError('--plan <name|id> is required');
+  const caseId = await resolveCaseRef(ctx, casePair);
+
+  const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<CreateRunInput>> => {
+    const executor = await resolvePair('user', executorPair, (input) =>
+      resolveUser(attemptCtx, input),
+    );
+    const input: CreateRunInput = {
+      library_id: library.id,
+      plan_id: plan.id,
+      case_id: caseId,
+      ...(executor === undefined ? {} : { executor_id: executor.id }),
+    };
+    return { resolutions: present([library, plan, executor]), value: input };
+  };
+
+  const run = await runWrite(ctx, resolve, (attemptCtx, input) => createRun(attemptCtx, input));
+  printRun(run, ctx, 'created');
+}
+
+async function runRunBulkCreate(flags: RunBulkCreateFlags, command: Command): Promise<void> {
+  const { ctx } = contextFor(command);
+
+  const planPair = readPair('plan', flags.plan, flags.planId);
+  const executorPair = readPair('executor', flags.executor, flags.executorId);
+  const refs = (flags.case ?? []).map((value) => value.trim()).filter((value) => value !== '');
+  const ids = (flags.caseId ?? []).map((value) => value.trim()).filter((value) => value !== '');
+
+  if (planPair === undefined) {
+    throw new UsageError('--plan <name|id> is required', {
+      hint: 'runs are created inside one plan: pass --plan once for the whole batch',
+    });
+  }
+  if (refs.length === 0 && ids.length === 0) {
+    throw new UsageError('nothing to add: pass --case <ref> or --case-id <id>', {
+      hint: `both are repeatable, up to ${100} cases per call`,
+    });
+  }
+  checkBulkLimit(refs.length + ids.length, 'cases');
+
+  const library = await requireLibraryFlag(ctx, flags);
+  const plan = await resolvePair('testhub-plan', planPair, (input) =>
+    resolveTestPlan(ctx, library.id, input),
+  );
+  if (plan === undefined) throw new UsageError('--plan <name|id> is required');
+
+  // Outside the retry: each reference costs a read, and a cache-invalidation retry
+  // must not repeat them (nothing here comes from the metadata cache anyway).
+  const caseIds = [...ids];
+  for (const ref of refs) caseIds.push((await getRunCaseId(ctx, ref)));
+
+  const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<CreateRunInput[]>> => {
+    const executor = await resolvePair('user', executorPair, (input) =>
+      resolveUser(attemptCtx, input),
+    );
+    const runs: CreateRunInput[] = caseIds.map((caseId) => ({
+      library_id: library.id,
+      plan_id: plan.id,
+      case_id: caseId,
+      ...(executor === undefined ? {} : { executor_id: executor.id }),
+    }));
+    return { resolutions: present([library, plan, executor]), value: runs };
+  };
+
+  const items = await runWrite(ctx, resolve, (attemptCtx, runs) =>
+    bulkCreateRuns(attemptCtx, { runs }),
+  );
+  printRunBulkItems(items, ctx, 'created');
+}
+
+/**
+ * `PATCH /v1/testhub/runs/bulk` — **atomic**, unlike its `POST` sibling.
+ *
+ * Every entry needs a `status_id`, so the shared `--status` is required in the
+ * `--run` form and each entry must carry one in the `--file` form. That is the
+ * endpoint's rule, not a CLI choice: an entry without it answers `100008`.
+ */
+async function runRunBulkUpdate(flags: RunBulkUpdateFlags, command: Command): Promise<void> {
+  const { ctx } = contextFor(command);
+
+  const refs = (flags.run ?? []).map((value) => value.trim()).filter((value) => value !== '');
+  const ids = (flags.runId ?? []).map((value) => value.trim()).filter((value) => value !== '');
+  const usesFile = (flags.file?.trim() ?? '') !== '';
+
+  const statusPair = readPair('status', flags.status, flags.statusId);
+  const executorPair = readPair('executor', flags.executor, flags.executorId);
+
+  if (usesFile && (refs.length > 0 || ids.length > 0)) {
+    throw new UsageError('--file cannot be combined with --run / --run-id', {
+      hint: 'use --file when each run needs its own result, or --run with a shared --status',
+    });
+  }
+  if (usesFile && (statusPair !== undefined || flags.remark !== undefined)) {
+    throw new UsageError('--file carries its own status and remark, so those flags are refused', {
+      hint: 'put status / status_id and remark in the entries, or drop --file',
+    });
+  }
+  if (!usesFile) {
+    if (refs.length === 0 && ids.length === 0) {
+      throw new UsageError('nothing to update: pass --run <ref> … or --file <path|->');
+    }
+    if (statusPair === undefined) {
+      throw new UsageError('--status <name|id> is required', {
+        hint:
+          'every entry of this endpoint needs a status_id — there is no remark-only mode. ' +
+          'List the values with `pingcode testhub meta run-statuses --library <l>`',
+      });
+    }
+  }
+
+  const entries = usesFile
+    ? await readEntryFile(
+        flags,
+        RUN_BULK_UPDATE_SCHEMA,
+        'pass a JSON array of run entries, or - to read it from stdin. Each entry needs run or ' +
+          'run_id and a status or status_id',
+      )
+    : [];
+  checkBulkLimit(usesFile ? entries.length : refs.length + ids.length, 'runs');
+
+  // Run ids first, outside the retry: the write is id-only and a short_id needs a read.
+  const runIds = new Map<string, string>();
+  for (const ref of refs) runIds.set(ref, (await getRun(ctx, ref)).id);
+  for (const id of ids) runIds.set(id, id);
+  for (const entry of entries) {
+    const byId = optionalEntryString(entry, 'run_id');
+    const byRef = optionalEntryString(entry, 'run');
+    if (byId !== undefined && byRef !== undefined) {
+      throw new UsageError(`${entry.at} sets both run and run_id`, {
+        hint: 'use run for an id or short_id to resolve, or run_id for an id sent unchanged',
+      });
+    }
+    if (byId !== undefined) {
+      runIds.set(entry.at, byId);
+      continue;
+    }
+    if (byRef === undefined) {
+      throw new UsageError(`${entry.at} names no run`, {
+        hint: 'give the entry a run (id or short_id) or a run_id',
+      });
+    }
+    runIds.set(entry.at, (await getRun(ctx, byRef)).id);
+  }
+
+  const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<BulkUpdateRunEntry[]>> => {
+    const flagged = await resolveLibraryFlag(attemptCtx, flags);
+    const resolutions: ResolveResult[] = present([flagged]);
+    const libraryId = flagged?.id;
+
+    const resolveStatusName = async (input: string): Promise<string> => {
+      if (libraryId === undefined) {
+        throw new UsageError('--library <name|id> is required to resolve a run status by name', {
+          hint: 'run statuses are library-scoped; pass --library, or use --status-id / status_id',
+        });
+      }
+      const resolved = await withConfigurationScope('run statuses', () =>
+        resolveRunStatus(attemptCtx, libraryId, input),
+      );
+      resolutions.push(resolved);
+      return resolved.id;
+    };
+
+    const executor = await resolvePair('user', executorPair, (input) =>
+      resolveUser(attemptCtx, input),
+    );
+    if (executor !== undefined) resolutions.push(executor);
+
+    if (!usesFile) {
+      const statusId =
+        statusPair === undefined
+          ? undefined
+          : 'byId' in statusPair
+            ? statusPair.byId
+            : await resolveStatusName(statusPair.byName);
+      const rows: BulkUpdateRunEntry[] = [...refs, ...ids].map((key) => ({
+        run_id: runIds.get(key) as string,
+        status_id: statusId as string,
+        ...(flags.remark === undefined ? {} : { remark: flags.remark }),
+        ...(executor === undefined ? {} : { executor_id: executor.id }),
+      }));
+      return { resolutions, value: rows };
+    }
+
+    const rows: BulkUpdateRunEntry[] = [];
+    for (const entry of entries) {
+      const statusEntry = entryPair(entry, 'status');
+      if (statusEntry === undefined) {
+        throw new UsageError(`${entry.at} names no status`, {
+          hint: 'status_id is required on every entry of this endpoint — there is no remark-only mode',
+        });
+      }
+      const statusId =
+        'byId' in statusEntry ? statusEntry.byId : await resolveStatusName(statusEntry.byName);
+      const entryExecutor = await resolveEntryExecutor(attemptCtx, entry, resolutions);
+      const remark = optionalEntryString(entry, 'remark');
+      rows.push({
+        run_id: runIds.get(entry.at) as string,
+        status_id: statusId,
+        ...(remark === undefined ? {} : { remark }),
+        ...(entryExecutor === undefined
+          ? executor === undefined
+            ? {}
+            : { executor_id: executor.id }
+          : { executor_id: entryExecutor }),
+      });
+    }
+    return { resolutions, value: rows };
+  };
+
+  const items = await runWrite(ctx, resolve, (attemptCtx, runs) =>
+    bulkUpdateRuns(attemptCtx, { runs }),
+  );
+  printRunBulkItems(items, ctx, 'updated');
+}
+
+const RUN_BULK_UPDATE_SCHEMA = {
+  wrapperKey: 'runs',
+  allowed: ['run', 'run_id', 'status', 'status_id', 'remark', 'executor', 'executor_id'],
+  refused: {
+    steps:
+      'a step array replaces wholesale and a step sent without its status would be re-created, ' +
+      'orphaning its results — record steps one run at a time with `testhub runs patch --step`',
+  },
+} as const;
+
+async function resolveEntryExecutor(
+  ctx: Ctx,
+  entry: RawEntry,
+  resolutions: ResolveResult[],
+): Promise<string | undefined> {
+  const pair = entryPair(entry, 'executor');
+  if (pair === undefined) return undefined;
+  if ('byId' in pair) return pair.byId;
+  const resolved = await resolveUser(ctx, pair.byName);
+  resolutions.push(resolved);
+  return resolved.id;
+}
+
+/** A `--case` reference for a run write: `short_id` is accepted on the read, not the write. */
+async function resolveCaseRef(ctx: Ctx, pair: PairInput): Promise<string> {
+  if ('byId' in pair) return pair.byId;
+  return await getRunCaseId(ctx, pair.byName);
+}
+
+/**
+ * A case reference → a real case id.
+ *
+ * `getCase` comes from the api layer rather than from `cases.ts`: the two resource
+ * files must not reach into each other, and a case read is one wrapper call.
+ */
+async function getRunCaseId(ctx: Ctx, ref: string): Promise<string> {
+  return (await getCase(ctx, ref)).id;
+}
+
+function printRunBulkItems(items: TestRunBulkItem[], ctx: Ctx, verb: string): void {
+  const mode = modeOf(ctx);
+  printCollection(items, RUN_BULK_COLUMNS, mode);
+  if (mode.json) return;
+  const failed = items.filter((item) => item.state !== undefined && item.state !== 'success');
+  if (failed.length > 0) {
+    errLine(
+      paint.yellow(
+        `${failed.length} of ${items.length} entries failed — read the STATE and MESSAGE columns`,
+      ),
+    );
+    return;
+  }
+  errLine(paint.green(`${verb} ${items.length} run(s)`));
+}
+
+// ---------------------------------------------------------------------------
+// history: every result ever recorded on one run
+// ---------------------------------------------------------------------------
+
+const RUN_HISTORY_COLUMNS: Column<TestRunHistoryItem>[] = [
+  { header: 'ID', value: (row) => row.id },
+  { header: 'WHEN', value: (row) => timestampCell(row.executed_at) },
+  { header: 'RESULT', value: (row) => refName(row.executed_status) || (row.status ?? '') },
+  { header: 'BY', value: (row) => refName(row.executed_by) },
+  { header: 'STEPS', value: (row) => String(row.steps.length) },
+  { header: 'REMARK', value: (row) => row.remark ?? '', flex: true },
+];
+
+/**
+ * `runs history …` — the audit trail of one run, oldest first.
+ *
+ * This is the half a test report was missing: `runs list` shows only the latest
+ * result, while every `runs patch` and every applied `runs bulk-update` entry appends
+ * a row here.
+ */
+function registerRunHistoryCommands(parent: Command): void {
+  const group = parent
+    .command('history')
+    .description('执行历史 every result ever recorded on one run (read-only)');
+
+  group.addHelpText(
+    'after',
+    '\nOldest first, one row per recorded result — `runs list` shows only the latest. A\n' +
+      '`runs patch` and every applied `runs bulk-update` entry both append a row, so a bulk\n' +
+      'result is auditable (unlike a pjm bulk update, which appears in no feed).\n' +
+      'For the latest result of every run of one CASE, use `testhub cases history list <case>`.\n' +
+      'A history id belonging to a different run is refused as a mismatch (400 `100643`), not\n' +
+      'reported as missing.\n',
+  );
+
+  addGlobalOptions(
+    addPagingOptions(
+      group
+        .command('list')
+        .description('list every result recorded on a run')
+        .argument('<run>', 'run id or short_id'),
+    ),
+    { hidden: true },
+  ).action(async (target: string, flags: PagingFlags, command: Command) => {
+    const { ctx } = contextFor(command);
+    // The histories path is id-only (a short_id answers 404), so the reference goes
+    // through the run read that does accept one.
+    const run = await getRun(ctx, requireFlag(target, '<run>'));
+    const paging = readPaging(flags);
+
+    if (paging.all) {
+      const values = await collect(
+        iterateRunHistories(ctx, run.id, { pageSize: paging.pageSize, limit: paging.limit }),
+      );
+      printCollection(values, RUN_HISTORY_COLUMNS, modeOf(ctx), { all: true });
+      return;
+    }
+
+    const page = await listRunHistories(ctx, run.id, {
+      pageIndex: paging.pageIndex,
+      pageSize: paging.pageSize,
+    });
+    printPage(page, RUN_HISTORY_COLUMNS, modeOf(ctx));
+  });
+
+  addGlobalOptions(
+    group
+      .command('get')
+      .description('show one recorded result')
+      .argument('<run>', 'run id or short_id')
+      .argument('<history-id>', 'result record id, as printed by list'),
+    { hidden: true },
+  ).action(async (target: string, historyId: string, _flags: unknown, command: Command) => {
+    const { ctx } = contextFor(command);
+    const run = await getRun(ctx, requireFlag(target, '<run>'));
+    const row = await getRunHistory(ctx, run.id, requireFlag(historyId, '<history-id>'));
+
+    printResource(
+      row,
+      [
+        ['id', row.id],
+        // A history's `run` and `case` refs carry no `name` — the run has a `short_id`
+        // and the case an `identifier` — so `refName` alone would print bare ids.
+        ['run', refLabel(row.run, 'short_id')],
+        ['case', refLabel(row.case, 'identifier')],
+        ['plan', row.plan === undefined ? '' : (row.plan.name ?? row.plan.id)],
+        ['library', refName(row.library)],
+        ['result', refName(row.executed_status) || (row.status ?? '')],
+        ['by', refName(row.executed_by)],
+        ['when', timestampCell(row.executed_at)],
+        ['steps', String(row.steps.length)],
+        ['remark', row.remark ?? ''],
+      ],
+      modeOf(ctx),
+    );
+  });
+}
+
+/**
+ * A `Ref`'s most human key, falling back to the id.
+ *
+ * `refName` is right for the many refs that carry a `name`, but a history's `run` and
+ * `case` do not: they carry `short_id` and `identifier`. `Ref`'s extra keys are typed
+ * `unknown`, so the read is narrowed here rather than asserted.
+ */
+function refLabel(
+  ref: { id: string; name?: string | undefined; [key: string]: unknown } | undefined,
+  key: 'short_id' | 'identifier',
+): string {
+  if (ref === undefined) return '';
+  const value = ref[key];
+  if (typeof value === 'string' && value !== '') return value;
+  return refName(ref);
 }
