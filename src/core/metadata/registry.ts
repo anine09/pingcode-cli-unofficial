@@ -133,8 +133,9 @@ const TABLE = {
   //    scope: N identical cache entries asserting a scoping the API does not have.
   //  - **the resolver would be confidently wrong.** Tags *are* really project-scoped on
   //    the write side: `POST …/work_items/{id}/tags` refused **all 23** ids for a work
-  //    item in one project (400 `100354` `'tag'资源不存在`) while accepting two of them
-  //    for a work item in another. A row here would answer "the id of tag POC in
+  //    item in one project (400 `100354` `'tag'资源不存在`) while accepting **8 of the
+  //    same 23** for a work item in another — every id tried, both ways, 2026-08-04.
+  //    A row here would answer "the id of tag POC in
   //    project YYHC" with an id that project cannot use — the resolver contract is a
   //    name in a scope → the id valid in that scope, and this endpoint cannot honour
   //    it.

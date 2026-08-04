@@ -38,11 +38,25 @@ describe('command tree root', () => {
     // families, and only under an entity that mounts them. Anything else nesting that
     // deep is still a failure, and this stays a traversal: mounting the families on a
     // sixth entity does not touch this file.
+    //
+    // S2b added three more, and they are named here rather than waved through because
+    // the point of the assertion is that the list is short and deliberate. All three are
+    // sub-resources the API itself addresses **under** a work item —
+    // `/v1/pjm/work_items/{id}/relations`, `…/tags`, `…/transition_histories` — so the
+    // command path mirrors the URL path, which is the same justification the four
+    // injected families have. A `project work-item link add` is therefore a legitimate
+    // fourth segment; a fourth-level *container* still is not.
     const roots = program().commands.filter((command) => command.name() !== 'help');
     const containers = roots.flatMap((command) => containerPaths(command));
     const leaves = roots.flatMap((command) => leafPaths(command));
 
-    const families: readonly string[] = CROSSCUTTING_FAMILIES;
+    const families: readonly string[] = [
+      ...CROSSCUTTING_FAMILIES,
+      // pjm work-item sub-resources (S2b): typed links, tags, state history.
+      'link',
+      'tag',
+      'history',
+    ];
     const deep = containers.filter((parts) => parts.length > 2);
     expect(deep.every((parts) => families.includes(parts[2] ?? ''))).toBe(true);
     expect(containers.filter((parts) => parts.length > 3)).toEqual([]);

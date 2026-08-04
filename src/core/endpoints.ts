@@ -127,21 +127,29 @@ export const ENDPOINTS = {
   // item, as opposed to which sprint or release it is filed under.
   // -------------------------------------------------------------------------
   //
-  // Live findings, 2026-08-04, public cloud. Eight of them contradict the docs,
-  // the catalog, or a conclusion an earlier child recorded:
+  // Live findings, 2026-08-04, public cloud. Seven of them contradict the docs,
+  // the catalog, or a conclusion an earlier child recorded. An eighth was
+  // **retracted** on re-measurement — it is kept as the first entry because the
+  // mistake is more instructive than the fact:
   //
-  //  - **`POST /v1/pjm/work_items/search` ignores paging completely.** Every
-  //    placement was tried — `payload.page_index`/`page_size` (what the docs
-  //    document), the same two at the top level of the body, and the query
-  //    string — and all three answer `page_index: 0, page_size: 30` and return
-  //    the first 30 rows. `total` *is* accurate (195, and 1182 org-wide), so the
-  //    endpoint reports how many matched and then refuses to show you more than
-  //    30. **This is not ship's search** (design §14.1: ship echoes the
-  //    requested index and pages for real), so "pjm's search is isomorphic to
-  //    ship's" — D7.2's premise — is false. `walkPages`' echoed-index guard is
-  //    what keeps `--all` from looping here; the command refuses `--all`
-  //    outright instead, because returning 30 rows labelled `all: true` would be
-  //    a lie.
+  //  - ~~**`POST /v1/pjm/work_items/search` ignores paging completely.**~~
+  //    **RETRACTED, design D16.1.** The endpoint pages perfectly normally, like
+  //    ship's and testhub's: `payload.page_index`/`page_size` are honoured and
+  //    echoed, consecutive pages are disjoint, the last page is short, and an
+  //    out-of-range index echoes the requested value with zero rows instead of
+  //    clamping (197 rows walked over seven pages of 30, and pages of 3 agree
+  //    with pages of 30 on the ordering). So D7.2's "isomorphic to ship's search"
+  //    premise is **true** after all.
+  //    The original finding was an artifact of the instrument, not a property of
+  //    the API: the probe drove the cursor through
+  //    `pingcode api POST …/search --body '{…,"page_index":2,…}'`, and
+  //    `buildSearchBody` in `core/paginate.ts` **overwrites** the body's cursor
+  //    with `--page`/`--page-size`, which default to 0/30. Every placement of the
+  //    cursor inside the body therefore answers `0, 30` — for any endpoint, not
+  //    just this one. Driven with `--page 2 --page-size 3` the identical call
+  //    echoes `page_index: 2` and returns the third disjoint page.
+  //    **Lesson for the next probe: a `…/search` cursor must be driven with
+  //    `--page`, never with `--body`.**
   //  - **the search filter vocabulary is not the query-string vocabulary.**
   //    `?type_id=` on the GET list becomes **`type`** in the filter (the bare
   //    slug, enum-validated), `?tag_id=` becomes `tags.id`, `?version_id=`
@@ -196,7 +204,8 @@ export const ENDPOINTS = {
   //    and the same 23 as the org-level `GET /v1/pjm/work_item_tags`. Tags are
   //    nevertheless **really project-scoped**: `POST …/work_items/{id}/tags`
   //    refused all 23 for a YYHC work item (400 `100354` `'tag'资源不存在`) while
-  //    accepting two of them for a SHOU02 work item. So this list is the only
+  //    accepting 8 of the same 23 for a SHOU02 work item — every id tried in
+  //    both directions (design D16.3). So this list is the only
   //    tag enumerator there is *and* it answers a question nobody asked. Tag
   //    names are not unique either (four `后端`, three `前端`, three `算法`).
   //  - **`GET …/projects/{id}/progress` is not a list.** The catalog marks it
@@ -213,7 +222,7 @@ export const ENDPOINTS = {
   //    archived through the API. `identifier` *is* patchable, and must be
   //    uppercase and short (400 `100335`).
 
-  /** `POST` only, and **unpaged**: always the first 30 matches, whatever you ask for. */
+  /** `POST` only, and it pages normally — but on its own filter vocabulary. */
   workItemsSearch: '/v1/pjm/work_items/search',
 
   /**

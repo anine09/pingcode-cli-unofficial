@@ -83,3 +83,26 @@ export function groupNames(): string[] {
     .commands.map((command) => command.name())
     .filter((name) => name !== 'help');
 }
+
+/**
+ * `--help` text **including** any `addHelpText('after')` block.
+ *
+ * `helpFor` uses `helpInformation()`, which renders usage, options and subcommands but
+ * drops the trailing prose — and for several groups that prose *is* the contract: it is
+ * where an upstream asymmetry, a dead filter or a "this endpoint ignores paging" warning
+ * lives. A test that asserts one of those has to read the full text.
+ *
+ * `test/help/resolve.test.ts` grew a local copy of this first; this is the shared one, so
+ * a third copy never has to be written.
+ */
+export function fullHelpFor(path: readonly string[]): string {
+  const command = commandAt(program(), path);
+  let text = '';
+  command.configureOutput({
+    writeOut: (chunk) => {
+      text += chunk;
+    },
+  });
+  command.outputHelp();
+  return text;
+}

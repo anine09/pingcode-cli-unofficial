@@ -475,17 +475,25 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   //    user is looking at, because `GET /v1/pjm/work_item/tags?project_id=` returns the
   //    whole organisation's tags regardless of the project asked for, while the write
   //    accepts only the ones belonging to the work item's own project. Live: all 23
-  //    listed tags were refused for a work item in one project and two of them were
-  //    accepted for a work item in another. Exit 5 would send an agent hunting for a
-  //    row `project meta tags` had just printed. The command layer explains the real
-  //    cause instead.
+  //    listed tags were refused for a work item in one project and 8 of the 23 were
+  //    accepted for a work item in another (re-measured exhaustively 2026-08-04 —
+  //    design D16.3 corrects an earlier "two of them"). Exit 5 would send an agent
+  //    hunting for a row `project meta tags` had just printed. The command layer
+  //    explains the real cause instead.
   //  - `100357` (`工作项不包含此标签`) on GET …/tags/{tag_id}. This one is genuinely an
-  //    absence of the pair, and it *would* qualify on the `100405` reasoning — but the
-  //    matching **DELETE** answers HTTP **500** `100000` for the same situation
-  //    (removing a tag twice), so a mapping would make the same mistake exit 5 on a
-  //    read and 7 on a write. Reporting one of the two honestly and the other not is
-  //    worse than leaving both on 7; the asymmetry is documented in `tag delete --help`
-  //    instead. Revisit if the 500 is ever fixed.
+  //    absence of the pair, and it *would* qualify on the `100405` reasoning. It stays
+  //    on 7, but the original reason was **wrong** and is corrected here (design D16.2).
+  //    The claim was "the matching DELETE answers HTTP 500 for the same situation, so a
+  //    mapping would make the same mistake exit 5 on a read and 7 on a write". Both
+  //    halves were re-measured live 2026-08-04: the raw DELETE does answer 500
+  //    `100000` on a repeat, but `project work-item tag delete` **reads the tag before
+  //    the --yes gate**, so the refined leaf never reaches the DELETE — it reports the
+  //    same 400 `100357` the read does. The two refined paths therefore already agree,
+  //    and mapping would make both exit 5 consistently.
+  //    What is left is a genuine judgement call rather than a defect, so it is being
+  //    left alone rather than decided inside a cleanup commit: mapping it would split
+  //    the refined leaves (exit 5) from `pingcode api DELETE` (exit 7, HTTP 500), which
+  //    is the same split the old comment feared, only relocated. Revisit deliberately.
   //  - `100350` (`工作项关联已经存在`) and `100352` (`'tag'资源已经存在`) and `100407`
   //    (`成员已经在项目中`) — uniqueness conflicts, judged exactly as `100220` /
   //    `100343` / `100105` were.

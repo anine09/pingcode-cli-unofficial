@@ -190,12 +190,23 @@ export async function updateWorkItem(
 // POST /v1/pjm/work_items/search — filtered reads, live-verified 2026-08-04
 // ---------------------------------------------------------------------------
 //
-// ⚠️ **This endpoint ignores paging.** `payload.page_index` / `payload.page_size`,
-// the same two at the top level of the body, and the query string were all tried:
-// every one answers `page_index: 0, page_size: 30`. `total` is accurate, so it
-// reports how many rows matched and then hands back the first 30 of them. That is
-// *not* ship's search, which pages for real (design §14.1), so nothing here may be
-// reasoned about by analogy with `searchIdeas` / `searchTickets`.
+// **This endpoint pages normally**, exactly like ship's and testhub's searches
+// (design §14.1) — `payload.page_index` / `payload.page_size` are honoured, the
+// envelope echoes both back, consecutive pages are disjoint, the last page is short,
+// and an out-of-range index returns zero rows with the requested index echoed rather
+// than clamping.
+//
+// ⚠️ An earlier revision of this comment claimed the opposite ("ignores paging: every
+// placement answers `page_index: 0, page_size: 30`"), and the command layer was built
+// on it — a refused `--all` and a warning on every call. **It was a probe artifact,
+// not an API behaviour**, re-measured live 2026-08-04 (design D16.1): the probe went
+// through `pingcode api POST …/search --body '{…"page_index":2…}'`, and
+// `buildSearchBody` in `core/paginate.ts` **overwrites** the body's cursor with
+// `--page` / `--page-size` (default 0 / 30). So every placement of the cursor *inside
+// the body* is discarded and answers 0/30, whoever sends it. The same call with
+// `--page 2 --page-size 3` echoes `page_index: 2` and returns the third disjoint page.
+// If you need to probe a `…/search` cursor again, drive it with `--page`, never with
+// `--body`.
 //
 // The filter vocabulary is also **not** the query-string vocabulary of the simple
 // list — see `core/endpoints.ts` for the enumerated field and operator sets. The
@@ -203,11 +214,9 @@ export async function updateWorkItem(
 // `identifier` / `short_id` / `bug_type_id` cannot be filtered on at all.
 
 /**
- * One page — in practice **the only page** — of `POST /v1/pjm/work_items/search`.
+ * One page of `POST /v1/pjm/work_items/search`.
  *
- * `page` is passed through for signature symmetry with `listWorkItems` and because
- * `fetchSearchPageOf` needs something to normalise the envelope against; upstream
- * disregards it. Callers should say so to the user rather than pretend otherwise.
+ * `page` is honoured — see the block above for why an earlier revision said otherwise.
  */
 export async function searchWorkItems(
   ctx: Ctx,
@@ -218,11 +227,11 @@ export async function searchWorkItems(
 }
 
 /**
- * Walk the search endpoint. Kept for symmetry with the other read paths and used by
- * nothing in the command layer: because the echoed `page_index` never advances,
- * `walkPages` warns and stops after the first page (`core/paginate.ts`), so this
- * yields at most 30 items. `project work-item list` refuses `--all` in search mode
- * instead of shipping that as a feature.
+ * Walk the search endpoint, exactly as `iterateWorkItems` walks the simple list.
+ *
+ * Used by `project work-item list --all` whenever a search-only filter is in play.
+ * `walkPages`' echoed-index guard is a defence here, not a live path: the index does
+ * advance (live 2026-08-04, 197 rows over seven pages of 30).
  */
 export function iterateSearchWorkItems(
   ctx: Ctx,

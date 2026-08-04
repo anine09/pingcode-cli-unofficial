@@ -6,18 +6,87 @@ exports[`project --help > project 1`] = `
 项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
 
 Options:
-  -h, --help               display help for command
+  -h, --help                    display help for command
 
 Commands:
-  list [options]           list projects
-  get [options] <project>  show one project
-  work-item                work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
-  sprint                   迭代 sprints: plan and update them (scopes pcp:read:pjm:sprint /
-                           pcp:write:pjm:sprint)
-  version                  发布 releases of a project (scopes pcp:read:pjm:release /
-                           pcp:write:pjm:release)
-  meta                     ids you need before writing: every pjm lookup is scoped to one project
-  help [command]           display help for command
+  list [options]                list projects
+  get [options] <project>       show one project
+  create [options]              create a project — PERMANENT: there is no delete and no archive
+  update [options] <project>    patch a project — only the fields you pass are sent
+  progress [options] <project>  work-item counts for a project (open / in progress / done)
+  work-item                     work items (scopes pcp:read:pjm:workitem / pcp:write:pjm:workitem)
+  sprint                        迭代 sprints: plan and update them (scopes pcp:read:pjm:sprint /
+                                pcp:write:pjm:sprint)
+  version                       发布 releases of a project (scopes pcp:read:pjm:release /
+                                pcp:write:pjm:release)
+  member                        项目成员 members of a project (scopes pcp:read:pjm:project /
+                                pcp:write:pjm:project)
+  meta                          ids you need before writing: every pjm lookup is scoped to one
+                                project
+  help [command]                display help for command
+"
+`;
+
+exports[`project --help > project create (permanent, and the one flag that can never be changed) 1`] = `
+"Usage: pingcode project create [options]
+
+create a project — PERMANENT: there is no delete and no archive
+
+Options:
+  --name <text>              project name
+  --identifier <KEY>         short uppercase key, unique in the organisation — it prefixes every
+                             work-item id
+  --type <type>              one of scrum | kanban | waterfall | hybrid
+  --description <text>       description
+  --visibility <visibility>  private (default) | public — CANNOT be changed later
+  --assignee <name|id>       负责人; need not be a member, and is not added as one
+  --start-at <when>          unix seconds or a date like 2026-01-31 — stored verbatim, not snapped
+                             to a day
+  --end-at <when>            unix seconds or a date like 2026-01-31 — stored verbatim, not snapped
+                             to a day
+  --member <name|id>         initial member, repeatable: user name or id
+  --process-id <id>          project process template; omitted, --type picks the matching system
+                             one (\`pingcode api GET /v1/pjm/processes\`)
+  -h, --help                 display help for command
+
+This is IRREVERSIBLE. The API has no DELETE for a project, and \`is_archived\` is
+read-only (a patch containing it is accepted and silently dropped), so a project
+created by mistake stays in every listing forever. There is no --dry-run substitute
+for reading this paragraph, but \`--dry-run\` does show the exact body first.
+--identifier must be uppercase with no spaces and reasonably short; anything else is
+rejected as a bad format rather than truncated. It is the only required field that
+can still be changed afterwards, with \`project update --identifier\`.
+--visibility can only be set here: patching it later does nothing.
+Unlike a sprint or a release, --start-at / --end-at are stored EXACTLY as given —
+the server does not round them to the start and end of the day.
+
+"
+`;
+
+exports[`project --help > project member (the deliberate absence of \`remove\` is in the group help) 1`] = `
+"Usage: pingcode project member [options] [command]
+
+项目成员 members of a project (scopes pcp:read:pjm:project / pcp:write:pjm:project)
+
+Options:
+  -h, --help            display help for command
+
+Commands:
+  list [options]        list the members of a project (also the --assignee candidate set)
+  get [options] <user>  show one membership, addressed by the user it belongs to
+  add [options]         add a user or a team to a project
+  help [command]        display help for command
+
+A membership is addressed by the USER id, not by a separate membership id — that is
+what the API returns as the row id, so \`member get <user>\` is the same reference
+\`member add --user\` took.
+There is no \`member remove\` leaf: the endpoint exists, and the generic layer reaches
+it — pingcode api DELETE /v1/pjm/projects/<project>/members/<user> --yes
+It is not a refined leaf because a membership is trivially recreatable with
+\`member add\`, and this command group is capped at the endpoints it was scoped for.
+Note the project's 负责人 (assignee) is unrelated to membership: it can be someone
+who is not a member, and setting it does not add them.
+
 "
 `;
 
@@ -27,14 +96,42 @@ exports[`project --help > project meta 1`] = `
 ids you need before writing: every pjm lookup is scoped to one project
 
 Options:
-  -h, --help            display help for command
+  -h, --help                display help for command
 
 Commands:
-  types [options]       work-item types of a project (values for --type / type_id)
-  states [options]      work-item states of one (project, type) pair — both are required
-  priorities [options]  work-item priorities of a project
-  sprints [options]     sprints of a project (scrum/hybrid only)
-  help [command]        display help for command
+  types [options]           work-item types of a project (values for --type / type_id)
+  states [options]          work-item states of one (project, type) pair — both are required
+  priorities [options]      work-item priorities of a project
+  sprints [options]         sprints of a project (scrum/hybrid only)
+  relation-types [options]  link types for \`work-item link add\` (organisation-wide, 9 system rows)
+  tags [options]            work-item tags — the only tag enumerator, and it is ORGANISATION-wide
+  help [command]            display help for command
+"
+`;
+
+exports[`project --help > project meta tags (the org-wide vocabulary warning) 1`] = `
+"Usage: pingcode project meta tags [options]
+
+work-item tags — the only tag enumerator, and it is ORGANISATION-wide
+
+Options:
+  --project <name|id>  project name or id (required by the API, but see below)
+  --name <text>        name SUBSTRING, case-insensitive — a search, not an exact match
+  -h, --help           display help for command
+
+Read this before using an id from here.
+--project is REQUIRED by the endpoint and then IGNORED by it: three different
+projects returned byte-identical lists (verified live 2026-08-04). So what you get
+is every tag in the organisation, not this project's.
+Tags are nevertheless project-scoped where it counts: \`work-item tag add\` refuses a
+tag belonging to another project with "'tag'资源不存在", which reads as though the
+tag did not exist. It does — it is simply not this project's. There is no endpoint
+that lists only a given project's tags, so the reliable way to find a usable id is
+to read the tags[] of a work item in that project (\`work-item get\`).
+Names are not unique either: several projects each define their own 后端 / 前端.
+This is also why \`pingcode resolve\` has no work-item-tag kind — a cached resolver
+would hand back ids the write refuses.
+
 "
 `;
 
@@ -159,7 +256,8 @@ Options:
   -h, --help                        display help for command
 
 Commands:
-  list [options]                    list work items of a project
+  list [options]                    list work items of a project (some filters switch to the search
+                                    endpoint)
   get [options] <work-item>         show one work item
   create [options]                  create a work item (ids are project-scoped: run \`pingcode
                                     project meta\` first)
@@ -167,11 +265,194 @@ Commands:
                                     replace
   transition [options] <work-item>  move a work item to another state (workflow-validated by the
                                     server)
+  bulk-update [options]             set ONE property on many work items in a single call
+  delete [options] <work-item>      delete a work item — recoverable from the recycle bin in the
+                                    web UI
+  link                              typed links between two WORK ITEMS (blocks, duplicates,
+                                    relates, …)
+  tag                               标签 tags on a work item (add / get / remove)
+  history                           流转记录 the STATE history of a work item (read-only)
   relation                          关联 cross-kind links of a work item (principal_type=work_item)
   comment                           评论 comments on a work item (principal_type=work_item)
   attachment                        附件 attachments of a work item (principal_type=work_item)
   activity                          活动记录 audit trail of a work item (principal_type=work_item)
   help [command]                    display help for command
+"
+`;
+
+exports[`project --help > project work-item bulk-update (the widest new flag set, and the ignored properties) 1`] = `
+"Usage: pingcode project work-item bulk-update [options]
+
+set ONE property on many work items in a single call
+
+Options:
+  --id <ref>            work item to change, repeatable: id, short_id, identifier or URL
+  --project <name|id>   scope for resolving --state / --priority by NAME
+  --type <name|id>      work-item type, needed with --state <name>
+  --assignee <name|id>  new assignee
+  --assignee-id <id>    new assignee, given as an id
+  --priority <name>     new priority (needs --project)
+  --priority-id <id>    new priority, given as an id
+  --title <text>        new title — the same title for every work item
+  --description <text>  new description — the same one for every work item
+  --property <name>     any other property_name, for a property this CLI has no flag for
+  --value <json>        the value for --property: JSON if it parses, otherwise the raw string
+  --state <name>        new state, resolved by name (requires --type)
+  --state-id <id>       new state, given as an id (no lookup, no --type needed)
+  -h, --help            display help for command
+
+The endpoint takes ONE property_name and ONE value, so exactly one of --assignee /
+--assignee-id / --state / --state-id / --priority / --priority-id / --title /
+--description / --property must be given. Two properties need two calls.
+Verified to work upstream: assignee_id, state_id, priority_id, title, description.
+Verified ACCEPTED AND SILENTLY IGNORED (HTTP 200, "updated 0"): sprint_id — so a
+bulk move into a sprint is NOT possible, use \`work-item update --sprint\` per item —
+and also type_id, version_ids, tag_ids, participant_ids, properties, bug_type_id,
+entry_id, swimlane_id, phase_id. parent_id and board_id are refused outright.
+--property is the escape hatch for anything not listed; it is not validated, and a
+property the server ignores still answers 200, so always read the "updated" count.
+Other live facts worth knowing before scripting this:
+  - it is BEST EFFORT, not atomic: an unknown id is skipped silently and the rest
+    still land (the sprint/release bulk creates are atomic — do not generalise);
+  - the change appears in NO activity record, unlike the single-item update, so it
+    is invisible to an audit;
+  - the ids may span projects, which is why --state / --priority by name need
+    --project: their ids are project-scoped and one batch may not share a project;
+  - each --id costs one read, because the endpoint accepts real ids only.
+
+"
+`;
+
+exports[`project --help > project work-item delete (the first refined DELETE in pjm) 1`] = `
+"Usage: pingcode project work-item delete [options] <work-item>
+
+delete a work item — recoverable from the recycle bin in the web UI
+
+Arguments:
+  work-item   id, short_id, identifier such as SCR-5, or a pasted URL
+
+Options:
+  --yes       confirm: the item leaves every list, sprint and board immediately
+  -h, --help  display help for command
+"
+`;
+
+exports[`project --help > project work-item history (state changes only) 1`] = `
+"Usage: pingcode project work-item history [options] [command]
+
+流转记录 the STATE history of a work item (read-only)
+
+Options:
+  -h, --help                              display help for command
+
+Commands:
+  list [options] <work-item>              list the state changes of a work item
+  get [options] <work-item> <history-id>  show one state change
+  help [command]                          display help for command
+
+State changes only. A title, assignee or sprint change is not here — that is the
+\`activity\` subgroup, which is the free-form audit feed. Every work item has one row
+from creation, with FROM shown as (new).
+A bulk update (\`work-item bulk-update\`) appears in NEITHER feed, verified live: it
+changes the record without recording that it did.
+
+"
+`;
+
+exports[`project --help > project work-item link (link vs relation is in the group help) 1`] = `
+"Usage: pingcode project work-item link [options] [command]
+
+typed links between two WORK ITEMS (blocks, duplicates, relates, …)
+
+Options:
+  -h, --help                              display help for command
+
+Commands:
+  list [options] <work-item>              list the work items linked to this one
+  get [options] <work-item> <link-id>     show one link — the work item in the path is checked,
+                                          unlike a release
+  add [options] <work-item>               link this work item to another one, with a type
+  delete [options] <work-item> <link-id>  remove a link — both directions go at once
+  help [command]                          display help for command
+
+Use \`link\` for work item ↔ work item and \`relation\` for work item ↔ anything else:
+the cross-kind /v1/relations family refuses two work items, and this one accepts
+nothing but work items. Only this family has a type.
+List the types with \`pingcode project meta relation-types\`. --relation takes the
+localized name (关联), the stable category slug (relate) or the id; the slug is the
+safest, because the ids differ per tenant.
+The server keeps the INVERSE edge in step: adding "block" here adds "blocked_by"
+there, and deleting either side removes both. The two sides have DIFFERENT link
+ids, so delete the one \`link list\` printed for the work item you are on.
+Links may cross projects, and a work item can be linked to itself (the API allows
+it; nothing here stops you).
+
+"
+`;
+
+exports[`project --help > project work-item list (the two transports and their different filters) 1`] = `
+"Usage: pingcode project work-item list [options]
+
+list work items of a project (some filters switch to the search endpoint)
+
+Options:
+  --project <name|id>      project name or id
+  --type <name|id>         work-item type
+  --assignee <name|id>     assignee: display name, username, email or id
+  --sprint <name|id>       sprint (scrum/hybrid projects only)
+  --parent <ref>           only children of this work item: id, short_id, identifier or URL
+  --keywords <text>        fuzzy search over title and description
+  --unassigned             (search) only work items with no assignee
+  --title-contains <text>  (search) substring of the title
+  --created-after <date>   (search) created on or after this DATE (00:00 local)
+  --created-before <date>  (search) created on or before this DATE (23:59 local)
+  --updated-after <date>   (search) updated on or after this DATE
+  --updated-before <date>  (search) updated on or before this DATE
+  --page <n>               page index, 0-based (default: "0")
+  --page-size <n>          rows per page, 1-100 (default: "30")
+  --all                    walk every page (best effort: the API guarantees no ordering)
+  --limit <n>              stop after this many rows with --all (default: "500")
+  --state <name>           filter by state, resolved by name (requires --type)
+  --state-id <id>          filter by state, given as an id (no lookup, no --type needed)
+  -h, --help               display help for command
+
+Flags marked (search) can only be expressed by POST /v1/pjm/work_items/search, so
+passing any of them switches this command to that endpoint. Paging, --all and the
+reported total behave identically on both transports (verified live 2026-08-04), so
+the switch is invisible except for which filters are available.
+The two endpoints do filter on different things. Search cannot filter by
+identifier, short_id or bug type at all; the simple list cannot filter by date,
+title text or "unassigned". Everything else works in both.
+
+"
+`;
+
+exports[`project --help > project work-item tag (the missing list is in the group help) 1`] = `
+"Usage: pingcode project work-item tag [options] [command]
+
+标签 tags on a work item (add / get / remove)
+
+Options:
+  -h, --help                             display help for command
+
+Commands:
+  add [options] <work-item>              add a tag to a work item
+  get [options] <work-item> <tag-id>     show one tag of a work item (there is no list — see above)
+  delete [options] <work-item> <tag-id>  remove a tag from a work item (the tag itself survives)
+  help [command]                         display help for command
+
+There is no \`tag list\`: the API has no collection GET here (only add, get-one and
+remove), so read the tags[] field of \`work-item get\` instead. Enumerate the
+vocabulary with \`pingcode project meta tags --project <p>\`.
+Tags are PROJECT-scoped on the write side but the vocabulary list is org-wide, so
+most ids it prints belong to other projects and are refused here with
+"'tag'资源不存在". If that happens, the tag exists — it just is not this project's.
+Tag names are not unique either, so --tag <name> can be ambiguous; --tag-id always
+works.
+A second remove is safe HERE — this leaf reads the tag first, so it fails cleanly with
+"工作项不包含此标签". The raw endpoint answers HTTP 500 to a repeat DELETE, so reach it
+through \`pingcode api DELETE\` only if you are ready for that.
+
 "
 `;
 
