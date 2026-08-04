@@ -22,6 +22,8 @@ Start here:
 - **No network in unit tests.** `fetch` is injected through `Ctx`.
 - **API facts are recorded in `research/`, never assumed.** When reality contradicts the docs, update
   the research file and `design.md` rather than quietly patching a call site.
+- **When the published docs and the live API disagree, the live API wins** — and the disagreement gets
+  written down, never dropped. See [Catalog Drift](./catalog-drift.md).
 
 ---
 
@@ -34,6 +36,7 @@ Start here:
 | [Error Handling](./error-handling.md) | Error hierarchy, the exit-code contract, status-first + `code`-override mapping | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Forbidden/required patterns, testing policy, API-fact discipline | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | The stdout/stderr contract, log levels, redaction | Filled |
+| [Catalog Drift](./catalog-drift.md) | The generated endpoint catalog: the weekly drift check, who resyncs, and how a docs-vs-live conflict is judged | Filled |
 
 There is **no frontend** in this project; see [`../frontend/index.md`](../frontend/index.md).
 
