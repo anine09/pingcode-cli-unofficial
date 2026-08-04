@@ -358,3 +358,22 @@ sharper write path.
     deduplicating, and an omitted `--executor` leaves the run **unassigned** — it is not defaulted
     to the creator. When you are adding several cases and some may already be there, prefer
     `runs bulk-create`: it lands the new ones and reports the duplicates instead of failing the call.
+
+## 5. Deliberately left to `pingcode api`
+
+Reachable, just not as named commands — say that rather than reporting a limitation:
+
+| Left out | Why | Reach it with |
+|---|---|---|
+| library **members** (4 endpoints) | no command needs library membership: `--executor` and `--assignee` resolve against the organisation directory | `pingcode api GET /v1/testhub/libraries/<id>/members` |
+| library **update** | exists upstream and cannot clear a field; renaming a library is rare enough not to earn a leaf (rule 15) | `pingcode api PATCH /v1/testhub/libraries/<id> --set name="…"` |
+| case-module (**suite**) writes | the suite tree is read to resolve `--suite`; editing it is a configuration act | `pingcode api list --module testhub --search suites` |
+| plan **delete** | no test plan DELETE exists upstream at all | — |
+| every configuration **write** (case states, types, property schemes) | tenant configuration, and a wrong write is felt by everyone in the library | `pingcode api list --module testhub --search plans` |
+| `PUT /v1/testhub/runs/{run_id}` | full replacement, and documented to blank the executor when the field is omitted — `runs patch` covers the same ground without that risk | `pingcode api PUT /v1/testhub/runs/<id>` |
+| `GET /v1/testhub/cases` and `GET /v1/testhub/runs` (the simple lists) | unfiltered they scan every library the token can see; `POST …/search` is the only sane read path, and it is what `cases list` / `runs list` use | `pingcode api GET /v1/testhub/cases` |
+| `GET /v1/testhub/plan_states/{state_id}` | the *list* (`meta plan-states`) is wired and is the only thing a plan write needs | `pingcode api GET /v1/testhub/plan_states/<id>` |
+
+Library and plan **creation** *are* covered (`testhub libraries create`, `testhub plans create`), so
+the CLI can bootstrap its own fixtures — but read rules 13–15 first: only the plain (普通) plan type is
+reachable without a sprint or release, and a library cannot be deleted afterwards.

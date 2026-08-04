@@ -21,28 +21,43 @@ description: >-
 
 `pingcode` is a command-line client for the PingCode Open API. Its top level mirrors PingCode's own
 GUI modules: **`product`** (产品管理 / ship — products, requirements/需求, tickets/工单),
-**`project`** (项目管理 / pjm — projects and work items), **`testhub`** (测试管理 — test libraries,
-cases, plans and runs), **`scm`** (源码管理 — code hosting data), **`build`** and **`release`**
-(构建与部署 — CI build and deployment records), **`settings`** (后台设置 — the organisation
-directory) and **`auth`** (the CLI's own local credentials).
+**`project`** (项目管理 / pjm — projects, work items, sprints, releases), **`testhub`** (测试管理 —
+test libraries, cases, plans and runs), **`scm`** (源码管理 — code hosting data), **`build`** and
+**`release`** (构建与部署 — CI build and deployment records), **`settings`** (后台设置 — the
+organisation directory) and **`auth`** (the CLI's own local credentials).
 
 `scm`, `build` and `release` are the DevOps **write-back** surface: a CI/CD job tells PingCode what
 happened, and PingCode links it to work items. None of the three reads your git server or your
 pipeline.
+
+**Two layers, and knowing which one you are on saves you a retry loop.** Every one of the **459**
+documented `/v1` endpoints is callable through **`pingcode api`** — same auth, paging, `--dry-run`,
+redaction and exit codes as anything else. **158** of them also have a named command with flags,
+name→id resolution and a table. So: if a named command exists, use it; if it does not, the answer is
+almost never "the CLI cannot do that" — it is `pingcode api list --search <word>` and then
+`pingcode api <METHOD> <path>`. Only 7 endpoints are genuinely out of reach (they need a user token;
+see [`modules/api.md`](modules/api.md)).
 
 Each business module owns its resources *and* its id lookups, so a module's whole surface is one
 `--help` away:
 
 ```
 auth      login status logout
+api       GET|POST|PATCH|PUT|DELETE <path> · list · describe
+resolve   list · <kind> <name>
 product   list get · idea … · ticket … · plan … · meta …
-project   list get · work-item … · meta …
+project   list get create update progress · work-item … · sprint … · version … · member … · meta …
 testhub   libraries … · cases … · plans … · runs … · meta …
 scm       platform … · platform-user … · repo … · branch … · commit … · ref … · pr … · review …
 build     list get create update delete
 release   env … · deploy …
 settings  users
 ```
+
+Four cross-object families — `relation`, `comment`, `attachment`, `activity` — are mounted under
+five entities (`product idea`, `product ticket`, `project work-item`, `testhub cases`,
+`testhub runs`), so e.g. `pingcode project work-item comment add SCR-5 --text "…"`. See
+[`modules/crosscutting.md`](modules/crosscutting.md).
 
 Everything below assumes `pingcode` is on `PATH` (`npm run build` produces `dist/bin/pingcode.js`).
 
@@ -168,6 +183,9 @@ from every URL, log line, dry-run plan and error message it emits.
 - `--dry-run` on a mutating command prints `{"dry_run":true,"request":{…}}` to stdout and exits 0
   without sending anything. Read requests still run, so ids are really resolved.
 - Errors in `--json` mode go to **stderr** as `{"error":{"kind":…,"message":…,"code":…,"exit":…}}`.
+- **`pingcode api` is the exception to the shapes above**: stdout is the API's raw JSON, so `--json`
+  is a no-op on its five verbs and no key is normalised away. Its own `api list` / `api describe` are
+  local catalog views and do honour `--json`.
 - Global flags (`--host`, `--json`, `--dry-run`, `--no-cache`, `--verbose`) may appear before or
   after the subcommand.
 
@@ -198,10 +216,10 @@ one file per module, so a module can be revised without touching this one:
 
 | Module | File | Covers |
 |---|---|---|
-| 项目管理 pjm | [`modules/pjm.md`](modules/pjm.md) | `project list/get`, `project meta …`, `project work-item …` |
+| 项目管理 pjm | [`modules/pjm.md`](modules/pjm.md) | `project list/get/create/update/progress`, `project meta …`, `project work-item …` (incl. `link` / `tag` / `history`), `project sprint …`, `project version …`, `project member …`, and the pjm-only rules |
 | 产品管理 ship | [`modules/ship.md`](modules/ship.md) | `product list/get`, `product meta …`, `product idea …`, `product ticket …`, `product plan …` (需求排期, read-only), and the ship-only traps |
 | 测试管理 testhub | [`modules/testhub.md`](modules/testhub.md) | `testhub libraries/cases/plans/runs/meta …`, and the testhub-only traps |
-| 源码管理 scm | [`modules/scm.md`](modules/scm.md) | `scm platform …`, `scm platform-user …`, `scm repo …` — the DevOps write-back surface, 企业令牌 only |
+| 源码管理 scm | [`modules/scm.md`](modules/scm.md) | `scm platform …`, `platform-user …`, `repo …`, `branch …`, `commit …`, `ref …`, `pr …`, `review …` — the DevOps write-back surface, 企业令牌 only |
 | 构建与部署 | [`modules/cicd.md`](modules/cicd.md) | `build …` (CI build records) and `release env …` / `release deploy …` (deploy targets and deployments), 企业令牌 only |
 | 跨对象资源 | [`modules/crosscutting.md`](modules/crosscutting.md) | `relation` / `comment` / `attachment` / `activity`, mounted under work items, ideas, tickets, cases and runs |
 | 通用逃生舱 | [`modules/api.md`](modules/api.md) | `api GET/POST/PATCH/PUT/DELETE <path>` for every documented endpoint, plus `api list` / `api describe` |
@@ -257,23 +275,27 @@ The refined commands (`project meta …`, `product meta …`, `testhub meta …`
 directly, so `resolve` is mainly for feeding the generic layer.
 ## 4. Rules that will bite you
 
-1. **Resolve ids per project.** Run `pingcode project meta types` / `project meta states` for the project you are
-   writing to before `create`. An id from another project is rejected or, worse, silently wrong.
-2. **`--state <name>` always requires `--type`.** States live in a `(project, work item type)` pair,
-   and the API does **not** report a work item's type, so the CLI cannot infer it — not on `list`, not
-   on `create`, and not on `update`/`transition` either. Either pass `--type <name|id>` alongside
-   `--state <name>`, or skip the lookup entirely with `--state-id <id>`. `--state` and `--state-id`
-   are mutually exclusive.
-3. **`update` replaces, it does not merge.** Every field you pass overwrites the stored value, and
+These hold in **every** module. The rules that apply to one module only — pjm's
+`--state` needs `--type`, ship's product scoping, testhub's library scoping, scm's platform hop —
+live in that module's file, because there is no way to state them once and have them be true.
+
+1. **Resolve ids under the right parent first.** Ids are scoped: to a **project** in pjm, a
+   **product** in ship, a **test library** in testhub, a **hosting platform** in scm. The same state
+   name is a different id under a different parent, so run that module's `meta` lookup (or
+   `pingcode resolve <kind> <name> --parent <id>`) before a write. Never validate an id's shape: they
+   are 24-hex, 32-hex **or** bare slugs (`task`, `story`, `bug`).
+2. **`update` replaces, it does not merge.** Every field you pass overwrites the stored value, and
    array fields and `properties` objects are replaced wholesale rather than merged. Read the item
    first if you need to preserve anything.
-4. **There is no way to clear a field.** Only the fields you pass are sent; the CLI has no
+3. **There is no way to clear a field.** Only the fields you pass are sent; the CLI has no
    `--clear-<field>`.
-5. **An update with no fields is exit 2**, not a no-op.
-6. **State changes are workflow-validated** by the server: the target state must belong to the type's
-   state scheme and a legal transition must exist from the current state. On rejection the CLI prints
-   the server message plus the states configured for that type on stderr — but only if you passed
-   `--type`, since the candidate lookup needs it too.
+4. **An update with no fields is exit 2**, not a no-op.
+5. **A 200 is not proof the field landed.** This API accepts unknown body fields, several read-only
+   fields, and whole unsupported properties, with a 200 and no warning. Where the CLI knows about a
+   specific case it refuses or warns on stderr; otherwise read the object back.
+6. **Every `delete` needs `--yes`, and every `PUT` needs `pingcode api`.** No named command issues a
+   `PUT`: it is full replacement and this API never documents what an omitted field does. See
+   [`modules/api.md`](modules/api.md).
 7. **No endpoint supports sorting.** Neither the CLI nor the API can order results. Sort what you
    collected yourself, and remember that offset paging over unordered, changing data can duplicate or
    skip rows.
@@ -281,16 +303,24 @@ directly, so `resolve` is mainly for feeding the generic layer.
    at `--limit` (default 500), and gives up if the API stops honouring `page_index`.
 9. **Rate limit is 200 requests per minute per token.** Prefer one `--page-size 100` call over many
    small ones, let the metadata cache work, and do not loop `--all` over large projects casually.
-10. **Timestamps are unix seconds.** `--start-at` / `--end-at` accept `1730000000` or `2026-01-31`
-    (parsed as UTC midnight).
+10. **Timestamps are unix seconds.** Date flags accept `1730000000` or a calendar date — but read the
+    flag's own `--help`, because the families differ on purpose: `project --start-at` stores the
+    instant verbatim, while `project sprint` / `project version` / `testhub plans` snap `--start` to
+    `00:00:00` and `--end` to `23:59:59` of the date given.
+
 ## 5. Agent workflow
 
+0. **Decide which layer you are on.** If the task maps onto a named command, use it. If it does not,
+   do not conclude the CLI cannot help: `pingcode api list --search <word> --json` finds the endpoint,
+   `pingcode api describe <id>` prints its fields, scope and warnings, and `pingcode resolve <kind>
+   <name> --json` turns a name into the id `api` needs. Never invent a command path — if you are
+   unsure it exists, run its `--help`.
 1. `pingcode auth status` — if it reports no token, ask the user for credentials (§1) instead of
    guessing.
 2. Resolve the parent scope: `pingcode project list --json` for work items,
-   `pingcode product list --json` for ideas and tickets, or `pingcode testhub libraries list --json`
-   for cases, plans and runs.
-3. Resolve ids:
+   `pingcode product list --json` for ideas and tickets, `pingcode testhub libraries list --json`
+   for cases, plans and runs, or `pingcode scm platform list --json` for anything under `scm`.
+3. Resolve ids — each module's file has the full list; the short version:
    - pjm: `pingcode project meta types --project <p> --json`, then
      `project meta states --project <p> --type <t> --json`. Keep the type around: you need it again for
      `--state <name>` on any write.
@@ -304,32 +334,55 @@ directly, so `resolve` is mainly for feeding the generic layer.
      --library <l> --json` first, since `--type` on `plans create` comes from there. If the tenant
      has no usable library at all, `pingcode testhub libraries create` is the bootstrap; read
      [`modules/testhub.md`](modules/testhub.md) §4c rule 15 first, because it cannot be undone.
+   - scm / CI: resolve the platform, then the repo (`pingcode scm repo list --platform <p> --json`);
+     branch ids are needed as *ids* by `scm pr create`, and work items are linked by
+     **identifier** (`PLM-1`), never by id.
 4. Read before writing: `pingcode project work-item get <ref> --json`, `pingcode product idea get <ref> --json`,
    `pingcode product ticket get <ref> --json` or `pingcode testhub cases get <ref> --json` — and for a
    step-level run edit, read the run's steps first, because `--step` must cover all of them.
 5. For any mutation, run it with `--dry-run --json` first, show the plan, get confirmation, then run
-   it again without `--dry-run`. Remember that **nothing in ship can be deleted**, so say so before
-   creating anything.
-6. Always pass `--json` and parse stdout only; read stderr for warnings.
-7. On exit 2 read the message — it names the flag, the ambiguous name, or the states a ticket can
-   actually move to. On exit 3 re-authenticate. On exit 6 wait a minute rather than retrying
-   immediately.
+   it again without `--dry-run`. Say what cannot be undone *before* creating it: **nothing in ship can
+   be deleted**, a project or sprint can never be deleted, a test library cannot be deleted, and
+   `scm` has no DELETE except branches.
+6. Always pass `--json` and parse stdout only; read stderr for warnings. Remember that
+   `pingcode api` prints the API's raw JSON regardless, and that a missing key means null *or* empty.
+7. On exit 2 read the message — it names the flag, the ambiguous name, the states a ticket can
+   actually move to, or the nearest documented paths. On exit 3 re-authenticate. On exit 4 name the
+   scope from `api describe`. On exit 6 wait a minute rather than retrying immediately.
 
-## 6. Not covered
+## 6. What has no named command
 
-Wiki spaces and pages, ship customers and external users, product tags, product/suite/member writes,
-`POST /v1/relations` (the ship↔pjm link), departments and groups, workloads, comments and
-attachments, Insight/Goals/Flow/Plan, and webhooks. PingCode has no REST API for webhooks at all —
-they are configured in PingCode Flow's UI.
+**Nothing on this list is out of reach** — it has no *refined* command, which means the answer is
+`pingcode api`, not "the CLI cannot". Say that to the user rather than declaring a limitation.
 
-Inside testhub, this version deliberately leaves out: case **deletion** (irreversible, with no
-undelete), library **update** and the four library-member endpoints, case-module (suite) writes,
-plan **update** and **delete**, `POST /v1/testhub/runs` and `PUT /runs/{id}` (documented to blank the
-executor when the field is omitted — untested and not worth testing), every configuration write, the
-case/run history reads, and the case-property lookup. Library and plan *creation* **are** covered
-(`testhub libraries create`, `testhub plans create`), so the CLI can bootstrap its own fixtures; only
-iteration and release plan types are out of reach, for the reason in
-[`modules/testhub.md`](modules/testhub.md) §4c rule 14.
+| Area | Named commands | How to reach it |
+|---|---|---|
+| Wiki spaces and pages (19 endpoints) | none | `pingcode api list --module wiki`, then `api GET/POST/PATCH`. **`DELETE /v1/wiki/pages/{id}` has no recovery path** — never run it speculatively |
+| 组织架构 beyond `settings users`: departments, teams, roles, jobs (22) | none | `pingcode api GET /v1/directory/departments` etc. |
+| 工时 worklogs and worklog types (7) | none | `pingcode api GET /v1/workloads` |
+| 评审 reviews (8) and 关注人 participants/followers (4) | none | `pingcode api GET /v1/reviews`, `api GET /v1/participants` — note `scm review` is a *different* resource |
+| 权限 permission views (7) | none | 6 of the 7 need a user token and are refused; `pingcode api GET /v1/permission/points` works |
+| 安全日志 login / audit logs (2) | none | `pingcode api GET /v1/security/audit_logs` |
+| Nexus / CES app storage (5) | none | `pingcode api list --module nexus` |
+| pjm 工作项配置 schemes (42) and 看板 boards (15) | only the project-scoped read lookups, as `project meta …` | `pingcode api list --module pjm --search 工作项配置` |
+| ship customers, external users, product tags, suite and member writes | none | `pingcode api list --module ship` |
+| all 10 `PUT` endpoints | none, on purpose | `pingcode api PUT …` — read the warning in [`modules/api.md`](modules/api.md) first |
+
+Genuinely unavailable, as opposed to merely unrefined:
+
+- **Webhooks.** PingCode has no REST API for them at all; they are configured in PingCode Flow's UI.
+- **Insight / Goals / Flow.** No API surface.
+- **The 7 user-token endpoints** (`/v1/myself`, `/v1/permission/my/*`, `/v1/permission/check/*`) —
+  they need the OAuth2 authorization-code flow, which this CLI does not implement. They are refused
+  before any request, with an explanation.
+- **Uploading a file as an attachment.** Only the JSON code-snippet form of `POST /v1/attachments`
+  exists; the `multipart/form-data` form is not expressible in either layer. See
+  [`modules/crosscutting.md`](modules/crosscutting.md).
+
+A module file also records the omissions *inside* that module and how to reach them — testhub's are a
+section of its own in [`modules/testhub.md`](modules/testhub.md) §5, and every other module states
+them inline next to the family they belong to. If a module document does not mention something, check
+`pingcode api list --module <m>` before telling the user it is impossible.
 
 ## 7. Installing this skill elsewhere
 

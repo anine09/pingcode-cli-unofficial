@@ -83,6 +83,17 @@ pingcode project meta tags --project "Mobile App" --json
 `pingcode project meta states` requires **both** a project and a type — that is an API constraint, not a CLI
 choice.
 
+**`--state <name>` therefore always requires `--type`, everywhere in this module.** States live in a
+`(project, work item type)` pair and the API does **not** report a work item's type, so the CLI cannot
+infer it — not on `list`, not on `create`, and not on `update` / `transition` either. Either pass
+`--type <name|id>` alongside `--state <name>`, or skip the lookup entirely with `--state-id <id>`.
+`--state` and `--state-id` are mutually exclusive.
+
+**State changes are workflow-validated by the server**: the target state must belong to the type's
+state scheme *and* a legal transition must exist from the current state. There is no local
+pre-check — on rejection the CLI prints the server's message plus the states configured for that
+type on stderr, but only if you passed `--type`, since listing the candidates needs it too.
+
 Lookups are cached under `~/.pingcode/cache/` for 24 hours. Use `--no-cache` if a project was
 reconfigured and an id looks stale.
 
