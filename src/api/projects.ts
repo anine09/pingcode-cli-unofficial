@@ -5,6 +5,8 @@ import type { Page, PageRequest, PaginateOptions } from '../core/paginate';
 import type {
   BulkCreateResult,
   Project,
+  ProjectMember,
+  ProjectProgress,
   ProjectType,
   ProjectVersion,
   Sprint,
@@ -15,6 +17,8 @@ import {
   iterateOf,
   parseBulkCreateResult,
   parseProject,
+  parseProjectMember,
+  parseProjectProgress,
   parseProjectVersion,
   parseSprint,
 } from './parse';
@@ -78,6 +82,164 @@ export async function getProject(
 export async function verifyAccess(ctx: Ctx): Promise<number> {
   const page = await listProjects(ctx, {}, { pageSize: 1, pageIndex: 0 });
   return page.total;
+}
+
+/**
+ * Required: `type`, `name`, `identifier` — and the API defaults nothing else.
+ *
+ * Live notes, 2026-08-04 (design D16):
+ *
+ *  - `type` is `scrum | kanban | waterfall | hybrid`; a bad value is 400 `100003`. It
+ *    selects a 项目流程 automatically, so `process_id` is only needed to pick a
+ *    non-default template (`pingcode api GET /v1/pjm/processes`).
+ *  - `identifier` must be **uppercase and short** — lowercase, spaces and long values
+ *    are all 400 `100335` `'project'标识的格式不正确` — and unique (400 `100336`). It
+ *    is also the prefix of every work-item key in the project, and it *is* patchable
+ *    afterwards.
+ *  - `visibility` defaults to `private` and can never be changed again: a
+ *    `PATCH {visibility}` is accepted and silently dropped.
+ *  - `start_at` / `end_at` are **verbatim instants**, not snapped to whole days the way
+ *    a sprint's and a release's are (design D15.4).
+ *  - `assignee_id` need not name a member, and naming one does **not** add them.
+ *  - ⚠️ **there is no project DELETE and no way to archive one** ([S§3.8.1]; the
+ *    undocumented `is_archived` in a patch body is dropped). Every project created here
+ *    is permanent.
+ */
+export type CreateProjectInput = {
+  type: string;
+  name: string;
+  identifier: string;
+  description?: string | undefined;
+  /** 项目流程 template id; omitted, `type` picks the matching system process. */
+  process_id?: string | undefined;
+  /** `private | public`. Not patchable afterwards. */
+  visibility?: string | undefined;
+  scope_type?: 'organization' | 'user_group' | undefined;
+  scope_id?: string | undefined;
+  /** Verbatim unix seconds. */
+  start_at?: number | undefined;
+  end_at?: number | undefined;
+  assignee_id?: string | undefined;
+  /** Initial members. Each entry needs both keys. */
+  members?: readonly { id: string; type: string }[] | undefined;
+};
+
+/**
+ * Any subset, and genuinely partial — verified by read-back.
+ *
+ * `visibility`, `is_archived`, `type` and `process_id` are **not** in this list because
+ * sending them is accepted and dropped, which is the API-wide treatment of an
+ * undocumented key (design D11.3). An empty body answers 200 and changes nothing, so
+ * the command layer refuses it as a `UsageError` first.
+ */
+export type UpdateProjectInput = {
+  name?: string | undefined;
+  /** Uppercase, short, unique — and it renames every work-item key in the project. */
+  identifier?: string | undefined;
+  description?: string | undefined;
+  start_at?: number | undefined;
+  end_at?: number | undefined;
+  assignee_id?: string | undefined;
+  /** 项目状态 id from `pingcode api GET /v1/pjm/project/states?project_id=…`. */
+  state_id?: string | undefined;
+  properties?: Record<string, unknown> | undefined;
+};
+
+export async function createProject(ctx: Ctx, input: CreateProjectInput): Promise<Project> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.projects,
+    body: compact({ ...input, members: input.members === undefined ? undefined : [...input.members] }),
+  });
+  return parseProject(raw);
+}
+
+export async function updateProject(
+  ctx: Ctx,
+  projectId: string,
+  patch: UpdateProjectInput,
+): Promise<Project> {
+  const raw = await request<unknown>(ctx, {
+    method: 'PATCH',
+    path: ENDPOINTS.project(projectId),
+    body: compact(patch),
+  });
+  return parseProject(raw);
+}
+
+/**
+ * `GET /v1/pjm/projects/{project_id}/progress` — work-item counts, and **not a list**.
+ *
+ * The catalog marks it `paged: "query"`; live it returns a bare
+ * `{work_item: {total, pending_count, in_progress_count, completed_count}}` and ignores
+ * every paging parameter. There is no sprint, release or workload figure in it.
+ */
+export async function getProjectProgress(ctx: Ctx, projectId: string): Promise<ProjectProgress> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.projectProgress(projectId),
+  });
+  return parseProjectProgress(raw);
+}
+
+/**
+ * Add a member. `member.type` is `user | user_group` (a bad value is 400 `100039`), and
+ * `role_id` defaults to **普通成员** when omitted — the three org roles come from
+ * `pingcode api GET /v1/directory/roles`. A duplicate is 400 `100407`.
+ */
+export type AddProjectMemberInput = {
+  member: { id: string; type: string };
+  role_id?: string | undefined;
+};
+
+export async function addProjectMember(
+  ctx: Ctx,
+  projectId: string,
+  input: AddProjectMemberInput,
+): Promise<ProjectMember> {
+  const raw = await request<unknown>(ctx, {
+    method: 'POST',
+    path: ENDPOINTS.projectMembers(projectId),
+    body: compact(input),
+  });
+  return parseProjectMember(raw);
+}
+
+export async function listProjectMembers(
+  ctx: Ctx,
+  projectId: string,
+  page: PageRequest = {},
+): Promise<Page<ProjectMember>> {
+  return await fetchPageOf(ctx, ENDPOINTS.projectMembers(projectId), {}, page, parseProjectMember);
+}
+
+export function iterateProjectMembers(
+  ctx: Ctx,
+  projectId: string,
+  options: PaginateOptions = {},
+): AsyncGenerator<ProjectMember, void, undefined> {
+  return iterateOf(ctx, ENDPOINTS.projectMembers(projectId), {}, options, parseProjectMember);
+}
+
+/**
+ * One membership. The path takes the **user (or group) id** — a membership row's `id`
+ * *is* that id — and both an unknown id and a real user who simply is not a member
+ * answer 400 `100405` `成员不在项目中`.
+ *
+ * There is no `member remove` leaf in this CLI even though
+ * `DELETE …/members/{member_id}` exists: it is deliberately left to the generic layer
+ * (`pingcode api DELETE … --yes`), which reaches it already — see `modules/pjm.md`.
+ */
+export async function getProjectMember(
+  ctx: Ctx,
+  projectId: string,
+  memberId: string,
+): Promise<ProjectMember> {
+  const raw = await request<unknown>(ctx, {
+    method: 'GET',
+    path: ENDPOINTS.projectMember(projectId, memberId),
+  });
+  return parseProjectMember(raw);
 }
 
 // ---------------------------------------------------------------------------

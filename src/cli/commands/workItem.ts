@@ -25,7 +25,7 @@ import {
   type WorkItemLocator,
 } from '../../core/metadata';
 import { collect } from '../../core/paginate';
-import type { WorkItem } from '../../types/api';
+import type { Ref, WorkItem } from '../../types/api';
 import { addGlobalOptions } from '../globals';
 import { errLine, paint, type Column } from '../output';
 import { addCrosscutting } from './_shared/crosscutting';
@@ -101,17 +101,34 @@ type UpdateFlags = StateFlags & {
 };
 
 /**
- * The live API omits `type` from every work-item payload (research/s8-smoke.md
- * F1), so a state *name* can only be resolved if the user names the type. The
- * flag is never sent: `PATCH` has no `type_id` field.
+ * `--type` used to be mandatory for a state *name* because the CLI believed the API
+ * never reported a work item's type. It does — as a bare slug string, live-verified
+ * 2026-08-04 — so the flag is now an override, needed only when the item cannot be
+ * read first (it never sends a `type_id`: `PATCH` has no such field).
  */
 const TYPE_FLAG_HELP =
-  'work-item type — used only to resolve --state <name> and to list candidate states on rejection; never sent';
+  'work-item type — overrides the type read off the item when resolving --state <name>, and lists candidate states on rejection; never sent';
+
+/**
+ * A work item's `type` is a **slug string** on the wire (`"task"`), not the reference
+ * object every neighbouring field is. Both shapes are read here so no call site has to
+ * know, and the slug doubles as the `work_item_type_id` a state lookup needs.
+ */
+export function typeIdOf(type: Ref | string | undefined): string | undefined {
+  if (typeof type === 'string') return type === '' ? undefined : type;
+  return type?.id;
+}
+
+/** What a table cell or a field block shows: the name if there is one, else the slug. */
+export function typeLabelOf(type: Ref | string | undefined): string {
+  if (typeof type === 'string') return type;
+  return refName(type);
+}
 
 export const WORK_ITEM_COLUMNS: Column<WorkItem>[] = [
   { header: 'IDENTIFIER', value: (item) => item.identifier ?? item.short_id ?? item.id },
   { header: 'TITLE', value: (item) => item.title ?? '', flex: true },
-  { header: 'TYPE', value: (item) => refName(item.type) },
+  { header: 'TYPE', value: (item) => typeLabelOf(item.type) },
   { header: 'STATE', value: (item) => refName(item.state) },
   { header: 'ASSIGNEE', value: (item) => refName(item.assignee) },
   { header: 'END', value: (item) => timestampCell(item.end_at) },
@@ -537,7 +554,7 @@ function printWorkItem(item: WorkItem, ctx: Ctx, verb?: string): void {
       ['identifier', item.identifier ?? item.short_id ?? ''],
       ['id', item.id],
       ['title', item.title ?? ''],
-      ['type', refName(item.type)],
+      ['type', typeLabelOf(item.type)],
       ['state', refName(item.state)],
       ['priority', refName(item.priority)],
       ['assignee', refName(item.assignee)],

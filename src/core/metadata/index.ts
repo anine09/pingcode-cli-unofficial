@@ -68,6 +68,13 @@ export const resolveWorkItemPriority: ScopedResolver = scoped('work_item_priorit
 export const resolveSprint: ScopedResolver = scoped('sprint');
 /** 发布 — the project-scoped release plan, not a wiki revision or a config scheme. */
 export const resolveProjectVersion: ScopedResolver = scoped('pjm-version');
+/**
+ * 工作项关联类型 — org-level, so no parent. Resolves the localized name (关联) or the
+ * stable `category` slug (`relate`) to the per-tenant id that
+ * `POST /v1/pjm/work_items/{id}/relations` needs. There is deliberately **no**
+ * resolver for work-item tags — see the note in `registry.ts`.
+ */
+export const resolveRelationType: RootResolver = root('pjm-relation-type');
 export const resolveUser: RootResolver = root('user');
 
 // ship (产品管理) — the parent is a product
@@ -258,7 +265,14 @@ function locatorOf(raw: unknown): WorkItemLocator {
     shortId: str(record.short_id),
     title: str(record.title),
     projectId: str(refRecord(record.project)?.id),
-    typeId: str(refRecord(record.type)?.id),
+    // A work item reports its `type` as a **bare slug string** (`"task"`), not as a
+    // reference object — live 2026-08-04, contradicting `research/s8-smoke.md` F1,
+    // which recorded the field as absent. Only `refRecord(...)?.id` was read here, so
+    // the type was silently lost and `--state <name>` needed `--type` even though the
+    // item had just told us. The slug *is* the `work_item_type_id` the state lookup
+    // wants (system types use slugs as ids, research §6.8); a custom type reports a
+    // 24-hex id here and works the same way. The object branch stays for safety.
+    typeId: str(record.type) ?? str(refRecord(record.type)?.id),
     stateId: str(state?.id),
     stateName: str(state?.name),
   };

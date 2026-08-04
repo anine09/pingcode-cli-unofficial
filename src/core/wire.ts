@@ -446,6 +446,65 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   //    one bulk batch share a name. A server fault must keep its 500.
   '100308': 'not_found',
   '100304': 'not_found',
+  // S2b (08-02-full-api-coverage) pjm work-item smoke, 2026-08-04, live tenant
+  // (design D16). Three codes, all HTTP **400**, and all three are *composite-key*
+  // absences — the row exists only as a pair, and the pair is what the URL addresses:
+  //   100351 "工作项或工作项关联不存在" — GET **and DELETE**
+  //     /v1/pjm/work_items/{item}/relations/{relation_id}, for an unknown relation id,
+  //     for a relation id that belongs to a **different** work item, and for one that
+  //     was just deleted. Three causes, one code, and every one of them means "there
+  //     is no link at the address given". (The two directions of a link have different
+  //     ids, so addressing one through the other end's item is the common mistake.)
+  //   1003108 "工作项流转记录不存在" — GET
+  //     …/work_items/{item}/transition_histories/{unknown}. Note the **seven** digits,
+  //     like 发布's `1003107`. One verb, one meaning; nothing else answers it.
+  //   100405 "成员不在项目中" — GET **and DELETE**
+  //     …/projects/{project}/members/{member_id}, for an unknown id *and* for a real
+  //     organisation user who simply is not in this project. The membership is the
+  //     resource, so its absence is a not-found however the id was wrong.
+  // Admitted for the reason every row above was: without them a missing link exited 7
+  // while a missing work item exited 5 (`100317`), for the same mistake in the same
+  // module. The precedent for the pair-shaped ones is S1c's `100222`, which was
+  // admitted precisely because "a review id that exists but hangs off a different pull
+  // request really is not at the address given".
+  //
+  // Deliberately **not** mapped, from the same smoke — five of them, and the first is
+  // the one worth reading:
+  //  - `100354` (`'tag'资源不存在`) on POST …/work_items/{id}/tags. **This is `100300`
+  //    all over again** (S2a's most valuable veto): the tag it calls missing is one the
+  //    user is looking at, because `GET /v1/pjm/work_item/tags?project_id=` returns the
+  //    whole organisation's tags regardless of the project asked for, while the write
+  //    accepts only the ones belonging to the work item's own project. Live: all 23
+  //    listed tags were refused for a work item in one project and two of them were
+  //    accepted for a work item in another. Exit 5 would send an agent hunting for a
+  //    row `project meta tags` had just printed. The command layer explains the real
+  //    cause instead.
+  //  - `100357` (`工作项不包含此标签`) on GET …/tags/{tag_id}. This one is genuinely an
+  //    absence of the pair, and it *would* qualify on the `100405` reasoning — but the
+  //    matching **DELETE** answers HTTP **500** `100000` for the same situation
+  //    (removing a tag twice), so a mapping would make the same mistake exit 5 on a
+  //    read and 7 on a write. Reporting one of the two honestly and the other not is
+  //    worse than leaving both on 7; the asymmetry is documented in `tag delete --help`
+  //    instead. Revisit if the 500 is ever fixed.
+  //  - `100350` (`工作项关联已经存在`) and `100352` (`'tag'资源已经存在`) and `100407`
+  //    (`成员已经在项目中`) — uniqueness conflicts, judged exactly as `100220` /
+  //    `100343` / `100105` were.
+  //  - `100043` (`不支持使用过滤条件 filter.X`), `100044`
+  //    (`过滤条件 filter.X 缺少有效的操作符` / `不支持操作符: in`), `100335`
+  //    (`'project'标识的格式不正确`), `100336` (`'project'标识已经存在`), `100001`
+  //    (`'relation_type'格式不正确`) and `100039` (`member.type 必须是一个枚举值`) — input
+  //    validation. The first two are *useful* input validation: `100043` names the
+  //    offending filter path, which is how the search vocabulary in `endpoints.ts` was
+  //    enumerated rather than guessed.
+  //  - `100300` (`'project'资源不存在`) — reaffirmed **not** mapped. S2b met it three
+  //    more times (an unknown project on `…/progress`, on
+  //    `work_item/tags?project_id=` and on `PATCH /projects/{id}`) where it really does
+  //    mean "no such project", but S2a proved it also fires for a project that plainly
+  //    exists (a kanban project refusing a sprint create), and one code cannot be two
+  //    answers.
+  '100351': 'not_found',
+  '1003108': 'not_found',
+  '100405': 'not_found',
 };
 
 const NOT_FOUND_HINT =

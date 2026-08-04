@@ -77,6 +77,76 @@ const TABLE = {
 
   work_item_priority: { label: 'priority', path: ENDPOINTS.workItemPriorities, ...PROJECT_SCOPED },
 
+  /**
+   * 工作项关联类型 — the vocabulary `POST /v1/pjm/work_items/{id}/relations` cannot be
+   * called without, and the **only** row S2b adds.
+   *
+   * It passes all four tests a row is judged by, which is unusual — most candidates fail
+   * one:
+   *
+   *  - **no parent.** `GET /v1/pjm/work_item/relation_types` takes no parameters at all,
+   *    so the single `parent` slot `ResolverSpec` offers is not even needed. Same shape
+   *    as `release-env` and `scm-platform`.
+   *  - **the names are unique**, and so are the `category` slugs: nine rows, 被阻塞 /
+   *    阻塞 / 结果 / 原因 / 重复 / 关联 / 副本 / 拷贝 / 提及 (live 2026-08-04, matching
+   *    F5's table exactly).
+   *  - **it is configuration, and about as static as configuration gets**: all nine rows
+   *    report `is_system: 1`, so a 24 h cache cannot go stale in any way that matters.
+   *  - **no server-side name filter to be tempted by** — the endpoint has no query
+   *    parameters, so the whole (nine-row) list is loaded and a failed lookup prints the
+   *    real candidates.
+   *
+   * `category` is an alias because it is the **stable** key: the ids are 24-hex and
+   * differ per tenant, while `relate` / `block` / `blocked_by` do not. The write accepts
+   * either (verified live: both the id and the slug create the link, and the response
+   * echoes the slug), so the resolved `id` is what gets sent and `--relation relate`
+   * still works.
+   *
+   * The kind is spelled `pjm-relation-type` rather than `relation_type` because
+   * "relation" is the other overloaded word in this API: the cross-kind `/v1/relations`
+   * family (design D7.6) has no type vocabulary at all, and a bare `resolve
+   * relation-type` would look like it belonged to it.
+   */
+  'pjm-relation-type': {
+    label: 'relation type',
+    path: ENDPOINTS.workItemRelationTypes,
+    aliases: ['category'],
+    hint:
+      'these are the typed work-item↔work-item link kinds (关联 / 阻塞 / 被阻塞 / …), used by ' +
+      '`pingcode project work-item link add`; the cross-kind `work-item relation` family has no ' +
+      'types. List them with `pingcode project meta relation-types`, and prefer the stable ' +
+      'category slug (relate, block, blocked_by, cause, caused_by, clone, cloned_by, duplicate, ' +
+      'mention) over the per-tenant id',
+  },
+
+  //
+  // **工作项标签 gets no row, and that decision is the interesting half of S2b.**
+  // `GET /v1/pjm/work_item/tags?project_id=` looks exactly like the three
+  // project-scoped rows above, and it is the only tag enumerator the API has, so a
+  // `pjm-work-item-tag` row was the obvious move. Live 2026-08-04 killed it on the one
+  // test that matters more than convenience — **would the answer be right?**
+  //
+  //  - **`project_id` is required and then ignored.** Three different projects returned
+  //    the identical 23 rows, byte for byte, and the same rows as the org-level
+  //    `GET /v1/pjm/work_item_tags`. So the row would have to claim a project parent
+  //    (the query parameter is mandatory) while caching a list the parent does not
+  //    scope: N identical cache entries asserting a scoping the API does not have.
+  //  - **the resolver would be confidently wrong.** Tags *are* really project-scoped on
+  //    the write side: `POST …/work_items/{id}/tags` refused **all 23** ids for a work
+  //    item in one project (400 `100354` `'tag'资源不存在`) while accepting two of them
+  //    for a work item in another. A row here would answer "the id of tag POC in
+  //    project YYHC" with an id that project cannot use — the resolver contract is a
+  //    name in a scope → the id valid in that scope, and this endpoint cannot honour
+  //    it.
+  //  - **the names are not unique**: four `后端`, three `前端`, three `算法`, two
+  //    `运维`. The commonest tags would resolve to an ambiguity error listing four
+  //    indistinguishable candidates.
+  //
+  // `project work-item tag add` therefore resolves a name **in the command layer**,
+  // uncached, against the work item's own project, and explains `100354` when the
+  // server refuses the id. That is the honest shape: one live lookup whose result is
+  // not promoted to a cached fact.
+  //
   /** The project id rides in the **path** here, so there is no `parentQuery`. */
   sprint: {
     label: 'sprint',

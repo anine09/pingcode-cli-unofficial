@@ -17,6 +17,8 @@ Commands:
   work_item_state|work-item-state [options] <name>        state → id (/v1/pjm/work_item/states)
   work_item_priority|work-item-priority [options] <name>  priority → id
                                                           (/v1/pjm/work_item/priorities)
+  pjm-relation-type [options] <name>                      relation type → id
+                                                          (/v1/pjm/work_item/relation_types)
   sprint [options] <name>                                 sprint → id
                                                           (/v1/pjm/projects/{parent}/sprints)
   pjm-version [options] <name>                            release → id

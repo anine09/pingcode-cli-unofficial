@@ -85,7 +85,11 @@ describe('normalisation (design §8)', () => {
   });
 
   it('tolerates id shapes of every kind (research §6.8)', () => {
-    expect(parseWorkItem({ id: 'w', type: { id: 'story', name: '用户故事' } }).type?.id).toBe('story');
+    // A work item's `type` arrives as a bare slug string on the live API (S2b, 2026-08-04)
+    // and is kept verbatim; the object form the docs imply still parses to a `Ref`.
+    expect(parseWorkItem({ id: 'w', type: 'story' }).type).toBe('story');
+    const objectForm = parseWorkItem({ id: 'w', type: { id: 'story', name: '用户故事' } }).type;
+    expect(typeof objectForm === 'object' ? objectForm?.id : undefined).toBe('story');
     expect(parseUser({ id: 'a0417f68e846aae315c85d24643678a9' }).id).toHaveLength(32);
     expect(parseProject({ id: '5eb623f6a70571487ea47000' }).id).toHaveLength(24);
   });

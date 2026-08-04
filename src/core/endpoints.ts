@@ -121,9 +121,170 @@ export const ENDPOINTS = {
   workItem: (workItemId: string): string =>
     `/v1/pjm/work_items/${encodeURIComponent(workItemId)}`,
 
+  // -------------------------------------------------------------------------
+  // 工作项 writes, links, tags and history — research §3.8.3, live-verified
+  // 2026-08-04 (design D16). The other half of pjm: what happens *to* a work
+  // item, as opposed to which sprint or release it is filed under.
+  // -------------------------------------------------------------------------
+  //
+  // Live findings, 2026-08-04, public cloud. Eight of them contradict the docs,
+  // the catalog, or a conclusion an earlier child recorded:
+  //
+  //  - **`POST /v1/pjm/work_items/search` ignores paging completely.** Every
+  //    placement was tried — `payload.page_index`/`page_size` (what the docs
+  //    document), the same two at the top level of the body, and the query
+  //    string — and all three answer `page_index: 0, page_size: 30` and return
+  //    the first 30 rows. `total` *is* accurate (195, and 1182 org-wide), so the
+  //    endpoint reports how many matched and then refuses to show you more than
+  //    30. **This is not ship's search** (design §14.1: ship echoes the
+  //    requested index and pages for real), so "pjm's search is isomorphic to
+  //    ship's" — D7.2's premise — is false. `walkPages`' echoed-index guard is
+  //    what keeps `--all` from looping here; the command refuses `--all`
+  //    outright instead, because returning 30 rows labelled `all: true` would be
+  //    a lie.
+  //  - **the search filter vocabulary is not the query-string vocabulary.**
+  //    `?type_id=` on the GET list becomes **`type`** in the filter (the bare
+  //    slug, enum-validated), `?tag_id=` becomes `tags.id`, `?version_id=`
+  //    becomes `versions.id`, `?participant_id=` becomes `participants.id`; and
+  //    `identifier`, `short_id`, `id`, `bug_type_id` and `is_archived`/
+  //    `is_deleted` are **not filterable at all** (400 `100043`
+  //    `不支持使用过滤条件 filter.X`, which names the offending path — that is how
+  //    the vocabulary below was enumerated rather than guessed).
+  //    Supported: `project.id`, `state.id`, `priority.id`, `assignee.id`,
+  //    `sprint.id`, `parent.id`, `created_by.id`, `updated_by.id`, `board.id`,
+  //    `entry.id`, `swimlane.id`, `phase.id`, `participants.id`, `versions.id`,
+  //    `tags.id`, `type`, `title`, `description`, `created_at`, `updated_at`,
+  //    `start_at`, `end_at`, `completed_at`, `story_points`,
+  //    `estimated_workload`, `remaining_workload`, `properties.{key}`.
+  //    Operators: reference fields take `in` / `nin` / `exists`; text fields take
+  //    **`contains` only** (`eq`, `like`, `ne` are all refused, 400 `100044`);
+  //    numeric and date fields take `gt` / `lt` / `gte` / `lte` / `between`
+  //    (a two-element array), and `eq` on `story_points` but *not* on a date.
+  //  - **every work-item payload DOES carry `type`, as a bare slug string.**
+  //    `research/s8-smoke.md` F1 recorded the opposite ("the live API omits
+  //    `type` from every work-item payload") and the CLI was built on it:
+  //    `parseWorkItem` ran the value through `parseRef`, which turns a string
+  //    into `undefined`, so the TYPE column was always blank and `--json` lost
+  //    the field entirely. `'task'`/`'epic'` is also exactly what
+  //    `work_item_type_id` wants (system types use slugs as ids), so the type is
+  //    now read off the item and `--type` is only needed for a custom type or to
+  //    override.
+  //  - **`PATCH /v1/pjm/work_items` (bulk) is one property at a time**, not a
+  //    patch object: `{ids, property_name, property_value}`. It answers
+  //    `{inserts, updates, deletes}` counts, and `updates` is the **only**
+  //    signal of what happened. Verified to work: `assignee_id`, `state_id`,
+  //    `priority_id`, `title`, `description`. Verified **accepted and silently
+  //    ignored** (`updates: 0` with a perfectly valid value): `sprint_id`
+  //    (also as `sprint`, `sprint_ids`, `iteration_id`), `type_id`,
+  //    `participant_ids`, `version_ids`, `tag_ids`, `entry_id`, `swimlane_id`,
+  //    `phase_id`, `properties`, `bug_type_id`. So D7.2's headline use case —
+  //    move twenty work items into a sprint in one call — **does not work**, and
+  //    the single-item `PATCH …/{id} {sprint_id}` still has to be issued per
+  //    item. Only `parent_id` and `board_id` are refused honestly
+  //    (`当前工作项属性不支持批量更新`).
+  //  - **omitting `property_value` CLEARS the field** (`updates: 1`), it is not
+  //    a no-op. The CLI therefore requires a value and has no clear-a-field
+  //    mode.
+  //  - **the bulk PATCH is best-effort and leaves no audit trail.** A batch of
+  //    one real and one nonexistent id answered `updates: 1` (the sprint/version
+  //    bulks are **atomic**, design D15.5 — do not extrapolate), an unknown id
+  //    is not reported at all, a batch may span projects, and the change appears
+  //    in **no** `/v1/activities` row, while the equivalent single PATCH does.
+  //  - **`GET /v1/pjm/work_item/tags?project_id=` ignores `project_id`.** It is
+  //    validated (an unknown project is 400 `100300`) and then disregarded:
+  //    three different projects returned the identical 23 rows, byte for byte,
+  //    and the same 23 as the org-level `GET /v1/pjm/work_item_tags`. Tags are
+  //    nevertheless **really project-scoped**: `POST …/work_items/{id}/tags`
+  //    refused all 23 for a YYHC work item (400 `100354` `'tag'资源不存在`) while
+  //    accepting two of them for a SHOU02 work item. So this list is the only
+  //    tag enumerator there is *and* it answers a question nobody asked. Tag
+  //    names are not unique either (four `后端`, three `前端`, three `算法`).
+  //  - **`GET …/projects/{id}/progress` is not a list.** The catalog marks it
+  //    `paged: "query"`; it returns a bare
+  //    `{work_item: {total, pending_count, in_progress_count, completed_count}}`
+  //    with no envelope, and paging parameters do nothing.
+  //  - **a project's `start_at`/`end_at` are instants, not days.** 12:00 was
+  //    stored as 12:00 on both create and patch — the opposite of a sprint or a
+  //    release, which the server snaps to 00:00:00 / 23:59:59 (D15.4). Hence
+  //    `--start-at` / `--end-at` here and `--start` / `--end` there, inside one
+  //    command group.
+  //  - **`is_archived` and `visibility` are not patchable**, both silently
+  //    dropped, so a project created by mistake can be neither deleted nor
+  //    archived through the API. `identifier` *is* patchable, and must be
+  //    uppercase and short (400 `100335`).
+
+  /** `POST` only, and **unpaged**: always the first 30 matches, whatever you ask for. */
+  workItemsSearch: '/v1/pjm/work_items/search',
+
+  /**
+   * 同类工作项关联 — the **typed** work-item↔work-item family, and not to be
+   * confused with the cross-kind `/v1/relations` (design D7.6, F5). `relation_type`
+   * is required and accepts the vocabulary's `category` slug (`relate`, `block`, …)
+   * **or** its 24-hex id; the response always echoes the slug. Live notes:
+   *
+   *  - the server creates the **inverse** row on the other work item and pairs the
+   *    category (`block` here produced `blocked_by` there); deleting either side
+   *    removes both.
+   *  - the two sides have **different relation ids**, so a delete needs the id
+   *    listed from the side you are on.
+   *  - a work item can be related to **itself** (200, and it produces two rows).
+   *  - links may cross projects.
+   *  - `GET …/{unknown work item}/relations` answers **200 with zero rows** — the
+   *    list does not validate the work item, unlike the history list below.
+   */
+  workItemRelations: (workItemId: string): string =>
+    `/v1/pjm/work_items/${encodeURIComponent(workItemId)}/relations`,
+  /** The work-item segment **is** enforced here (400 `100351`), unlike a 发布's. */
+  workItemRelation: (workItemId: string, relationId: string): string =>
+    `/v1/pjm/work_items/${encodeURIComponent(workItemId)}/relations/${encodeURIComponent(relationId)}`,
+
+  /**
+   * ⚠️ **There is no `GET …/work_items/{id}/tags` list** (research §3.8.3): add,
+   * get-one and delete exist, and the only way to see a work item's tags is the
+   * `tags[]` field on the work item itself. Removing the same tag twice is an
+   * HTTP **500** (`100000`), not a 400.
+   */
+  workItemTags: (workItemId: string): string =>
+    `/v1/pjm/work_items/${encodeURIComponent(workItemId)}/tags`,
+  workItemTag: (workItemId: string, tagId: string): string =>
+    `/v1/pjm/work_items/${encodeURIComponent(workItemId)}/tags/${encodeURIComponent(tagId)}`,
+
+  /** Read-only. One row per state change, `from_state: null` on the creation row. */
+  workItemTransitionHistories: (workItemId: string): string =>
+    `/v1/pjm/work_items/${encodeURIComponent(workItemId)}/transition_histories`,
+  workItemTransitionHistory: (workItemId: string, historyId: string): string =>
+    `/v1/pjm/work_items/${encodeURIComponent(workItemId)}/transition_histories/${encodeURIComponent(historyId)}`,
+
   workItemTypes: '/v1/pjm/work_item/types',
   workItemStates: '/v1/pjm/work_item/states',
   workItemPriorities: '/v1/pjm/work_item/priorities',
+  /**
+   * ⚠️ **Singular `work_item` segment**, like the three above. Org-level: 9 system
+   * rows, no query parameters at all, each with a stable `category` slug and a
+   * per-tenant 24-hex `id`. The **only** source for the `relation_type` that
+   * `POST …/work_items/{id}/relations` requires.
+   */
+  workItemRelationTypes: '/v1/pjm/work_item/relation_types',
+  /**
+   * ⚠️ Singular segment again, and `?project_id=` is **required but ignored** — see
+   * the block above. `?name=` is a case-insensitive **substring** match.
+   */
+  workItemTagVocabulary: '/v1/pjm/work_item/tags',
+
+  /** Not a list: a bare `{work_item: {…counts}}`, despite the catalog's `paged`. */
+  projectProgress: (projectId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/progress`,
+  /**
+   * A membership row's `id` **is** the user or group id, so `member get` takes the
+   * user id (as ship's product members do). `role_id` defaults to 普通成员. A
+   * project's `assignee` need **not** be a member, and assigning one does not add
+   * them.
+   */
+  projectMembers: (projectId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/members`,
+  /** 400 `100405` `成员不在项目中` for an unknown id *and* for a real non-member. */
+  projectMember: (projectId: string, memberId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(memberId)}`,
 
   users: '/v1/directory/users',
 

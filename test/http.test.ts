@@ -523,6 +523,25 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       // Behaviour is asserted through the wrappers in `test/pjmPlanning.test.ts`.
       '100308': 'not_found',
       '100304': 'not_found',
+      // S2b: 工作项关联 / 流转记录 / 项目成员 (S2b smoke, 2026-08-04, design D16). All
+      // three are **composite-key** absences — the addressed row exists only as a pair,
+      // so a wrong id and a mismatched pair are the same failure. `100351` was observed
+      // on GET and DELETE of a link, for an unknown id, for a link id belonging to
+      // another work item (the two directions of one link have different ids), and for
+      // one already deleted; `1003108` on GET of an unknown transition history — note
+      // the seven digits; `100405` on GET and DELETE of a membership, for an unknown id
+      // *and* for a real organisation user who is not in the project.
+      // Behaviour is asserted through the wrappers in `test/pjmWorkItemWrites.test.ts`.
+      //
+      // Two codes from the same smoke are deliberately absent, for opposite reasons:
+      // `100354` (`'tag'资源不存在`) is `100300`'s mistake again — it names a tag the
+      // user can see, because the tag vocabulary is org-wide while the write is
+      // project-scoped — and `100357` (`工作项不包含此标签`) *is* a genuine pair absence
+      // but its DELETE counterpart answers HTTP 500, so mapping it would split one
+      // mistake across two exit codes.
+      '100351': 'not_found',
+      '1003108': 'not_found',
+      '100405': 'not_found',
     });
   });
 

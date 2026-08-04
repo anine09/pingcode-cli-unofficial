@@ -184,8 +184,8 @@ Arguments:
   work-item         id, short_id, identifier such as SCR-5, or a pasted URL
 
 Options:
-  --type <name|id>  work-item type — used only to resolve --state <name> and to list candidate
-                    states on rejection; never sent
+  --type <name|id>  work-item type — overrides the type read off the item when resolving --state
+                    <name>, and lists candidate states on rejection; never sent
   --state <name>    target state, resolved by name (requires --type)
   --state-id <id>   target state, given as an id (no lookup, no --type needed)
   -h, --help        display help for command
@@ -203,8 +203,8 @@ Arguments:
 Options:
   --title <text>            new title
   --description <text>      new description (replaces the old one)
-  --type <name|id>          work-item type — used only to resolve --state <name> and to list
-                            candidate states on rejection; never sent
+  --type <name|id>          work-item type — overrides the type read off the item when resolving
+                            --state <name>, and lists candidate states on rejection; never sent
   --assignee <name|id>      new assignee
   --priority <name|id>      new priority
   --parent <ref>            new parent work item
