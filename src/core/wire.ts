@@ -397,6 +397,55 @@ export const ERROR_CODE_OVERRIDES: Record<string, 'auth' | 'not_found'> = {
   '100203': 'not_found',
   '100204': 'not_found',
   '100205': 'not_found',
+  // S2a (08-02-full-api-coverage) pjm planning smoke, 2026-08-04, live tenant
+  // (design D15.8). 迭代 and 发布, the same shape a fifth time — one stable
+  // per-resource code, HTTP **400**, identical across every verb that can name a
+  // missing row:
+  //   100308 "'Iteration'资源不存在"  — GET and PATCH
+  //     /v1/pjm/projects/{project}/sprints/{unknown 24-hex}. Two verbs, one code, and
+  //     that is *all* the verbs there are: the sprint path has no DELETE at all.
+  //     (Note the resource name is the English "Iteration" while every other code in
+  //     this family names it in lower case — wording is not a contract, which is why
+  //     only the code is matched.)
+  //   100304 "'version'资源不存在"    — GET, PATCH **and DELETE**
+  //     …/versions/{unknown 24-hex}. Three verbs, one code.
+  // Without these a missing sprint exited 7 while a missing work item exited 5
+  // (`100317`, already mapped) — the same mistake, in the same module.
+  //
+  // Deliberately **not** mapped, from the same smoke. The first row is the important
+  // one, and it is the reason this list is not just boilerplate:
+  //  - `100300` (`'project'资源不存在`) — returned both for a project id that does not
+  //    exist **and** for a real project that simply has no 迭代 module:
+  //    `POST /v1/pjm/projects/{a kanban project}/sprints` answers `100300` while
+  //    `GET …/sprints` on the same project answers 200 with zero rows. So the code
+  //    conflates "no such project" with "sprints are not available here", and exit 5
+  //    would tell an agent to go looking for a project it can see in `project list`.
+  //    Same judgement as ship's `100719`/`100702` and scm's `100223`. `project sprint
+  //    create` explains the kanban case in its own error hint instead.
+  //  - `100309` (`'project'不匹配`) and `1003107` (`发布与项目不匹配`, note the seven
+  //    digits) — the sprint/version *pairing* checks. Both records exist; only the
+  //    (project, child) pair is wrong, which is a mismatch rather than an absence.
+  //    `1003107` is also the only one of the five version verbs that performs the
+  //    check at all (D15.6).
+  //  - `100343` (`'Iteration'已经存在`) and `100337` (`'version'已经存在`) — uniqueness
+  //    conflicts on the name, judged exactly as `100220`/`100105` were.
+  //  - `100390` (`'sprint.1''sprint'资源名称已存在`) and `100001`
+  //    (`versions[1]:version named … had existed`, and also
+  //    `versions[0].project_id不存在`) — the two bulk endpoints' rejections. `100001`
+  //    is doubly disqualified: it carries a *missing parent* and a *name conflict*
+  //    under one code, and both refuse the **whole batch**, so exit 5 would name one
+  //    entry while implying the others landed — the reasoning that kept testhub's
+  //    `100619` on exit 7.
+  //  - `100042` (`开始时间必须小于结束时间`) and `100395`
+  //    (`输入的'operate_at'必须在开始和发布时间之间`) — cross-field validation, like
+  //    S1d's `100102`/`100041`.
+  //  - `100003` (`'status'不是有效的枚举值`) and `100039` (`versions[1].name 是必填字段`,
+  //    `versions 数组的长度必须大于等于 1`) — input validation. `100039` is the bulk
+  //    twin of the cross-module `100008` and is refused for the same reason.
+  //  - `100000` (`内部服务错误`) — a genuine HTTP **500**, returned when two entries of
+  //    one bulk batch share a name. A server fault must keep its 500.
+  '100308': 'not_found',
+  '100304': 'not_found',
 };
 
 const NOT_FOUND_HINT =

@@ -514,6 +514,15 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
       '100203': 'not_found',
       '100204': 'not_found',
       '100205': 'not_found',
+      // S2a: 迭代 / 发布 (S2a smoke, 2026-08-04, design D15.8). `100308` was observed on
+      // GET and PATCH — the only two verbs the sprint path has, since there is no
+      // sprint delete; `100304` on GET, PATCH **and DELETE**. Both are project-scoped
+      // children whose *parent's* absence answers a different code (`100300`), which is
+      // deliberately absent from this table: a kanban project — one that plainly exists
+      // — also answers `100300` when asked for a sprint.
+      // Behaviour is asserted through the wrappers in `test/pjmPlanning.test.ts`.
+      '100308': 'not_found',
+      '100304': 'not_found',
     });
   });
 

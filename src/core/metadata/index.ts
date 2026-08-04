@@ -66,6 +66,8 @@ export const resolveProject: RootResolver = root('project');
 export const resolveWorkItemType: ScopedResolver = scoped('work_item_type');
 export const resolveWorkItemPriority: ScopedResolver = scoped('work_item_priority');
 export const resolveSprint: ScopedResolver = scoped('sprint');
+/** 发布 — the project-scoped release plan, not a wiki revision or a config scheme. */
+export const resolveProjectVersion: ScopedResolver = scoped('pjm-version');
 export const resolveUser: RootResolver = root('user');
 
 // ship (产品管理) — the parent is a product

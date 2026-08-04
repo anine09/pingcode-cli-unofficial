@@ -13,6 +13,109 @@ export const ENDPOINTS = {
   projectSprints: (projectId: string): string =>
     `/v1/pjm/projects/${encodeURIComponent(projectId)}/sprints`,
 
+  // -------------------------------------------------------------------------
+  // 迭代 (sprints) + 发布 (versions) — research §3.8.5-6, live-verified
+  // 2026-08-04 (design D15). The planning half of pjm: what a sprint or a
+  // release *is*, as opposed to the work items inside it.
+  // -------------------------------------------------------------------------
+  //
+  // Both families are project-scoped through the **path**, both are day-granular,
+  // and both have an organisation-level `POST …/bulk` twin that is **企业令牌
+  // only and declares no scope at all** — two of the three non-DevOps ENT-only
+  // endpoints in the whole API ([S§3.8.5]/[S§7]A). `pingcode api describe` says so
+  // per endpoint; the refined leaves repeat it in `--help`.
+  //
+  // Missing symmetry, upstream, deliberately not worked around:
+  //
+  //  - **there is no sprint DELETE** ([S§3.8.5]). The path supports GET and PATCH
+  //    only, so a sprint created by mistake is permanent. `pingcode api DELETE`
+  //    refuses it at the catalog pre-flight, which is the honest answer.
+  //  - **there is no project DELETE** either ([S§3.8.1]).
+  //  - a version *does* delete, and cleanly — see below.
+  //  - pjm has **no `PUT` anywhere**, so design D8.4 (PUT never gets a refined
+  //    leaf) is satisfied vacuously here rather than by omission.
+  //
+  // Live findings, 2026-08-04, public cloud (design D15). None of these are in
+  // the docs, and four of them contradict what the docs or the catalog say:
+  //
+  //  - **`?name=` is a SUBSTRING, case-insensitive filter on both lists**, not the
+  //    exact match scm's platform/branch `?name=` and release's environment
+  //    `?name=` are (design D11.2, D14). `?name=print` returned all four
+  //    `Sprint N` rows and `?name=2` returned only `Sprint 2`. So it is a real
+  //    search, and the flag is documented as one — but it is *not* a candidate
+  //    enumerator, which is why the two resolvers still load the whole list.
+  //  - **`?status=` filters, and is enum-validated** (400 `100003` on a bad
+  //    value). On the sprint list it names the sprint's own `status`
+  //    (`pending|in_progress|completed`); on the **version** list it names the
+  //    stage's `type` (`pending|in_progress|published`) — a version resource has
+  //    no `status` field at all, so the filter is named after a field that does
+  //    not exist in the response.
+  //  - **`?stage_id=` on the version list is silently ignored** (all rows came
+  //    back, including those in other stages), so no flag exposes it (D11.2's
+  //    rule: a dead filter is worse than no filter). `?assignee_id=` and
+  //    `?keywords=` are ignored on the sprint list for the same reason.
+  //  - **the server snaps the window to whole days.** A `start_at` of 12:00 was
+  //    stored as `00:00:00` and an `end_at` of 12:00 as `23:59:59` of the same
+  //    date, on create *and* on patch, for both families. That is exactly the
+  //    asymmetry `parseDateBoundaryFlag` already implements, so `--start` /
+  //    `--end` take dates rather than instants here.
+  //  - **`versions.stage_id` is documented (and catalogued) as required on
+  //    `POST /v1/pjm/versions/bulk` and is not**: a bulk create without it
+  //    answered 200 and defaulted to the first stage, exactly as the single
+  //    create does. No `OPTIONAL_QUERY_OVERRIDES`-style row was added, because
+  //    `missingRequired` only checks top-level body keys and this one is nested
+  //    (`versions.stage_id`), so nothing is refused — the only cost is one
+  //    misleading line in `api describe`.
+  //  - **both bulk endpoints are atomic, and neither is capped.** A batch whose
+  //    *second* entry collided with an existing name created nothing (sprints:
+  //    400 `100390`; versions: 400 `100001`), and a 60-entry version batch was
+  //    accepted in full — so the CLI invents no client-side limit, unlike
+  //    testhub's runs bulk where 50 is documented ([TH§7]). Two entries sharing a
+  //    name *within* one batch is HTTP **500** `100000`, and still creates
+  //    nothing. An empty array is 400 `100039`.
+  //  - **the project segment is enforced on three of the five version verbs.**
+  //    `GET` and `PATCH …/projects/{any}/versions/{version_id}` **ignore it
+  //    entirely** and act on the version in its real project (verified by writing
+  //    through a foreign project id and reading the change back through the right
+  //    one), while `DELETE` refuses with 400 `1003107` `发布与项目不匹配`. The
+  //    sprint family enforces it on both verbs (400 `100309` `'project'不匹配`).
+  //  - **a sprint cannot be created in a kanban project**, and the refusal is
+  //    400 `100300` `'project'资源不存在` — the same code an absent project id
+  //    returns. The list answers 200 with zero rows instead. Versions have no
+  //    such restriction and work in kanban projects too. This is why `100300` is
+  //    **not** in `ERROR_CODE_OVERRIDES`: it conflates "no such project" with
+  //    "this project has no iteration module".
+  //  - **deleting a version detaches it from every work item that referenced it**
+  //    — 200, and the work item's `versions`/`version` field is simply gone. No
+  //    refusal (unlike a release environment in use, D14.7) and no orphan
+  //    (unlike an scm branch, D12.5). The DELETE response is the deleted version.
+  //  - **`operate_at` alone is silently ignored.** Sent without a `stage_id` it
+  //    answers 200 and echoes the *old* value; it is only honoured alongside a
+  //    stage change, and moving to a stage that has no recorded `operate_at`
+  //    *requires* it (400 `100395`
+  //    `输入的'operate_at'必须在开始和发布时间之间`). `progress`, `changelog`,
+  //    `description` on a version and any other undocumented key are accepted and
+  //    dropped, which is the API-wide behaviour D11.3 recorded.
+  //  - **no field in either family is a `*_name` upsert.** Probed with
+  //    `assignee_name`: 200, ignored, and no ghost user appeared in the directory
+  //    — so unlike scm's `sender_name` / `owner_name` (D12.1) there is no hazard
+  //    here, and consequently no warning anywhere.
+
+  /** GET + PATCH only — **no DELETE exists** ([S§3.8.5]). The project segment is enforced. */
+  projectSprint: (projectId: string, sprintId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/sprints/${encodeURIComponent(sprintId)}`,
+  /** Org-level, **企业令牌 only, no declared scope**. Each entry carries its own `project_id`. */
+  sprintsBulk: '/v1/pjm/sprints/bulk',
+
+  /** 发布 = release = version. Unrelated to `/v1/wiki/pages/{id}/versions` ([S§6]). */
+  projectVersions: (projectId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/versions`,
+  /** GET/PATCH ignore the project segment; DELETE enforces it (400 `1003107`). */
+  projectVersion: (projectId: string, versionId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}`,
+  /** Org-level, **企业令牌 only, no declared scope**, and `stage_id` is not really required. */
+  versionsBulk: '/v1/pjm/versions/bulk',
+
   workItems: '/v1/pjm/work_items',
   /** Accepts **`id` or `short_id`** on GET (research §6.9); PATCH documents only `id`. */
   workItem: (workItemId: string): string =>

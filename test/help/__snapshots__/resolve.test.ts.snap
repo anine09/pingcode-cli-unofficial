@@ -19,6 +19,8 @@ Commands:
                                                           (/v1/pjm/work_item/priorities)
   sprint [options] <name>                                 sprint → id
                                                           (/v1/pjm/projects/{parent}/sprints)
+  pjm-version [options] <name>                            release → id
+                                                          (/v1/pjm/projects/{parent}/versions)
   user [options] <name>                                   user → id (/v1/directory/users)
   ship-product [options] <name>                           product → id (/v1/ship/products)
   ship-product-member [options] <name>                    product member → id

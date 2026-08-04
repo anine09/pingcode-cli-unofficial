@@ -44,14 +44,15 @@ describe('resolve command surface', () => {
     ]);
   });
 
-  it('covers 28 of the 30 kinds, and omits exactly the two nothing names', () => {
+  it('covers 29 of the 31 kinds, and omits exactly the two nothing names', () => {
     // The count is the honest half of the assertion above: it moves only when the
     // table does, and it is what catches a row that quietly stopped being resolvable.
     // 27 → 29 with S1a's `scm-platform` / `scm-repo`, 29 → 30 with S1d's `release-env`
     // (the one DevOps collection outside scm that a name can address — a build record's
-    // identifier is not unique and a deploy has no name at all).
-    expect(META_KINDS).toHaveLength(30);
-    expect(RESOLVABLE_KINDS).toHaveLength(28);
+    // identifier is not unique and a deploy has no name at all), 30 → 31 with S2a's
+    // `pjm-version` (a 发布 name is unique per project, 400 `100337` on a duplicate).
+    expect(META_KINDS).toHaveLength(31);
+    expect(RESOLVABLE_KINDS).toHaveLength(29);
 
     // Ticket state plans are found by scanning for an embedded `product.id` (ship
     // GOTCHA #23) and their flows are graph edges — neither is addressed by a name, so

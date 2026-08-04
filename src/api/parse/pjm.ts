@@ -11,9 +11,12 @@
  */
 
 import type {
+  BulkCreateResult,
   Project,
+  ProjectVersion,
   Sprint,
   User,
+  VersionStage,
   WorkItem,
   WorkItemPriority,
   WorkItemState,
@@ -132,6 +135,81 @@ export function parseSprint(raw: unknown): Sprint {
     status: asString(record.status),
     start_at: asNumber(record.start_at),
     end_at: asNumber(record.end_at),
+    description: asString(record.description),
+    url: asString(record.url),
+    project: parseRef(record.project),
+    assignee: parseRef(record.assignee),
+    started_at: asNumber(record.started_at),
+    completed_at: asNumber(record.completed_at),
+    total_story_points: asNumber(record.total_story_points),
+    completed_story_points: asNumber(record.completed_story_points),
+    started_story_points: asNumber(record.started_story_points),
+    categories: parseRefList(record.categories),
+    created_at: asNumber(record.created_at),
+    created_by: parseRef(record.created_by),
+    updated_at: asNumber(record.updated_at),
+    updated_by: parseRef(record.updated_by),
+  };
+}
+
+/**
+ * 发布. Note `stages[]` gets its **own** parser rather than `parseRefList`: a stage
+ * row carries an `operate_at` a plain `Ref` would drop from the typed view (it would
+ * survive in the index signature, but no call site could reach it).
+ */
+export function parseProjectVersion(raw: unknown): ProjectVersion {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+    project: parseRef(record.project),
+    assignee: parseRef(record.assignee),
+    start_at: asNumber(record.start_at),
+    end_at: asNumber(record.end_at),
+    progress: asNumber(record.progress),
+    changelog: asString(record.changelog),
+    operate_at: asNumber(record.operate_at),
+    stage: parseRef(record.stage),
+    stages: Array.isArray(record.stages) ? record.stages.map(parseVersionStage) : [],
+    categories: parseRefList(record.categories),
+    created_at: asNumber(record.created_at),
+    created_by: parseRef(record.created_by),
+    updated_at: asNumber(record.updated_at),
+    updated_by: parseRef(record.updated_by),
+  };
+}
+
+export function parseVersionStage(raw: unknown): VersionStage {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+    operate_at: asNumber(record.operate_at),
+  };
+}
+
+/**
+ * One element of a `POST …/bulk` array, for either family.
+ *
+ * The created resource arrives under a family-specific key (`sprint` / `version`),
+ * so the key is a parameter and the result is normalised to `resource` — the
+ * alternative was two near-identical parsers differing in one string.
+ */
+export function parseBulkCreateResult<T>(
+  raw: unknown,
+  key: string,
+  parseResource: (value: unknown) => T,
+): BulkCreateResult<T> {
+  const record = asRecord(raw);
+  const resource = record[key];
+  return {
+    ...record,
+    state: asString(record.state),
+    ...(resource === undefined || resource === null ? {} : { resource: parseResource(resource) }),
   };
 }
 

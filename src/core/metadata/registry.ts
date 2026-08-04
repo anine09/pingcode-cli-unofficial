@@ -86,6 +86,47 @@ const TABLE = {
   },
 
   /**
+   * 发布 (a release plan of one project), and the only row S2a adds.
+   *
+   * It fits the table as it stands: the project id rides in the **path**, exactly
+   * like `sprint`, so one parent slot and no engine change. It earns the row on the
+   * same three tests every kind is judged by:
+   *
+   *  - **the name is a key.** Version names are unique per project — a duplicate
+   *    create is 400 `100337` `'version'已经存在` (live 2026-08-04) — and the
+   *    project-scoped cache key is what keeps two projects' identically named
+   *    releases apart.
+   *  - **the collection is configuration-like.** A project has a handful of
+   *    releases, edited rarely, so a 24 h cache is an optimisation rather than a
+   *    stale-answer generator. That is the judgement that *denied* rows to build
+   *    records and deploys (design D14.4), which grow once per CI run.
+   *  - **the whole list is loaded, not filtered server-side.** `?name=` here is a
+   *    **substring** match, not the exact one scm's platform and release's
+   *    environment lists offer (design D11.2, D14) — so it cannot answer "which
+   *    releases are there", and using it as an `inputQuery` would turn one typo
+   *    into several candidates. Loading the list also means a failed lookup prints
+   *    the real names.
+   *
+   * The kind is spelled `pjm-version` although the other pjm rows are unprefixed:
+   * "version" is the API's most overloaded word — a pjm release, a wiki page
+   * revision, a configuration scheme and two kinds of plan all answer to it
+   * ([S§6], design D7.2) — and this name is user-visible as
+   * `pingcode resolve pjm-version`.
+   *
+   * A cached id here *can* go stale in a way a sprint's cannot, because a version
+   * is the one thing in the planning surface that deletes. Every write goes through
+   * `runWrite`, so a rejected id is invalidated and re-resolved exactly once.
+   */
+  'pjm-version': {
+    label: 'release',
+    path: ENDPOINTS.projectVersions,
+    parent: 'project',
+    hint:
+      'a 发布/version here is a project release plan — not a wiki page revision and not a ' +
+      'configuration scheme; list them with `pingcode project version list --project <p>`',
+  },
+
+  /**
    * Users are an unbounded set, so the candidate list is a `keywords` **search over
    * the input itself** (`inputQuery`), and those keywords discriminate the cache key.
    * An empty result is then not proof of a typo, so the input is passed through as an
