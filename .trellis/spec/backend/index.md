@@ -22,6 +22,8 @@ Start here:
 - **No network in unit tests.** `fetch` is injected through `Ctx`.
 - **API facts are recorded in `research/`, never assumed.** When reality contradicts the docs, update
   the research file and `design.md` rather than quietly patching a call site.
+- **A 200 does not mean the field was accepted, and a probe never runs against your real credentials.**
+  See [Live Verification](./live-verification.md).
 - **When the published docs and the live API disagree, the live API wins** — and the disagreement gets
   written down, never dropped. See [Catalog Drift](./catalog-drift.md).
 
@@ -37,6 +39,7 @@ Start here:
 | [Quality Guidelines](./quality-guidelines.md) | Forbidden/required patterns, testing policy, API-fact discipline | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | The stdout/stderr contract, log levels, redaction | Filled |
 | [Catalog Drift](./catalog-drift.md) | The generated endpoint catalog: the weekly drift check, who resyncs, and how a docs-vs-live conflict is judged | Filled |
+| [Live Verification](./live-verification.md) | How a fact about the running API is obtained safely: probe isolation, independent read-back, proving a filter | Filled |
 
 There is **no frontend** in this project; see [`../frontend/index.md`](../frontend/index.md).
 

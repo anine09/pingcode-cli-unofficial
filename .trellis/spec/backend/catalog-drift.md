@@ -159,10 +159,10 @@ one signal this repository gets for free about a vendor that publishes no change
 - **A refined leaf is a separate, deliberate decision** — never a reflex, and never in the resync
   commit. It carries the same evidence bar every Phase S child met: a live happy path, the real error
   codes recorded in `research/` before any `ERROR_CODE_OVERRIDES` row, every filter flag proven to
-  *actually filter* (a filter the server silently ignores is worse than no flag — see the
-  `?stage_id=` note in `endpoints.ts`), `--yes` on any DELETE, and no `PUT` leaves at all (design
-  D8.4). Absent that evidence, the generic layer is the right home and "it is reachable" is a
-  complete answer.
+  *actually filter* (a filter the server silently ignores is worse than no flag — see
+  [Live Verification](./live-verification.md) and the `?stage_id=` note in `endpoints.ts`), `--yes` on
+  any DELETE, and no `PUT` leaves at all (design D8.4). Absent that evidence, the generic layer is the
+  right home and "it is reachable" is a complete answer.
 
 ---
 

@@ -59,8 +59,10 @@ sending a mutating request under `--dry-run`, and `bin/pingcode.ts` renders the 
 2. Otherwise switch on the HTTP status (401/403/404/429).
 3. Otherwise `ApiError`.
 
-The override table is small and evidence-backed (`research/s8-smoke.md` F2/F3): this API answers
-HTTP **400** where REST convention would use 401 or 404, which made exits 3 and 5 unreachable.
+The override table is evidence-backed (`research/s8-smoke.md` F2/F3): this API answers HTTP **400**
+where REST convention would use 401 or 404, which made exits 3 and 5 unreachable. Illustrative rows —
+**the table itself lives in `src/core/wire.ts` and is longer than this; do not maintain a second copy
+of it here**:
 
 | `code` | HTTP | Observed on | → |
 |---|---|---|---|
@@ -70,14 +72,39 @@ HTTP **400** where REST convention would use 401 or 404, which made exits 3 and 
 | `100725` | 400 | `GET /v1/ship/ideas/{unknown id}` (`08-01-ship-cli/research/s7-smoke.md` F1) | `NotFoundError` (5) |
 | `100711` | 400 | `GET /v1/ship/tickets/{unknown id}` (same source) | `NotFoundError` (5) |
 
-Not every "does not exist" code belongs here. Ship's `100719` / `100702` ("state does not exist" on
-an idea/ticket PATCH) are also returned for a state that **does** exist but is unreachable under the
-state plan, so they stay `ApiError` (7): a code that conflates two causes must be mapped to neither.
-
 **Never match on message text.** The PingCode API is Chinese-only and its wording is not a contract;
-a locale or copy change would silently break the mapping. Match on the `code` string only, and only
-for codes actually observed against the live API. Add a new entry only with a recorded observation
-in `research/`, and cite it in the comment above the table.
+a locale or copy change would silently break the mapping. Match on the `code` string only.
+
+#### Admission rules for a row
+
+The table's whole value is that **every row is trustworthy**, which makes it a table you add to
+slowly. A row is admitted only if all five hold:
+
+1. **It cites a live observation** — child, date, path(s), verb(s) and HTTP status, in the comment
+   directly above the row. A row without an observation is a claim about the API dressed as code.
+   Prefer several verbs: the codes worth mapping turn out to be identical across `GET`/`PATCH`/`DELETE`
+   and across "malformed id", "unknown id" and "unknown `short_id`", and that invariance *is* the
+   evidence.
+2. **The code has exactly one meaning.** A code that also fires for something that is not an absence
+   must be mapped to neither cause. Ship's `100719`/`100702` and testhub's `100649` all say "state does
+   not exist" *and* are returned for a state that exists but is unreachable under the state plan, so
+   they stay `ApiError` (7) — telling an agent `not_found` about a state it can see in
+   `meta ticket-states` is worse than saying nothing.
+3. **Where a sibling code disambiguates it, that has been verified.** pjm's `100303` **is** mapped
+   precisely because pjm has a *separate* code for unreachability (`100379`,
+   `工作项状态不能流转到当前状态`, probed live), so `100303` really does mean "no such state". Rule 2
+   and rule 3 are the same rule seen from both sides; do not apply one without checking the other.
+4. **It is module-specific, not generic.** `100008` ("required field") is returned by every module, so
+   mapping it would relabel input validation as absence across the whole CLI. Business-rule refusals
+   (`100223` 默认分支不能被删除), uniqueness conflicts (`…已经存在`), enum/shape validation (`100003`,
+   `100004`, `100005`) and genuine `500`s (`100000`) are never absences.
+5. **The refusal is written down too.** Every code that was observed and *not* mapped is recorded
+   beside the table with its reason. That is what stops the next child re-litigating it from the docs
+   — see `live-verification.md`, "Record the negatives".
+
+The whole table is pinned with `toEqual` in `test/http.test.ts`, so a row cannot land, or vanish,
+without a deliberate test edit. `100379` has its own test asserting it stays **unmapped**, because if
+a future API change collapsed it into `100303` then `100303` would start lying.
 
 The 404 branch stays even though this API is not observed to return 404 — for self-hosted builds and
 future behaviour. Note the asymmetry: an invalid *bearer* token on a resource endpoint **does**
@@ -137,6 +164,10 @@ through `redactUrl()` / `redactSnippet()`.
 - **Reinterpreting a status without evidence.** F2/F3 were only found by running against the live
   API. If a mapping surprises you, record the observation in `research/` first, then change code.
 - **Pattern-matching the Chinese message text** instead of the `code`.
+- **Mapping a code that has two meanings**, or mapping a generic one such as `100008`. Read the five
+  admission rules above; a wrong row makes every other row less believable.
+- **Duplicating the override table into a doc.** It lives in `src/core/wire.ts`, pinned by
+  `test/http.test.ts`.
 - **Calling `process.exit` from a command**, which bypasses error rendering and the `--json`
   contract.
 - **Letting a raw URL into an error message.** The `client_secret` travels in the query string on

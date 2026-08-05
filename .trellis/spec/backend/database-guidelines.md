@@ -91,5 +91,9 @@ Freshness rules:
 - **Treating a cache write failure as fatal.**
 - **Reading `~/.pingcode/` from a command.** Go through `core/config.ts`; the layering test will
   catch you.
-- **Validating the shape of a cached id.** Ids may be 24-hex, 32-hex, or a bare slug — they pass
-  through untouched.
+- **Validating the shape of a cached id.** Ids may be 24-hex, 32-hex, or a bare slug (`task`, `story`,
+  `bug`) — they pass through untouched.
+- **Running a script that executes CLI leaves without redirecting `PINGCODE_CONFIG_DIR` first.** A
+  probe that enumerated the command tree ran `auth logout` against a developer's real store and
+  deleted the credentials *and* the cache; only the human could restore them. See
+  [Live Verification](./live-verification.md).

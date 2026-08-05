@@ -36,6 +36,8 @@ conditionally rather than assigned `undefined`.
 | Real network calls in tests | Inject `fetch` through `Ctx`. See below. |
 | Adding a runtime dependency | The list is frozen at `commander` + `picocolors`. Needs a stated reason. |
 | Shape-validating an id client-side | Ids are 24-hex, 32-hex (users), *or* bare slugs (`task`, `story`, `bug`). Ids pass through untouched. |
+| Naming a leaf flag `--version` (or binding `-v`) | The root owns `--version`, and commander's root parses options across the whole argv: `project work-item update X --version 1.4` printed the CLI version, exited 0 and sent nothing. Use `--release`. Pinned by `test/help/project.test.ts` and `test/help/root.test.ts`. |
+| Exposing a flag for a field or filter the server silently ignores | A flag that lies is worse than an absent one; the API answers 200 and sometimes echoes the value it discarded. See [Live Verification](./live-verification.md). |
 
 ## Required Patterns
 
@@ -54,9 +56,32 @@ conditionally rather than assigned `undefined`.
 
 ## Testing Requirements
 
-- **Vitest, `test/*.test.ts`, one file per module**, plus two cross-cutting suites:
-  `test/layering.test.ts` (the architecture invariant) and `test/help.test.ts` (`--help` snapshots
-  plus the assertion that every command path in `SKILL.md` exists in the commander tree).
+- **Vitest, `test/*.test.ts`, one file per module**, plus the cross-cutting suites:
+  `test/layering.test.ts` (the architecture invariant), `test/help/<group>.test.ts` (one `--help`
+  suite per command group), `test/help/root.test.ts` (the tree's structural rules) and
+  `test/help/skill.test.ts` (every command path named in `SKILL.md` exists in the commander tree).
+- **A help suite asserts its own group's leaves — never a repo-wide list.** vitest keeps **one
+  snapshot file per test file**, so a single suite holding one ordered list of every leaf in the CLI
+  is a merge point that serialises every parallel change through one file; that is exactly what the
+  former `test/help.test.ts` did, and splitting it is what made eight children able to add leaves at
+  once. `test/help/tree.ts` holds the shared traversal so a group states its leaves once and derives
+  the rest. Adding a whole group stays one row in `src/cli/registry.ts` plus a one-line snapshot diff,
+  and changes **no** hand-written assertion.
+  - Corollary, learned by reverting it: a group *description* renders in `pingcode --help` and
+    reflows the root snapshot. Per-group notes — a dead filter, an upstream asymmetry, "this endpoint
+    ignores paging" — go in `addHelpText('after')`, which the root never prints.
+- **A test harness must not hand-roll the root program.** Root-level commander settings propagate
+  downwards, so a harness that builds its own `new Command()` root is testing a tree the CLI never
+  runs: `api DELETE … --yes false` passed in three such harnesses while the real binary refused it.
+  Use `createCliHarness` (`test/helpers/cli.ts`), which calls `buildProgram()` and owns a temp
+  `PINGCODE_CONFIG_DIR`.
+  > **Known gap, stated rather than papered over.** Three suites (`apiCommand`, `resolveCommand`,
+  > `testhubCommands`) still build their own root and compensate by re-adding
+  > `allowExcessArguments(false)` by hand. That patches the one setting known to matter and **will
+  > drift again** with the next root-level setting — the defect is the class, not those three lines.
+  > The fix is to route them through `createCliHarness` or to assert that a harness root's settings
+  > equal `buildProgram()`'s; until then, do not add a fourth hand-rolled root.
+
 - **Zero network in unit tests.** No `msw`, no `nock`: `Ctx.fetch` is replaced with a fake
   (`test/helpers/fake.ts`). A test that would open a socket is a bug in the test.
 - **Determinism is injected**, not mocked globally: `now` and `sleep` come from `Ctx`, so expiry
@@ -84,6 +109,9 @@ Unit tests prove our logic; they cannot prove the API's. So:
   (see the `ERROR_CODE_OVERRIDES` comment in `core/wire.ts`).
 - Currently unverified against the live API, by design: 429/`x-pc-retry-after`, 403/exit 4, and the
   self-hosted `<host>/open` derivation. They are unit-tested only, and the README says so.
+- **How to obtain such a fact safely — an isolated `PINGCODE_CONFIG_DIR`, an independent read-back
+  because a 200 does not mean the field was stored, and a probe per filter — is
+  [Live Verification](./live-verification.md).** Read it before any live-tenant work.
 
 ## Code Review Checklist
 
@@ -94,7 +122,10 @@ Unit tests prove our logic; they cannot prove the API's. So:
 - [ ] Exit codes unchanged, or changed everywhere at once (`errors.ts`, `design.md`, `SKILL.md`,
       README, tests).
 - [ ] Mutating command has `--dry-run` coverage, and the dry-run sends nothing.
-- [ ] `SKILL.md` and the README still describe flags that exist (`test/help.test.ts` checks command
-      paths; flags are on the reviewer).
+- [ ] `SKILL.md` and the README still describe flags that exist (`test/help/skill.test.ts` checks
+      command paths; flags are on the reviewer).
+- [ ] New leaves assert their own group's help suite; no repo-wide leaf list was reintroduced.
+- [ ] Every new flag is backed by a live observation that the field or filter it sends actually takes
+      effect.
 - [ ] No new runtime dependency, or a reason stated.
 - [ ] API-behaviour claims trace back to `research/`, not to guesswork.
