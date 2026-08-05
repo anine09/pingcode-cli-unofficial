@@ -50,9 +50,19 @@ jobs:
       # stream of duplicates.
       LABEL: catalog-drift
       TITLE: 'catalog drift: upstream API docs no longer match the vendored snapshot'
-      LOG: ${{ runner.temp }}/catalog-check.log
-      BODY: ${{ runner.temp }}/issue-body.md
     steps:
+      # LOG and BODY cannot live in the job-level `env:` above: that block may
+      # only reference github, needs, strategy, matrix, vars, secrets and inputs
+      # — NOT `runner`. A `${{ runner.temp }}` there does not fail at run time,
+      # it fails workflow *validation*, which GitHub reports as a 0-second run
+      # with no job, no check suite, and the workflow's name falling back to its
+      # file path. Writing them to $GITHUB_ENV here keeps one definition for the
+      # whole job, because $GITHUB_ENV entries apply to every later step.
+      - name: resolve the report paths
+        run: |
+          echo "LOG=$RUNNER_TEMP/catalog-check.log" >> "$GITHUB_ENV"
+          echo "BODY=$RUNNER_TEMP/issue-body.md" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       # Node 24, one version, no `npm ci`, no cache — the same reasoning as

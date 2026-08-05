@@ -47,6 +47,57 @@ function npmScriptsUsedIn(workflow: string): string[] {
   return [...used].sort();
 }
 
+/**
+ * The contexts `jobs.<id>.env` is allowed to read, per GitHub's context
+ * availability table. Notably absent: `runner`, `job`, `steps` and `env` — all
+ * of which are legal in a *step*-level `env:`, which is why this is an
+ * indentation-sensitive check rather than a grep for `runner`.
+ */
+const JOB_LEVEL_ENV_CONTEXTS = ['github', 'inputs', 'matrix', 'needs', 'secrets', 'strategy', 'vars'];
+
+/**
+ * The `KEY: value` lines of every job-level `env:` block, comments removed.
+ *
+ * `jobs.<id>.env` is a four-space key whose entries sit at six; a step's `env:`
+ * is at eight with entries at ten. Indentation is therefore the whole
+ * discriminator, and lines indented deeper than six (a folded value, a nested
+ * mapping) stay inside the block without being mistaken for entries.
+ *
+ * Comment lines are dropped first, the same way `test/githooks.test.ts` strips
+ * them before banning `git stash`: catalog-check.yml documents this exact rule in
+ * prose that names `${{ runner.temp }}`, and a check that fails on its own
+ * explanation would be deleted rather than obeyed.
+ */
+function jobLevelEnvEntries(workflow: string): string[] {
+  const entries: string[] = [];
+  let inside = false;
+  for (const line of workflow.split('\n')) {
+    if (line.trimStart().startsWith('#')) continue;
+    if (/^ {4}env:\s*$/.test(line)) {
+      inside = true;
+      continue;
+    }
+    if (!inside || line.trim() === '') continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent < 6) inside = false;
+    else if (indent === 6) entries.push(line.trim());
+  }
+  return entries;
+}
+
+/** The root context of every `${{ … }}` expression in a fragment of YAML. */
+function contextsUsedIn(text: string): string[] {
+  const contexts = new Set<string>();
+  for (const expression of text.match(/\$\{\{[^}]*\}\}/g) ?? []) {
+    const re = /(?<![.\w])([a-z][a-z_]*)\s*\./g;
+    for (let match = re.exec(expression); match !== null; match = re.exec(expression)) {
+      const name = match[1];
+      if (name !== undefined) contexts.add(name);
+    }
+  }
+  return [...contexts].sort();
+}
+
 describe('workflows', () => {
   it('are each governed by an explicit block below', () => {
     // Adding a workflow means adding its own assertions; the loops in this
@@ -87,6 +138,35 @@ describe('workflows', () => {
       expect(uses.length, name).toBeGreaterThan(0);
       for (const line of uses) expect(line, `${name}: ${line}`).toMatch(/@v\d+$/);
     }
+  });
+
+  it('keep job-level env blocks to the contexts available there, runner included', () => {
+    // A `${{ runner.temp }}` (or `job.`/`steps.`/`env.`) in `jobs.<id>.env` is not
+    // a runtime error: it fails workflow *validation*, which GitHub reports as a
+    // 0-second run with no job, no check suite, and the workflow's name falling
+    // back to its file path. Nothing local notices — the YAML is valid, and the
+    // push itself succeeds. An allowlist rather than a `runner` ban, so a future
+    // `${{ job.status }}` at job level is caught by the same line.
+    for (const { name, text } of workflows) {
+      for (const entry of jobLevelEnvEntries(text)) {
+        for (const context of contextsUsedIn(entry)) {
+          expect(JOB_LEVEL_ENV_CONTEXTS, `${name}: ${entry}`).toContain(context);
+        }
+      }
+    }
+  });
+
+  it('are actually scanned for that, at job level only', () => {
+    // Guards against the loop above passing vacuously: catalog-check.yml is the
+    // one file with a job-level `env:`, and these are its entries.
+    expect(jobLevelEnvEntries(catalogCheck).map((entry) => entry.split(':')[0])).toEqual(['LABEL', 'TITLE']);
+    // Step-level `env:` is out of scope on purpose — `runner`, `steps` and `job`
+    // are all legal there, and this file uses `steps.report.outputs.digest`.
+    expect(jobLevelEnvEntries(catalogCheck).join('\n')).not.toContain('GH_TOKEN');
+    expect(contextsUsedIn(catalogCheck)).toContain('steps');
+    // And the extractor does see the shape that broke the workflow.
+    expect(contextsUsedIn('LOG: ${{ runner.temp }}/catalog-check.log')).toEqual(['runner']);
+    expect(contextsUsedIn('RUN_URL: ${{ github.server_url }}/${{ github.repository }}')).toEqual(['github']);
   });
 });
 

@@ -82,6 +82,23 @@ conditionally rather than assigned `undefined`.
   > The fix is to route them through `createCliHarness` or to assert that a harness root's settings
   > equal `buildProgram()`'s; until then, do not add a fourth hand-rolled root.
 
+- **The workflow and hook suites assert text, not acceptance.** `test/workflows.test.ts` and
+  `test/githooks.test.ts` read `.github/workflows/` and `.githooks/` from disk and scan them
+  line-by-line — no YAML parser, no shell parser, because that would buy a dependency (see Forbidden
+  Patterns). They prove what a file *says*: that every `npm run` target exists, that actions are
+  pinned, that a gate was not quietly removed.
+  > **Known gap, stated rather than papered over.** Nothing in this repository performs GitHub's own
+  > schema validation — context availability per key, allowed `jobs.<id>.*` keys, where an expression
+  > may appear — so **a workflow can be fully green locally and still be unable to start**. That
+  > failure is close to silent: an invalid job-level `${{ runner.* }}` is not a runtime error but a
+  > validation error, reported as a 0-second run with no job, no check suite, and the workflow's `name`
+  > falling back to its file path. Nothing is red anywhere; the gate simply never ran. **GitHub is the
+  > only authoritative validator.** The rule that follows: after adding or editing a workflow, trigger
+  > it once — `gh workflow run <file>` (or `gh api repos/{owner}/{repo}/actions/workflows` and check
+  > that `name` is the declared name) — and read the run. A push that no longer errors is not proof the
+  > workflow runs. `test/workflows.test.ts` pins each invalid shape once it has been found (the
+  > job-level `env:` context allowlist is one); that list is a record of past accidents, not coverage.
+
 - **Zero network in unit tests.** No `msw`, no `nock`: `Ctx.fetch` is replaced with a fake
   (`test/helpers/fake.ts`). A test that would open a socket is a bug in the test.
 - **Determinism is injected**, not mocked globally: `now` and `sleep` come from `Ctx`, so expiry
@@ -128,4 +145,5 @@ Unit tests prove our logic; they cannot prove the API's. So:
 - [ ] Every new flag is backed by a live observation that the field or filter it sends actually takes
       effect.
 - [ ] No new runtime dependency, or a reason stated.
+- [ ] A new or edited workflow was actually triggered on GitHub once, not merely pushed.
 - [ ] API-behaviour claims trace back to `research/`, not to guesswork.
