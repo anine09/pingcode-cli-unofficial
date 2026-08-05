@@ -187,7 +187,11 @@ almost every difference is a trap.
     | 测试计划 test plan | `pingcode testhub plans list --library <l>` | a test cycle in a test library, with its own states and runs |
     | 配置方案 configuration scheme | `pingcode api GET /v1/ship/ticket_state_plans` | a *scheme* — a reusable bundle of states/properties/transitions bound to products |
     They share no ids and no vocabulary. The 排期 is the only one that is read-only for the whole
-    surface, and the configuration schemes are the only one with no refined command at all.
+    surface, and the configuration schemes are the only one with **no leaf you can type**. Note that
+    "no leaf" is not "not wired": `ticket_state_plans` and its `ticket_state_flows` child *are*
+    called, by the resolver cache, so that `ticket transition` can tell you which states are
+    reachable when the server refuses one. So they count towards README's 158 refined endpoints even
+    though no command bears their name — which is why that table is labelled *the refined layer*.
 11. **Tags cannot be set through the API** on ideas or tickets, and `submitter_id` on a ticket is
     silently ignored under a client-credentials token — the ticket is attributed to the token owner
     with no error. The CLI exposes neither.

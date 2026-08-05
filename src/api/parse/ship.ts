@@ -24,8 +24,6 @@ import type {
   ShipProperty,
   ShipPropertyOption,
   ShipState,
-  ShipStateFlow,
-  ShipStatePlan,
   ShipSuite,
   ShipTicket,
   ShipTicketType,
@@ -307,29 +305,11 @@ export function parseShipProperty(raw: unknown): ShipProperty {
   };
 }
 
-export function parseShipStatePlan(raw: unknown): ShipStatePlan {
-  const record = asRecord(raw);
-  return {
-    ...record,
-    id: asString(record.id) ?? '',
-    // Nullable: `null` means the org-level default plan (ship GOTCHA #23).
-    product: parseRef(record.product),
-  };
-}
-
-/**
- * State flows spell the source state **`form_state`** in the docs while
- * transition histories spell it `from_state`, and no response example exists to
- * settle which reaches the wire (ship GOTCHA #2). Both are accepted; the
- * normalised value is `from_state`.
+/*
+ * There is no `parseShipStatePlan` / `parseShipStateFlow` here. Both state-plan
+ * endpoints are read only by the `cacheOnly` resolvers in `core/metadata`, which decode
+ * rows with their own `refRecord` and carry the `form_state` / `from_state` spelling
+ * fix (ship GOTCHA #2) in `core/metadata/index.ts`. The parsers that used to sit here
+ * were the unexercised copy of that fix and went with the two dead `api/ship.ts`
+ * wrappers in the G3 closeout (2026-08-05). See `src/api/ship.ts` for the full note.
  */
-export function parseShipStateFlow(raw: unknown): ShipStateFlow {
-  const record = asRecord(raw);
-  return {
-    ...record,
-    id: asString(record.id) ?? '',
-    from_state: parseRef(record.from_state) ?? parseRef(record.form_state),
-    to_state: parseRef(record.to_state),
-    state_plan: parseRef(record.state_plan),
-  };
-}

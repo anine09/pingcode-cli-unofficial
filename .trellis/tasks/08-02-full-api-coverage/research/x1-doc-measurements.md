@@ -79,6 +79,23 @@ Two disambiguations, both forced by the only two duplicate `(method, path)` grou
 - `GET /v1/auth/token` is three grants; only `client_credentials` is implemented, and it is counted
   as **0** in the published table because it is not a user-facing data command.
 
+> **Re-measured 2026-08-05 at the G3 closeout, and unchanged: still 159 / 158, `unresolved: 0`,
+> `bad: 0`, `ship 27/101`.** That batch deleted `api/ship.ts`'s two never-called
+> `listTicketStatePlans` / `listTicketStateFlows` wrappers (design §D21.3). The count did not move
+> because the script also scans `src/core/metadata/**`, and it is `core/metadata/registry.ts` that
+> actually names those two endpoint helpers — the resolver cache was always the real access path, and
+> the wrappers were a parallel one nobody used. Two consequences worth writing down:
+>
+> 1. **Two of the 158 are reachable only through the resolver cache, not through any leaf.** They are
+>    `GET /v1/ship/ticket_state_plans` and its `…/ticket_state_flows` child, read so that
+>    `product ticket transition` can name the reachable states when the server refuses a move. This
+>    is why README's layer label is now *the refined layer* rather than *named commands*: the
+>    measurement is `(method, path)` pairs called by `src/api` + `src/core/metadata` +
+>    `src/cli/commands`, which is not the same set as "endpoints with a command".
+> 2. **Do not write `ENDPOINTS.<helper>` in prose inside those three directories.** The G3 comment
+>    explaining the deletion did, and it pushed `unresolved` from 0 to 2 — the very signal §3 cites
+>    as what makes the count trustworthy. The comment was reworded; the trap is real and permanent.
+
 ```
 wired endpoints: 159 / 459     ← includes the internal client_credentials call
                                ← published as 158, i.e. business endpoints only

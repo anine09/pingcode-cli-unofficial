@@ -18,8 +18,6 @@ import type {
   ShipProductMember,
   ShipProperty,
   ShipState,
-  ShipStateFlow,
-  ShipStatePlan,
   ShipSuite,
   ShipTicket,
   ShipTicketType,
@@ -41,8 +39,6 @@ import {
   parseShipProductMember,
   parseShipProperty,
   parseShipState,
-  parseShipStateFlow,
-  parseShipStatePlan,
   parseShipSuite,
   parseShipTicket,
   parseShipTicketType,
@@ -497,29 +493,33 @@ export async function listTicketProperties(ctx: Ctx, productId: string): Promise
 }
 
 // ---------------------------------------------------------------------------
-// ticket state plans + flows (transition pre-validation, PRD D11)
+// ticket state plans + flows — deliberately NOT in this layer at all
 // ---------------------------------------------------------------------------
 
-/**
- * There is **no `?product_id=` filter** on the plan list and the product resource
- * exposes no plan id, so "which plan does product X use" is an O(all plans)
- * client-side scan over the embedded `product.id` — the only route the docs
- * describe (ship GOTCHA #23, §9.11). Plans with `product: null` are the org-level
- * default and are skipped by the caller.
+/*
+ * `GET /v1/ship/ticket_state_plans` and
+ * `GET /v1/ship/ticket_state_plans/{plan}/ticket_state_flows` are the two endpoints
+ * behind `product ticket transition`'s advisory "here is what you *can* reach"
+ * message (design §13.2). They have **no wrapper in this file, on purpose** — the same
+ * shape as `api/testhub.ts`'s missing `listSuites` (`e76bdff`): a wrapper nobody calls
+ * reads like an access path and rots like one.
+ *
+ * They are reached by `core/metadata/registry.ts` instead, whose `ship-ticket-state-plan`
+ * and `ship-ticket-state-flow` rows are `cacheOnly` and name the `shipTicketStatePlans` /
+ * `shipTicketStateFlows` helpers of `core/endpoints.ts` directly (spelled without the
+ * `ENDPOINTS.` prefix here on purpose: `research/x1-scripts/zz-x1-coverage.test.ts` counts
+ * refined endpoint coverage by scanning this directory for that exact token, and a mention
+ * inside a comment would show up as an unclassifiable occurrence, costing the measurement
+ * its `unresolved: 0` guarantee). `findTicketStatePlanId` and `loadTicketStateFlows` in
+ * `core/metadata/index.ts` own the requests, the 24 h cache, the `product: null`
+ * org-default fallback and the edge encoding. A wrapper here would be a second, uncached
+ * path to the same rows.
+ *
+ * Two wrappers plus a `ShipStatePlan`/`ShipStateFlow` type pair and two parsers did exist
+ * until the G3 closeout (2026-08-05) found the wrappers had never had a caller. The whole
+ * chain went, not just its head, because the one fact it carried was already recorded on
+ * the live path: `core/metadata/index.ts` accepts both the documented `form_state` and the
+ * `from_state` spelling of an edge's source (ship GOTCHA #2) in its own code and comment,
+ * and `test/shipMetadata.test.ts` pins it there. Keeping a second copy behind a dead
+ * export would have been keeping the copy that is never exercised.
  */
-export async function listTicketStatePlans(ctx: Ctx): Promise<ShipStatePlan[]> {
-  return await listAllOf(ctx, ENDPOINTS.shipTicketStatePlans, {}, parseShipStatePlan);
-}
-
-/** The legal `from → to` edges of a state plan — this is what makes a transition legal. */
-export async function listTicketStateFlows(
-  ctx: Ctx,
-  statePlanId: string,
-): Promise<ShipStateFlow[]> {
-  return await listAllOf(
-    ctx,
-    ENDPOINTS.shipTicketStateFlows(statePlanId),
-    {},
-    parseShipStateFlow,
-  );
-}

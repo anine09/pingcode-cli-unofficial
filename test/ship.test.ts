@@ -6,7 +6,6 @@ import {
   parseShipPlanSummary,
   parseShipProduct,
   parseShipProperty,
-  parseShipStateFlow,
   parseShipTicket,
   parseShipTicketType,
   parseTicketChannel,
@@ -33,8 +32,6 @@ import {
   listTicketChannels,
   listTicketPriorities,
   listTicketProperties,
-  listTicketStateFlows,
-  listTicketStatePlans,
   listTicketStates,
   listTicketTypes,
   searchIdeas,
@@ -50,8 +47,11 @@ import { createFakeFetch, createTestContext, jsonResponse } from './helpers/fake
 /**
  * S3: the ship API wrappers. Injected `fetch`, zero network. Every assertion is
  * either a wire fact (method, path, query, body) or a normalisation the research
- * file demands (0/1 → boolean, `channel` Object-or-String, `form_state` typo,
- * `is_system` absence).
+ * file demands (0/1 → boolean, `channel` Object-or-String, `is_system` absence).
+ *
+ * The two ticket-state-plan wrappers are NOT here: they are `core/metadata`'s, and their
+ * `form_state` spelling fix is asserted in `test/shipMetadata.test.ts` (G3 closeout, design
+ * §D21.3).
  */
 
 const NOW = 1_700_000_000_000;
@@ -86,14 +86,6 @@ describe('ship normalisation', () => {
     expect((parseShipTicket({ id: 't', channel: { id: 'c1' } }).channel as { id: string }).id).toBe(
       'c1',
     );
-  });
-
-  it('accepts both `form_state` and `from_state` on a state flow (ship GOTCHA #2)', () => {
-    expect(parseShipStateFlow({ id: 'f1', form_state: { id: 'a' }, to_state: { id: 'b' } })).
-      toMatchObject({ from_state: { id: 'a' }, to_state: { id: 'b' } });
-    expect(parseShipStateFlow({ id: 'f1', from_state: { id: 'a' }, to_state: { id: 'b' } })).
-      toMatchObject({ from_state: { id: 'a' } });
-    expect(parseShipStateFlow({ id: 'f1', to_state: { id: 'b' } }).from_state).toBeUndefined();
   });
 
   it('normalises option ids onto `_id` and tolerates the `id` variant (ship GOTCHA #8)', () => {
@@ -312,28 +304,6 @@ describe('product-scoped metadata reads', () => {
       expect(fake.calls[0]?.method).toBe('GET');
     });
   }
-
-  it('lists state plans unfiltered — there is no ?product_id= (ship GOTCHA #23)', async () => {
-    const { ctx, fake } = ctxFor([
-      () => envelope([{ id: 'plan-org', product: null }, { id: 'plan-1', product: { id: 'prod-1' } }]),
-    ]);
-    const plans = await listTicketStatePlans(ctx);
-    expect(plans.map((plan) => plan.product?.id)).toEqual([undefined, 'prod-1']);
-    const url = new URL(fake.urls()[0] ?? '');
-    expect(url.pathname).toBe('/v1/ship/ticket_state_plans');
-    expect(url.searchParams.get('product_id')).toBeNull();
-  });
-
-  it('lists state flows under the plan', async () => {
-    const { ctx, fake } = ctxFor([
-      () => envelope([{ id: 'f1', form_state: { id: 's1' }, to_state: { id: 's2' } }]),
-    ]);
-    const flows = await listTicketStateFlows(ctx, 'plan-1');
-    expect(flows[0]?.from_state?.id).toBe('s1');
-    expect(new URL(fake.urls()[0] ?? '').pathname).toBe(
-      '/v1/ship/ticket_state_plans/plan-1/ticket_state_flows',
-    );
-  });
 });
 
 describe('the api layer neither logs nor sends under --dry-run', () => {

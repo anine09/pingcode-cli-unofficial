@@ -296,26 +296,15 @@ export type ShipPropertyOption = {
   [key: string]: unknown;
 };
 
-/** `GET /v1/ship/ticket_state_plans` — `product` is **nullable** (= org default). */
-export type ShipStatePlan = {
-  id: string;
-  product?: Ref | undefined;
-  [key: string]: unknown;
-};
-
-/**
- * `GET /v1/ship/ticket_state_plans/{plan}/ticket_state_flows` — the legal
- * transitions of a plan.
+/*
+ * There are no `ShipStatePlan` / `ShipStateFlow` types here.
  *
- * The docs spell the source field **`form_state`** on all three state-flow
- * records while `transition_histories` spell it `from_state`, and no response
- * example exists to settle it (ship GOTCHA #2). Both keys are accepted; the
- * normalised value lands in `from_state`.
+ * `GET /v1/ship/ticket_state_plans` and its `…/ticket_state_flows` child are read only by
+ * the two `cacheOnly` resolvers in `core/metadata`, which keep nothing but `{id}` and a
+ * `from → to` edge encoding — they never materialise a resource object, so a resource type
+ * had no consumer. Both types plus their parsers and `api/ship.ts` wrappers were deleted in
+ * the G3 closeout (2026-08-05); the one wire fact they documented, the docs' **`form_state`**
+ * spelling of an edge's source against `transition_histories`' `from_state` (ship GOTCHA #2),
+ * lives on the live path in `core/metadata/index.ts` and is pinned by
+ * `test/shipMetadata.test.ts`. See `src/api/ship.ts` for the full note.
  */
-export type ShipStateFlow = {
-  id: string;
-  from_state?: Ref | undefined;
-  to_state?: Ref | undefined;
-  state_plan?: Ref | undefined;
-  [key: string]: unknown;
-};
