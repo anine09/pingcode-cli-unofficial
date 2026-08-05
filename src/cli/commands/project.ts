@@ -254,8 +254,11 @@ export function registerProjectCommands(program: Command): void {
   )
     .addHelpText(
       'after',
-      '\n--state-id takes an id rather than a name because the project-state lookup lives at\n' +
-        'an endpoint outside this command group; the generic layer above prints them.\n' +
+      '\n--state-id takes an id and has NO `--state <name>` twin, because there is no\n' +
+        'project-state resolver kind: the lookup lives at `/v1/pjm/project/states`, outside\n' +
+        'this command group, and `pingcode resolve list` has no entry for it. The generic\n' +
+        'layer above prints the ids. This is the one place in the CLI where an `--x-id` flag\n' +
+        'is deliberately unpaired.\n' +
         'Not patchable, and silently ignored by the API if you send them another way:\n' +
         'visibility, type, process_id, is_archived. A project cannot be archived or deleted\n' +
         'through this API at all.\n',

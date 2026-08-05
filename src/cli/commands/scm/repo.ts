@@ -176,7 +176,10 @@ export function registerRepoCommands(parent: Command): void {
       addPlatformOptions(
         group
           .command('create')
-          .description('register a repository (full_name must be unique on the platform)')
+          .description(
+            'register a repository — PERMANENT: there is no repository delete. full_name must be ' +
+              'unique on the platform, and a mistyped --owner-name mints a permanent identity too',
+          )
           .requiredOption('--name <name>', 'repository name, e.g. pingcode-cli')
           .requiredOption('--full-name <owner/name>', 'unique full name, e.g. acme/pingcode-cli'),
       ),

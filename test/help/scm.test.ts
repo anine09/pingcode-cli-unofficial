@@ -241,6 +241,30 @@ describe('scm command surface', () => {
     ]);
   });
 
+  it('marks every irreversible create as PERMANENT, not just the two group descriptions', () => {
+    // G3 closeout, extending the test above. The `pr` / `review` groups already said it,
+    // but the five `create` leaves for resources scm cannot delete at all said nothing —
+    // so `scm repo create --owner-name` could mint an undeletable ghost identity on a typo
+    // with no warning anywhere near the flag. pjm's `project create` established the
+    // spelling (`PERMANENT: there is no delete …`); these reuse it verbatim so the word is
+    // greppable across groups.
+    //
+    // NOTE the premise this corrects, because a brief for this batch asserted otherwise:
+    // scm is NOT delete-free. It has exactly one DELETE, `scm branch delete`, asserted
+    // above. What these five share is that *their own* resource has none.
+    for (const leaf of [
+      ['scm', 'platform', 'create'],
+      ['scm', 'repo', 'create'],
+      ['scm', 'platform-user', 'create'],
+      ['scm', 'commit', 'create'],
+      ['scm', 'ref', 'create'],
+    ]) {
+      expect(flowingHelp(leaf), leaf.join(' ')).toContain('PERMANENT');
+    }
+    // The one create that is reversible must NOT claim to be permanent.
+    expect(flowingHelp(['scm', 'branch', 'create'])).not.toContain('PERMANENT');
+  });
+
   it('registers no --all on the delete leaf', () => {
     expect(helpFor(['scm', 'branch', 'delete'])).not.toContain('--all');
     expect(helpFor(['scm', 'branch', 'delete'])).toContain('--yes');

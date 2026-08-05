@@ -130,7 +130,10 @@ export function registerPlatformUserCommands(parent: Command): void {
     addPlatformOptions(
       group
         .command('create')
-        .description('register a git identity (the username must be unique on the platform)')
+        .description(
+          'register a git identity — PERMANENT: there is no identity delete anywhere in scm, so a ' +
+            'mistyped username is a ghost forever. The username must be unique on the platform',
+        )
         .requiredOption('--name <name>', 'git username — the string commits are attributed by')
         .option('--display-name <text>', 'display name shown in PingCode')
         .option('--html-url <url>', 'profile page on the hosting platform')

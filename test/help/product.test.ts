@@ -12,6 +12,20 @@ import { fullHelpFor, helpFor, leavesOf, subgroupsOf } from './tree';
  * surface is worth pinning, and leave `test/help/root.test.ts` alone.
  */
 
+/**
+ * `--help` **including the trailing prose**, with commander's hard wrapping undone, for
+ * asserting on a phrase rather than on where the terminal width happens to break a line
+ * (same reason as `test/help/scm.test.ts`'s helper of the same name).
+ *
+ * `fullHelpFor`, not `helpFor`, because the group-level warnings this file asserts live in
+ * `addHelpText('after')` epilogs. That is not incidental: a group *description* is also
+ * rendered in `pingcode --help`, so putting a multi-line warning there would reflow the
+ * root listing that `test/help/__snapshots__/root.test.ts.snap` pins.
+ */
+function flowingHelp(path: string[]): string {
+  return fullHelpFor(path).replace(/\s+/g, ' ');
+}
+
 describe('product command surface', () => {
   it('registers exactly these leaves', () => {
     expect(leavesOf('product')).toEqual([
@@ -136,8 +150,10 @@ describe('product --help', () => {
  *
  * All five of the leaves S4 added are GETs, and that is not a scoping choice — every
  * write verb on both paths answers HTTP **405 Method Not Allowed** (live 2026-08-05,
- * design §D18). Ship has no DELETE anywhere at all. Without these rows a future child
- * could quietly add a `plan create` that cannot work.
+ * design §D18). Ship has no delete for a product, a requirement or a ticket — its 8
+ * `DELETE`s all remove configuration or membership rows, so nothing this group creates can
+ * be undone. Without these rows a future child could quietly add a `plan create` that
+ * cannot work.
  */
 describe('product: the write leaves ship does not have', () => {
   it('offers no plan or history writes, because the routes answer 405', () => {
@@ -154,13 +170,29 @@ describe('product: the write leaves ship does not have', () => {
     }
   });
 
-  it('offers no delete leaf anywhere in ship: the module has no DELETE at all', () => {
+  it('offers no delete leaf anywhere in ship, and says so in the group description', () => {
     // The crosscutting subgroups are the exception and prove the rule — they are
     // `/v1/{relations,comments,attachments}`, not `/v1/ship/**`.
     const shipOwn = leavesOf('product').filter(
       (leaf) => !/ (relation|comment|attachment|activity) /.test(leaf),
     );
     expect(shipOwn.filter((leaf) => leaf.endsWith(' delete'))).toEqual([]);
+    // G3 closeout: the absence has to be visible where the user is. Every pjm leaf that
+    // creates something undeletable already said `PERMANENT`; this whole group did not,
+    // even though an idea and a ticket are exactly that.
+    expect(flowingHelp(['product'])).toContain('PERMANENT');
+  });
+
+  it('is precise about what the 8 ship DELETEs actually delete', () => {
+    // Correcting the wording this file used to carry ("the module has no DELETE at all").
+    // `api list --module ship --method DELETE` returns **8** rows — but every one of them
+    // removes a configuration or membership row (a scheme member, a product member, a
+    // suite, a tag, an external user, a state flow), never a product, a requirement or a
+    // ticket. The leaf-level claim above is correct; the prose was not, and an agent that
+    // believed the prose would not think to look for `DELETE …/products/{id}/members/{id}`.
+    const group = flowingHelp(['product']);
+    expect(group).toMatch(/configuration or membership row/);
+    expect(group).not.toMatch(/no DELETE at all/);
   });
 
   it('keeps the update surface to exactly the two resources that have a PATCH', () => {

@@ -161,7 +161,20 @@ const SHIP_PLAN_COLUMNS: Column<ShipPlan>[] = [
 export function registerProductCommands(program: Command): void {
   const product = program
     .command('product')
-    .description('产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)');
+    .description('产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)')
+    // Deliberately an epilog, not part of the description: a group description is also
+    // rendered in `pingcode --help`, where a four-line warning would crowd out the other
+    // nine groups (and `test/help/__snapshots__/root.test.ts.snap` pins that listing).
+    // Everything below is visible on `pingcode product --help`, which is where someone
+    // about to write is standing.
+    .addHelpText(
+      'after',
+      '\nPERMANENT: nothing in this group can be deleted. ship publishes 8 DELETEs and every\n' +
+        'one of them removes a configuration or membership row — a scheme entry, a product\n' +
+        'member, a suite, a tag, an external user, a state flow — never a product, a\n' +
+        'requirement or a ticket. So a requirement or ticket you create here is forever, and\n' +
+        '`--dry-run` is worth the extra call. There is no archive either.\n',
+    );
 
   addGlobalOptions(
     addPagingOptions(

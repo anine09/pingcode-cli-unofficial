@@ -81,7 +81,7 @@ Credentials come from a PingCode application, not from a user account:
      `bulk-update`
    - `pcp:read:global:team` — `pingcode settings users`
    - `pcp:read:pjm:sprint` / `pcp:write:pjm:sprint` — `pingcode project meta sprints` (the sprint
-     list) and `project sprint get|create|update|bulk`. Grant the write half only if you intend to
+     list) and `project sprint get|create|update|bulk-create`. Grant the write half only if you intend to
      plan sprints: **a sprint cannot be deleted**, by the API or by anyone
    - `pcp:read:pjm:release` / `pcp:write:pjm:release` — `pingcode project version …` (发布, a
      project release). Note the mismatch: the scope says *release*, the resource and the command say
@@ -113,7 +113,7 @@ Credentials come from a PingCode application, not from a user account:
    - `pcp:write:testhub:testcase` — `testhub cases create` / `update`
    - `pcp:read:testhub:testplan` — `testhub plans list` / `get`, `testhub meta plan-types`, and
      `testhub runs list`
-   - `pcp:write:testhub:testplan` — `testhub plans create`, `testhub runs patch` / `bulk`
+   - `pcp:write:testhub:testplan` — `testhub plans create`, `testhub runs update` / `bulk`
    - `pcp:read:testhub:configuration` — **not optional, despite the name**: `testhub meta
      case-states`, `testhub meta run-statuses` and `testhub meta important-levels` all sit behind
      it, and they are the only source of a `state_id`, a `status_id` and an `important_level_id`.
@@ -273,6 +273,42 @@ pingcode resolve testhub-library "研发测试库" --json
 
 The refined commands (`project meta …`, `product meta …`, `testhub meta …`) already accept names
 directly, so `resolve` is mainly for feeding the generic layer.
+
+### The two flag shapes, and how to tell which one a leaf uses
+
+Every field that could be given either as a business name or as an id is spelled in **one of two
+ways**, and the split is by module, not by field. It is not documented anywhere upstream, so read
+`--help` rather than guessing — but these are the rules the CLI follows.
+
+| Shape | Modules | Example |
+|---|---|---|
+| **Paired** — `--x <name\|id>` **plus** `--x-id <id>` | `testhub`, `scm`, `release` | `--library` / `--library-id`, `--platform` / `--platform-id`, `--repo` / `--repo-id`, `--env` / `--env-id` |
+| **Single** — one `--x <name\|id>` that accepts both | `pjm` (`project`), `ship` (`product`) | `--project`, `--sprint`, `--release`, `--product` |
+
+Both shapes accept a name or an id. What differs is only whether you can **force** the no-lookup
+path:
+
+- With a **pair**, `--x` triggers a name lookup (one extra GET, cached 24 h) and `--x-id` is sent
+  verbatim with no lookup at all. The two are mutually exclusive — passing both is exit 2. Reach for
+  `--x-id` when you already hold ids (it is faster, and it cannot be tripped by two objects sharing
+  a name).
+- With a **single** flag, the CLI decides: it passes a value through if it looks like an id and
+  looks it up otherwise. There is no way to say "skip the lookup". It never validates an id's shape
+  — ids in this API are 24-hex, 32-hex *or* a bare slug like `task` / `story` / `bug`.
+
+Three deliberate gaps in that scheme, so you do not read them as bugs:
+
+1. **`testhub runs list --case-id` has no `--case` twin**, although `runs create`,
+   `runs bulk-create` and `cases bulk-update` all pair on the same resource. The value goes straight
+   into the search filter, so a `short_id` arrives unresolved and the API answers 400 `100044`
+   (`'property_value'值不合法`). Pass a full case id, or get one from `testhub cases list`.
+2. **`scm branch|commit|pr list --work-item-id` accepts a 24-hex ObjectId only** — *not* an
+   identifier like `PLM-001`, which returns 400 `100003`. Note the asymmetry within one group: the
+   *write* paths' `--work-item` in the same commands **do** take `PLM-001`. Each leaf's `--help`
+   says which.
+3. **`project update --state-id` has no `--state`**, because there is no project-state resolver kind:
+   the lookup lives at `/v1/pjm/project/states`, which no `resolve` kind covers. Read the ids with
+   `pingcode api GET /v1/pjm/project/states --query project_id=<id>`.
 ## 4. Rules that will bite you
 
 These hold in **every** module. The rules that apply to one module only — pjm's

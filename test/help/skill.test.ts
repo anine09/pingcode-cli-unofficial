@@ -264,6 +264,19 @@ describe('SKILL.md records the contract that does not scale with the surface (PR
     expect(allDocs).toMatch(/best effort/i);
     expect(allDocs).toMatch(/no endpoint supports sorting/i);
   });
+
+  it('7. both flag shapes, since neither was documented anywhere before the G3 closeout', () => {
+    // The CLI has two spellings for "name or id" — `--x` + `--x-id` pairs (testhub, scm,
+    // release) and a single flag taking either (pjm, ship) — and until now an agent could
+    // only learn which by reading every `--help`. This is cross-module, so SKILL.md owns it
+    // rather than any module file; assert it *there* specifically.
+    expect(skill).toMatch(/--library-id/);
+    expect(skill).toMatch(/mutually exclusive/i);
+    // …and the three unpaired flags, each of which reads like an oversight until explained.
+    expect(skill).toMatch(/runs list --case-id/);
+    expect(skill).toMatch(/--work-item-id/);
+    expect(skill).toMatch(/project update --state-id/);
+  });
 });
 
 describe('the module documents carry the per-module rules (design D6.4)', () => {

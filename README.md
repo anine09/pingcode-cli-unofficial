@@ -64,9 +64,9 @@ The CLI authenticates as an **application**, not as a user, using the OAuth
    | `pcp:write:pjm:workitem` | `project work-item create` / `update` / `transition` / `bulk-update` / `delete`, plus `link …` and `tag …` |
    | `pcp:read:global:team` | `settings users`, and every `--assignee` / `--executor` that resolves against the org directory |
    | `pcp:read:pjm:sprint` | `project meta sprints` (which is the sprint *list*) and `project sprint get` |
-   | `pcp:write:pjm:sprint` | `project sprint create` / `update` / `bulk`. **A sprint can never be deleted** |
+   | `pcp:write:pjm:sprint` | `project sprint create` / `update` / `bulk-create`. **A sprint can never be deleted** |
    | `pcp:read:pjm:release` | `project version list` / `get`. Note the mismatch: the scope says *release*, the command says *version* |
-   | `pcp:write:pjm:release` | `project version create` / `update` / `delete` / `bulk` |
+   | `pcp:write:pjm:release` | `project version create` / `update` / `delete` / `bulk-create` |
    | `pcp:read:ship:product` | `product list` / `get`, `product plan …`, `product meta members`, and every product-name lookup |
    | `pcp:read:ship:idea` | `product idea list` / `get` / `history …`, `product meta idea-*` |
    | `pcp:write:ship:idea` | `product idea create` / `update` |
@@ -151,7 +151,7 @@ layers whose costs are completely different, and it is worth knowing which one y
 | Layer | What you get | Coverage | Cost of adding an endpoint |
 |---|---|---|---|
 | **Reach** — `pingcode api` | one generic executor over a vendored endpoint catalog: real auth, paging, `--dry-run`, redaction, exit codes, pre-flight validation | **459 / 459** | zero — it is already there |
-| **Ergonomics** — named commands | `--flags` instead of raw JSON, name→id resolution, width-aware tables, per-endpoint traps recorded in `--help` | **158 / 459** | one live-verified slice each |
+| **Ergonomics** — the refined layer | `--flags` instead of raw JSON, name→id resolution, width-aware tables, per-endpoint traps recorded in `--help` | **158 / 459** | one live-verified slice each |
 
 "Complete" (完全体) refers to **Reach**, and Reach is finished: every documented endpoint is
 invocable today. Seven of the 459 are refused *before any request* because they need a user token
@@ -195,9 +195,12 @@ how many the catalog documents. The module names are the ones `pingcode api list
   endpoints. And `pingcode resolve` contributes **32** leaves (one per resolvable metadata kind,
   plus `resolve list`) while calling only lookup endpoints already counted in their own module.
 - Conversely one command often covers several endpoints (`project work-item list` is both the simple
-  `GET` and `POST …/search`), and a handful of endpoints are called by the resolver cache rather than
-  by any single command. So compare the two columns of *this* table, never a leaf count against an
-  endpoint count.
+  `GET` and `POST …/search`), and **two endpoints have no command at all** yet are counted: `GET
+  /v1/ship/ticket_state_plans` and its `…/ticket_state_flows` child are called by the resolver cache,
+  to tell `product ticket transition` which states are reachable when the server refuses one. They
+  are wired and exercised, just never as a leaf you can type — which is why the layer is labelled
+  *the refined layer* rather than *named commands*. So compare the two columns of *this* table, never
+  a leaf count against an endpoint count.
 
 ### How this task's plan compares
 
@@ -269,8 +272,8 @@ pingcode project   list | get <project> | create | update <project> | progress <
 pingcode project work-item  list | get <ref> | create | update <ref> | transition <ref>
                             bulk-update | delete <ref>
                             link list|get|add|delete · tag add|get|delete · history list|get
-pingcode project sprint     get | create | update | bulk        # list is `project meta sprints`
-pingcode project version    list | get | create | update | delete | bulk
+pingcode project sprint     get | create | update | bulk-create   # list is `project meta sprints`
+pingcode project version    list | get | create | update | delete | bulk-create
 pingcode project member     list | get | add
 pingcode project meta       types | states | priorities | sprints | relation-types | tags
 
@@ -377,7 +380,7 @@ pingcode testhub plans create --library LIB --name "2026 S2 回归" \
   --type 普通 --start 2026-08-10 --end 2026-08-31 --assignee 张三 --dry-run --json
 
 pingcode testhub runs list --library LIB --plan "2026 S1 回归" --json
-pingcode testhub runs patch 7hK2mQ9x --status 通过 --remark "retested on iOS" --json
+pingcode testhub runs update 7hK2mQ9x --status 通过 --remark "retested on iOS" --json
 pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" --remove-run 7hK2mQ9x --json
 ```
 
@@ -423,7 +426,7 @@ sending it. Read requests still run, so ids are genuinely resolved first.
     `{"page_index":0,"page_size":30,"total":123,"values":[…]}`
   - any list with `--all` → `{"values":[…],"count":42,"all":true}`
   - every `meta` lookup (`product meta …`, `project meta …`, `testhub meta …`, `settings users`) → `{"values":[…],"count":20}`
-- Single-resource commands (`get`, `create`, `update`, `transition`, `patch`) print the resource object.
+- Single-resource commands (`get`, `create`, `update`, `transition`) print the resource object.
 - `--dry-run` prints `{"dry_run":true,"request":{"method":…,"url":…,"headers":…,"body":…}}` — with
   `Authorization` and any `client_secret` masked.
 - Errors print to **stderr** as `{"error":{"kind":…,"message":…,"code":…,"exit":…}}`.
@@ -518,6 +521,14 @@ follows is only what applies everywhere.
   `auth login` and `auth logout` both clear the cache.
 - **`pingcode resolve` is the same lookup as a hand-typed name**, exposed as one id on stdout so it
   can feed `pingcode api`, which takes ids only.
+- **Two flag shapes, split by module, both accepting a name or an id.** `testhub`, `scm` and
+  `release` use **pairs** — `--library` / `--library-id`, `--platform` / `--platform-id`, `--repo` /
+  `--repo-id`, `--env` / `--env-id` — where `--x` looks the name up and `--x-id` is sent verbatim with
+  no lookup; the two are mutually exclusive (exit 2). `pjm` and `ship` use a **single** flag
+  (`--project`, `--sprint`, `--release`, `--product`) that decides for you and offers no way to skip
+  the lookup. Neither shape ever validates an id's format. `SKILL.md` has the table plus the three
+  deliberate exceptions (`testhub runs list --case-id`, `scm … list --work-item-id`, and
+  `project update --state-id`, which has no `--state` because no resolver kind covers project states).
 
 ### pjm-specific caveats
 
@@ -529,7 +540,7 @@ follows is only what applies everywhere.
 - **State changes are workflow-validated server-side.** On rejection the CLI prints the server
   message plus the states configured for that type — but only if you passed `--type`.
 - **A project can never be deleted or archived**, and a **sprint can never be deleted at all**.
-  `project create`, `project sprint create` and `sprint bulk` are irreversible; `--dry-run` first.
+  `project create`, `project sprint create` and `sprint bulk-create` are irreversible; `--dry-run` first.
 - **`link` and `relation` are different families.** `link` is work item ↔ work item with a required
   type; `relation` is work item ↔ anything *else* and refuses two work items outright.
 - **There is no `sprint list` or `work-item tag list` leaf.** The sprint list is `project meta
@@ -599,7 +610,7 @@ modes.
   the names match. Six `meta` leaves are library-scoped (`case-states`, `case-types`,
   `case-properties`, `run-statuses`, `plan-types`, `suites`) and two are organisation-level
   (`important-levels`, `plan-states`); a missing `--library` on a library-scoped command is exit 2.
-  `cases get|update|delete`, `plans get|update` and `runs patch` read the resource first and inherit
+  `cases get|update|delete`, `plans get|update` and `runs update` read the resource first and inherit
   its library; `runs list` needs one only to resolve `--plan` / `--status` by name.
 - **`cases list` and `runs list` are `POST …/search`.** The plain `GET` lists are never used —
   unfiltered, `GET /v1/testhub/cases` scans every library the token can see. Same DSL limits as
@@ -610,7 +621,7 @@ modes.
   the write needs a status **id**, and only the localized (renameable) name joins them. So the CLI
   refuses a partial step edit and prints the full list of step ids. `--set` / `properties` on a case
   replace wholesale too.
-- **`runs patch` always sends `status_id`, and carries the executor over.** `status_id` is required
+- **`runs update` always sends `status_id`, and carries the executor over.** `status_id` is required
   by the API even on PATCH, so the CLI pre-reads the run and re-sends its current result — and its
   current executor — when you do not name one. If the run has no executor and you name none,
   `executor_id` is omitted and the CLI warns that the run stays unassigned (omitting it is a
@@ -662,7 +673,7 @@ modes.
   field, so name a library right the first time. The CLI prints that warning after every create.
 - **Still not exposed, on purpose:** library members, case-module (suite) writes, plan **delete**,
   configuration writes, and `PUT /runs/{id}` (documented to blank the executor when the field is
-  omitted — unverified, and `runs patch` covers the same ground safely). All are reachable through
+  omitted — unverified, and `runs update` covers the same ground safely). All are reachable through
   `pingcode api` if you really need them.
 
 ### SCM, build and release caveats

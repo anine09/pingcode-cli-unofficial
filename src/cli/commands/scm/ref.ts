@@ -130,7 +130,10 @@ export function registerRefCommands(parent: Command): void {
     addRepoOptions(
       group
         .command('create')
-        .description('link an existing commit to a branch (create the commit first)')
+        .description(
+          'link an existing commit to a branch — PERMANENT: refs have no delete, which is also ' +
+            'why deleting a branch orphans them. Create the commit first',
+        )
         .requiredOption('--sha <sha>', 'full SHA of a commit that already exists in PingCode')
         .requiredOption('--branch-id <id>', BRANCH_ID_HELP),
     ),

@@ -208,7 +208,10 @@ export function registerPlatformCommands(parent: Command): void {
   addGlobalOptions(
     group
       .command('create')
-      .description('register a hosting platform (the name must be unique in the organisation)')
+      .description(
+        'register a hosting platform — PERMANENT: scm publishes exactly one delete, for a ' +
+          'branch, so a platform cannot be removed. The name must be unique in the organisation',
+      )
       .requiredOption('--name <name>', 'platform name, unique per organisation')
       .requiredOption('--type <type>', `platform type, one of: ${PLATFORM_TYPES}`)
       .option('--description <text>', 'description'),

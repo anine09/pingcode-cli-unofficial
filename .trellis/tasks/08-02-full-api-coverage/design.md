@@ -3318,3 +3318,139 @@ exit=0
 `s-bulk-e2e-1`、`x3 v1785875150`）。**一处不可逆的状态变化**：`YYHC-225` 现在挂着
 `[CLI smoke] x3 v1785875150`（原为 `versions: []`），因为 D20.3 —— 发布列表清不掉。迭代已复原为
 原值 `s-e2e`。
+
+---
+
+## D21. G3 收尾批次：三处改名 + `100303` 复验 + 文档补账 — 2026-08-05
+
+G3（独立 oracle 审计）判定 PASS WITH FINDINGS、零 blocker。本节记录该批次里**唯一一处实机观测**
+与**唯一一处可能改变行为的裁决**，其余（命名、文档、回填）属执行不属发现。
+
+### D21.1 三处叶子改名（用户明确裁决）
+
+| 旧 | 新 | 理由 |
+|---|---|---|
+| `project sprint bulk` | `project sprint bulk-create` | `bulk` 此前一词二义：pjm 上是「批量创建」，`testhub runs bulk` 上是「复合 insert/update/delete」 |
+| `project version bulk` | `project version bulk-create` | 同上；而「批量创建」在 testhub 上本来就叫 `bulk-create`（S3），即一义二词 |
+| `testhub runs patch` | `testhub runs update` | 254 条叶子里唯一的 `patch` 动词；其余所有偏更新叶子都是 `update` |
+
+`testhub runs bulk` **保留裸名**：它确实是复合调用（`inserts`/`updates`/`deletes` 同一请求，且是
+删除 run 的唯一途径），没有 create/update 组合能命名它。这处**剩余的不对称是刻意的**，已写进
+`runs` 组的 `--help` 尾注、`modules/testhub.md`，并由 `test/help/testhub.test.ts` 断言 —— 免得后人
+读成残留。端点、叶子数（254）、命令组数（10）均不变；`root.test.ts.snap` 逐字节不变。
+
+### D21.2 `100303` 复验：**保留该行**，因为 pjm 不重复 ship 的混淆
+
+`wire.ts` 把 pjm 的 `100303`（`'state'资源不存在`）映射成 exit 5，但它唯一的证据是 MVP 期一次
+「全零 `state_id`」的 smoke；而同一文件明确**拒绝**映射 ship 的 `100719`/`100702` 与 testhub 的
+`100649`，理由正是实机显示那些码在「状态存在但流转不可达」时也会出现。没人回头验过 pjm。
+
+现已验。造一个 `[CLI smoke]` 故事，落在 scrum 项目 `CLIS2BX`（`6a717c8d3e127a186f112433`）；其
+story 状态方案 `68389e7f33ee52bc5c2584d6` 的出边由 `api GET …/work_item_state_flows` 读出，
+从 `关闭` 只有 `关闭 → 打开`、`关闭 → 挂起` 两条 —— 即 `已完成` **在方案内但不相邻**，非猜测：
+
+| 从 `关闭` 尝试 | HTTP | code | message | CLI |
+|---|---|---|---|---|
+| → `已完成`（在方案内，**不可达**） | 400 | **`100379`** | `工作项状态不能流转到当前状态` | exit 7 |
+| → 未使用但合法的 24-hex id | 400 | `100303` | `'state'资源不存在` | exit 5 |
+| → `新提交`（**别的类型**方案里的真状态） | 400 | `100303` | `'state'资源不存在` | exit 5 |
+| → `notanid` | 400 | `100003` | `'state_id'不是有效的字符串(不是有效的id)` | exit 7 |
+
+`project work-item transition` 与 `project work-item update --state` 两条码路给出完全相同的配对，
+所以这个分裂是服务端的，不是命令层假象。
+
+**裁决：保留 `100303` 行，`100379` 不入表。** pjm 有独立的不可达码，`100303` 因此**只**表示
+「该地址上没有这个状态」；第三行更是它站得住的正面理由 —— 一个不在所寻类型方案里的状态，在该
+地址上确实不存在（`project meta states --type story` 就不列它），exit 5 是诚实答案。`100379`
+是「被拒绝的流转」而非「缺失」，留在 exit 7，由 `explainStates` 补上服务端没说的候选状态与
+「还需要一条合法流转」那句话。
+
+代码改动仅两处，都在允许的例外范围内：`wire.ts` 的 `ERROR_CODE_OVERRIDES` 注释块（增加上表与
+`100379` 的不加理由），以及 `test/http.test.ts` 新增一条把**两半都钉住**的回归测试 —— 若上游哪天
+把两码合并，`100303` 就开始说谎，而那条测试会先说出来。`ERROR_CODE_OVERRIDES` 本身**一字未改**。
+
+**残留：0。** 探针工作项 `CLIS2BX-1`（`6a7285420fa6ce89caaabfdc`）用 `project work-item delete --yes`
+删除，复读得 `100317` → exit 5。全程 `PINGCODE_CONFIG_DIR` 指向 `~/.pingcode` 的临时副本。
+
+### D21.3 两个死的 ship wrapper：删除，因为 resolver 走的是另一条路
+
+G3 扫过 `src/api/**` 全部 278 个导出，只有 `listTicketStatePlans` / `listTicketStateFlows` 无人调用。
+先查清那两个端点今天究竟怎么被触达：`core/metadata/registry.ts` 的两行 `cacheOnly` resolver
+（`ship-ticket-state-plan` / `ship-ticket-state-flow`）直接引用 `ENDPOINTS.shipTicketStatePlans` /
+`shipTicketStateFlows`，经 `loadRows(pathOf(specOf(kind), …))` 自行发请求，**完全不经过
+`api/ship.ts`**。所以端点确实是接通的，158 在端点口径上是对的，缺陷只在「named commands」这个
+标签用错了度量。
+
+于是按 `e76bdff`（删 `listSuites`）的先例删掉两个 wrapper 与 `test/ship.test.ts` 里对应的两条测试，
+原位留一段注释说明这两个端点是怎么到达的，以免有人再加回来。**覆盖率数字不变**（脚本同时扫
+`src/core/metadata`）—— 见 D21.6。
+
+`parseShipStatePlan` / `parseShipStateFlow` 与 `ShipStatePlan` / `ShipStateFlow` **保留**：它们记录的是
+线上真实字段形状，包括 `form_state` 这个拼写怪癖（`types/ship.ts` 有说明，`test/ship.test.ts` 有断言）。
+诚实地说，删掉两个无调用者的导出之后它们自己也没有生产调用者了 —— 这是有意的取舍：它们是被测试钉住
+的线上事实，而删它们要动 `api/parse/**` 这个被多模块再导出的共享面，换不到任何功能收益。已在原位注明。
+
+### D21.4 A1「网页端可见」验收条款的回填
+
+`prd.md` A1 与 `implement.md` X3 三处仍要求「每一跳的关联在 PingCode 网页端可见」。X3 做不到
+（只有 API 凭据，无浏览器会话），改用了更强的证据：每条 `/v1/relations` 链接都从**对侧端点**读回一行
+镜像、且 id 不同，证明服务端真的物化了双向关系（D19.5）。四条 devops 关联（branch/PR/build/deploy →
+work_item）上游根本没有反向索引，只能给自侧证据（D19.7）。
+
+该偏离此前**只**记在 design 里。按 X1 的先例，在 `prd.md:288` 与 `implement.md` 的三处各插一条行内
+「实测回填」注，指向 §D19.5/§D19.7，写明替代了什么、哪四跳实质更弱。**原验收文字不改，只加注** ——
+让记录同时留下「要求过什么」和「交付了什么」，既不能被悄悄打勾，也不该被读成未决失败。
+
+### D21.5 两种 flag 约定终于有了文档
+
+CLI 里并存两种形状，而**此前没有任何文档解释过其中任何一种**：`--x` + `--x-id` 成对
+（testhub / scm / release），与单 flag 收 `name|id`（pjm / ship）。已在 `SKILL.md` 新增一节（跨模块，
+故落在根文档）+ README 一行，并顺带写清 G3 指出的三处更细的缺口：
+`testhub runs list --case-id` 没有 `--case`；`scm branch|commit|pr list --work-item-id` 只收 24-hex
+ObjectId 而同组写路径的 `--work-item` 收 `PLM-001` 这样的 identifier（本批次**改了 flag 描述**，
+因为原描述没说读路径拒收 identifier）；`project update --state-id` 没有 `--state`，因为不存在项目状态
+的 resolver kind —— 合法，但要写下来。
+
+### D21.5a 不可逆性写进 help：一个隐藏冲突，以及为什么用尾注而不是组描述
+
+G3 的第 6 项要求给 scm 的五个 `create` 与 **`product` 组描述**各加一句不可逆警告。照字面做会**破坏
+同一份 brief 的另一条硬要求**：组描述同时被渲染进 `pingcode --help` 的顶层清单，而
+`test/help/__snapshots__/root.test.ts.snap` 钉的正是那份清单 —— 实测加完后 root 快照 +4 −1 行，
+且 `product` 一组独占四行、把其余九组挤扁。
+
+**解法：改成 `addHelpText('after')` 尾注。** 两条要求同时满足 —— `pingcode product --help`（真正要写入
+的人所在的位置）照样第一眼看到，而 root 快照**逐字节不变**。这也与仓里既有形状一致：`project sprint`
+的两处缺失、`scm platform` 的说明、本批次给 `testhub runs` 加的 `bulk` 不对称注，全都是尾注。
+代价一句话说清：`pingcode --help` 顶层看不到这句警告。
+
+连带影响：`test/help/product.test.ts` 的断言必须改用 `fullHelpFor` 而非 `helpFor`（后者不含尾注），
+该文件的 helper 注释已写明这个理由，免得下一个人把断言改回去。
+
+scm 那五处仍然落在 **description** 里 —— 它们是叶子，不是组，叶子描述不进 root 清单。
+
+**另一处被实机推翻的 brief 前提**：brief 说「scm has no DELETE anywhere」。**不对，scm 恰有一条**
+`DELETE …/branches/{branch_id}`，CLI 也暴露为 `scm branch delete`；`test/help/scm.test.ts` 早就
+断言了「scm 只有一个 delete 叶子」。这五个 `create` 的共同点不是「scm 无 DELETE」，而是
+**它们各自的资源没有 DELETE**。措辞与新增断言都按事实写，并显式标注 `scm branch create`
+**不得**带 `PERMANENT`。
+
+### D21.6 基线与再测量
+
+| | 批次前 | 批次后 |
+|---|---|---|
+| 测试 | 1530 / 49 文件 | **1532 / 49 文件** |
+| 叶子 / 命令组 | 254 / 10 | **254 / 10**（改名不增减） |
+| metadata kinds | 33 / 可解析 31 | **33 / 31** |
+| 精修端点覆盖 | 159（发布 158） | **159（发布 158）** —— 删 wrapper 不改数，registry 侧引用照旧命中 |
+| `root.test.ts.snap` | — | 逐字节不变 |
+
+测试净 **+2**，明细（避免「+2」被读成只加了两条）：**+5 新增** —— testhub 的 `bulk` 刻意不对称、
+`100379` 回归（把两半都钉住）、scm 五个 `create` 的 `PERMANENT`、ship 8 条 DELETE 究竟删什么、
+SKILL.md 两种 flag 约定；**−3 删除** —— 两条 ship wrapper 测试与一条 `parseShipStateFlow` 单测，
+随 §D21.3 的死链一起走。
+
+**不得触碰集合零 diff**（`git diff --stat` 实证）：`src/core/{auth,http,config,errors,redact}.ts`、
+`src/cli/output.ts`、`src/cli/registry.ts`、`src/cli/commands/common.ts`、`package.json`、
+`package-lock.json`。`src/core/wire.ts` 有 32 增 1 删，**全部在 `ERROR_CODE_OVERRIDES` 的注释块里**
+（§D21.2 的实测表 + `100379` 的不加理由 + 一处 `runs patch` → `runs update` 的改名跟随），
+`ERROR_CODE_OVERRIDES` 常量本体一字未改。

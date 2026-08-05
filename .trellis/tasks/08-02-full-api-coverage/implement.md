@@ -596,6 +596,12 @@ metadata 新增 kinds：`scm-platform`、`scm-repo`（`registry.ts` 加两行）
 
 脚本化跑通 PRD A1 那条完整链路，每一跳记录命令、`--json` 输出摘要、以及网页端可见的证据：
 
+> **实测回填（X3 2026-08-05，G3 收尾批次补注）。**「网页端可见」按字面**无法完成** —— 只有 API
+> 凭据、没有浏览器会话。替代证据见 design **§D19.5**（每条 `/v1/relations` 关联都从对侧端点读回
+> 一行镜像、且 id 与 POST 返回的不同，证明服务端真的物化了双向记录 —— 比肉眼看网页**更强**）与
+> **§D19.7**（branch / PR / build / deploy → work_item 这**四跳**上游没有任何反向索引，只有自侧
+> `work_items` 数组，实质更弱，如实标注）。原文不改，只补账。
+
 1. `product idea create` 建需求
 2. `product idea relation add`（或 `project work-item link add`）关联到工作项
 3. `project work-item update --sprint`（或 `sprint bulk`）入迭代
@@ -614,6 +620,11 @@ metadata 新增 kinds：`scm-platform`、`scm-repo`（`registry.ts` 加两行）
 - 同一条链路的 `--dry-run` 变体**零写入**且打印完整请求计划 —— 用一次 list 复核 `total` 未变
   （A1 第三条，沿用 [TH§14.7] 的证明方式）。
 - 每一跳的关联在 PingCode 网页端可见，逐跳记录。
+  > **实测回填（X3 2026-08-05，G3 收尾批次补注）。**「网页端可见」按字面**无法完成** —— 只有 API
+  > 凭据、没有浏览器会话。替代证据见 design **§D19.5**（每条 `/v1/relations` 关联都从对侧端点读回
+  > 一行镜像、且 id 与 POST 返回的不同，证明服务端真的物化了双向记录 —— 比肉眼看网页**更强**）与
+  > **§D19.7**（branch / PR / build / deploy → work_item 这**四跳**上游没有任何反向索引，只有自侧
+  > `work_items` 数组，实质更弱，如实标注）。原文不改，只补账。
 - 全部 smoke 数据带 `[CLI smoke]` 前缀；不可删除的残留（如无 DELETE 的对象）如实列出，
   不隐藏（[TH§14.6] 的先例）。
 
@@ -707,6 +718,11 @@ for i in 1 2 3; do /usr/bin/time -f %e npx tsc --noEmit; done
 - `ERROR_CODE_OVERRIDES` 的每一行是否都有 smoke 证据，每条不加的决定是否都写了理由；
 - 各模块的「上游缺失的对称操作」是否都在 help / 文档里说明而不是留给用户去撞；
 - X3 的 A1 链路是否**每一跳**都有实机证据与网页端确认；
+  > **实测回填（X3 2026-08-05，G3 收尾批次补注）。**「网页端可见」按字面**无法完成** —— 只有 API
+  > 凭据、没有浏览器会话。替代证据见 design **§D19.5**（每条 `/v1/relations` 关联都从对侧端点读回
+  > 一行镜像、且 id 与 POST 返回的不同，证明服务端真的物化了双向记录 —— 比肉眼看网页**更强**）与
+  > **§D19.7**（branch / PR / build / deploy → work_item 这**四跳**上游没有任何反向索引，只有自侧
+  > `work_items` 数组，实质更弱，如实标注）。原文不改，只补账。
 - `test/layering.test.ts` 的不变式是否被放宽过（PRD A4）。
 
 ---

@@ -123,7 +123,10 @@ export function registerCommitCommands(parent: Command): void {
   addGlobalOptions(
     group
       .command('create')
-      .description('record a commit — link it to a branch afterwards with `scm ref create`')
+      .description(
+        'record a commit — PERMANENT: there is no commit delete. Link it to a branch ' +
+          'afterwards with `scm ref create`',
+      )
       .requiredOption('--sha <sha>', 'full 40-character SHA (the server validates this one)')
       .requiredOption('--message <text>', 'commit message')
       .requiredOption(

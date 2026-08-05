@@ -494,6 +494,8 @@ api-layer type `UpdateWorkItemInput` already declares `version_ids`, and the clo
 both — so the gap looks like an oversight rather than a decision. That is a behaviour change and
 X3 does not make it.
 
+> 已被 `8c09add` 推翻：`--sprint` / `--release` 现已存在（见 design §D20）。
+
 ### 7.2 `api --set` is scalar-only, and `version_ids` is one of the few fields upstream type-checks
 
 ```

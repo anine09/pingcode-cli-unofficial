@@ -273,7 +273,7 @@ export function registerBranchCommands(parent: Command): void {
             '--name <name>',
             'exact (case-insensitive) branch name — a real filter here, unlike on repo list',
           )
-          .option('--work-item-id <id>', 'only branches linked to this work item id'),
+          .option('--work-item-id <id>', 'only branches linked to this work item id (an id, not PLM-001)'),
       ),
     ),
     { hidden: true },

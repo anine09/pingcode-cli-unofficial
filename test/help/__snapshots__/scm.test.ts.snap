@@ -118,7 +118,8 @@ Commands:
   list [options]          list commits across the whole organisation — filter, or this scans
                           everything
   get [options] <commit>  show one commit, by id or SHA
-  create [options]        record a commit — link it to a branch afterwards with \`scm ref create\`
+  create [options]        record a commit — PERMANENT: there is no commit delete. Link it to a
+                          branch afterwards with \`scm ref create\`
   help [command]          display help for command
 "
 `;
@@ -126,7 +127,8 @@ Commands:
 exports[`scm --help > scm commit create 1`] = `
 "Usage: pingcode scm commit create [options]
 
-record a commit — link it to a branch afterwards with \`scm ref create\`
+record a commit — PERMANENT: there is no commit delete. Link it to a branch afterwards with \`scm
+ref create\`
 
 Options:
   --sha <sha>                 full 40-character SHA (the server validates this one)
@@ -155,8 +157,9 @@ Options:
 Commands:
   list [options]               list hosting platforms
   get [options] <platform>     show one hosting platform
-  create [options]             register a hosting platform (the name must be unique in the
-                               organisation)
+  create [options]             register a hosting platform — PERMANENT: scm publishes exactly one
+                               delete, for a branch, so a platform cannot be removed. The name must
+                               be unique in the organisation
   update [options] <platform>  patch a hosting platform — only the fields you pass are sent
   help [command]               display help for command
 "
@@ -165,7 +168,8 @@ Commands:
 exports[`scm --help > scm platform create 1`] = `
 "Usage: pingcode scm platform create [options]
 
-register a hosting platform (the name must be unique in the organisation)
+register a hosting platform — PERMANENT: scm publishes exactly one delete, for a branch, so a
+platform cannot be removed. The name must be unique in the organisation
 
 Options:
   --name <name>         platform name, unique per organisation
@@ -187,7 +191,9 @@ Options:
 Commands:
   list [options]           list the git identities known to a platform
   get [options] <user>     show one git identity
-  create [options]         register a git identity (the username must be unique on the platform)
+  create [options]         register a git identity — PERMANENT: there is no identity delete
+                           anywhere in scm, so a mistyped username is a ghost forever. The username
+                           must be unique on the platform
   update [options] <user>  patch a git identity — only the fields you pass are sent
   help [command]           display help for command
 "
@@ -196,7 +202,8 @@ Commands:
 exports[`scm --help > scm platform-user create 1`] = `
 "Usage: pingcode scm platform-user create [options]
 
-register a git identity (the username must be unique on the platform)
+register a git identity — PERMANENT: there is no identity delete anywhere in scm, so a mistyped
+username is a ghost forever. The username must be unique on the platform
 
 Options:
   --name <name>          git username — the string commits are attributed by
@@ -318,7 +325,8 @@ Options:
 Commands:
   list [options]       list the commit refs of ONE branch — the API offers no repository-wide list
   get [options] <ref>  show one commit ref
-  create [options]     link an existing commit to a branch (create the commit first)
+  create [options]     link an existing commit to a branch — PERMANENT: refs have no delete, which
+                       is also why deleting a branch orphans them. Create the commit first
   help [command]       display help for command
 "
 `;
@@ -326,7 +334,8 @@ Commands:
 exports[`scm --help > scm ref create 1`] = `
 "Usage: pingcode scm ref create [options]
 
-link an existing commit to a branch (create the commit first)
+link an existing commit to a branch — PERMANENT: refs have no delete, which is also why deleting a
+branch orphans them. Create the commit first
 
 Options:
   --sha <sha>                 full SHA of a commit that already exists in PingCode
@@ -351,7 +360,9 @@ Options:
 Commands:
   list [options]           list the repositories of a platform
   get [options] <repo>     show one repository
-  create [options]         register a repository (full_name must be unique on the platform)
+  create [options]         register a repository — PERMANENT: there is no repository delete.
+                           full_name must be unique on the platform, and a mistyped --owner-name
+                           mints a permanent identity too
   update [options] <repo>  patch a repository — only the fields you pass are sent
   help [command]           display help for command
 "
@@ -360,7 +371,8 @@ Commands:
 exports[`scm --help > scm repo create 1`] = `
 "Usage: pingcode scm repo create [options]
 
-register a repository (full_name must be unique on the platform)
+register a repository — PERMANENT: there is no repository delete. full_name must be unique on the
+platform, and a mistyped --owner-name mints a permanent identity too
 
 Options:
   --name <name>             repository name, e.g. pingcode-cli
