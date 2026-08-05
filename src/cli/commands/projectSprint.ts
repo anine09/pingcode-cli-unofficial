@@ -181,7 +181,7 @@ export function registerSprintCommands(parent: Command): void {
 
   addGlobalOptions(
     group
-      .command('bulk')
+      .command('bulk-create')
       .description('create many sprints in one atomic call — 企业令牌 only, and permanent')
       .requiredOption('--file <path|->', 'JSON array of entries, or - for stdin (see below)')
       .option('--project <name|id>', 'default project for entries that name none')

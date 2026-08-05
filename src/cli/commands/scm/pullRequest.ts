@@ -64,7 +64,7 @@ import {
  *  - **`PATCH` requires `status`**, uniquely in scm. A caller who only wants to fix a
  *    title cannot express that in one request, so `update` re-reads the pull request and
  *    re-emits its current status. That is a read-modify-write in the command layer, not
- *    a silent default — the same contract testhub's `runs patch` settled on for its
+ *    a silent default — the same contract testhub's `runs update` settled on for its
  *    mandatory `status_id` ([TH§7]). Pass `--status` and the extra read is skipped.
  *    Verified live: a status-less PATCH is refused with `100008 'status'是必填字段`.
  *  - **`--work-item` links can fail silently.** An identifier that does not exist is

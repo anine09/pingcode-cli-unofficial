@@ -198,25 +198,26 @@ exports[`testhub --help > testhub runs 1`] = `
 test runs 执行用例 (scopes pcp:read:testhub:testplan / pcp:write:testhub:testplan)
 
 Options:
-  -h, --help             display help for command
+  -h, --help              display help for command
 
 Commands:
-  list [options]         search runs (POST /v1/testhub/runs/search) — run search cannot filter by
-                         library.id — it is on the API exclusion list, so scope runs with --plan
-                         instead
-  create [options]       add one case to a plan as a run (POST /v1/testhub/runs)
-  patch [options] <run>  record a result on a run — always sends status_id, and re-sends the run's
-                         own executor unless you name another one
-  bulk-create [options]  add many cases to a plan as runs in one call (POST /v1/testhub/runs/bulk)
-  bulk-update [options]  record results on many runs in one call, across plans and libraries
-  bulk [options]         insert, update and delete the runs of one plan in a single call — the only
-                         way to delete a run. Each list is capped at 50, checked before the request
-  history                执行历史 every result ever recorded on one run (read-only)
-  relation               关联 cross-kind links of a test run (principal_type=test_run)
-  comment                评论 comments on a test run (principal_type=test_run)
-  attachment             附件 attachments of a test run (principal_type=test_run)
-  activity               活动记录 audit trail of a test run (principal_type=test_run)
-  help [command]         display help for command
+  list [options]          search runs (POST /v1/testhub/runs/search) — run search cannot filter by
+                          library.id — it is on the API exclusion list, so scope runs with --plan
+                          instead
+  create [options]        add one case to a plan as a run (POST /v1/testhub/runs)
+  update [options] <run>  record a result on a run — always sends status_id, and re-sends the run's
+                          own executor unless you name another one
+  bulk-create [options]   add many cases to a plan as runs in one call (POST /v1/testhub/runs/bulk)
+  bulk-update [options]   record results on many runs in one call, across plans and libraries
+  bulk [options]          insert, update and delete the runs of one plan in a single call — the
+                          only way to delete a run. Each list is capped at 50, checked before the
+                          request
+  history                 执行历史 every result ever recorded on one run (read-only)
+  relation                关联 cross-kind links of a test run (principal_type=test_run)
+  comment                 评论 comments on a test run (principal_type=test_run)
+  attachment              附件 attachments of a test run (principal_type=test_run)
+  activity                活动记录 audit trail of a test run (principal_type=test_run)
+  help [command]          display help for command
 "
 `;
 

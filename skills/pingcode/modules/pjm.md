@@ -179,7 +179,7 @@ invocations. Four things about it that will bite an agent that assumes otherwise
   a silently-rejected value and an unsupported property all answer 200. The CLI warns when `updated`
   is less than the number of ids sent — treat that warning as "verify by reading the items back".
 - **It is best-effort, not atomic.** An unknown id is skipped silently and the rest still land. (The
-  `sprint bulk` and `version bulk` creates *are* atomic — do not generalise from one to the other.)
+  `sprint bulk-create` and `version bulk-create` *are* atomic — do not generalise from one to the other.)
 - **It leaves no audit trail.** The change appears in neither `work-item activity list` nor
   `work-item history list`, while the equivalent single `update` does. It is invisible to an audit.
 
@@ -288,7 +288,7 @@ pingcode project sprint get "Sprint 5" --project "Mobile App" --json
 pingcode project sprint create --project "Mobile App" --name "Sprint 5" \
   --start 2026-09-01 --end 2026-09-14 --assignee wangxiao --json
 pingcode project sprint update "Sprint 5" --project "Mobile App" --status in_progress --json
-pingcode project sprint bulk --project "Mobile App" --assignee wangxiao --file sprints.json --json
+pingcode project sprint bulk-create --project "Mobile App" --assignee wangxiao --file sprints.json --json
 ```
 
 Four things about sprints that `--help` cannot make obvious enough:
@@ -297,7 +297,7 @@ Four things about sprints that `--help` cannot make obvious enough:
    the lookup `--sprint <name>` resolves against. Do not look for `project sprint list`.
 2. **A sprint cannot be deleted. Ever.** The API exposes only `GET` and `PATCH` on a sprint, so
    `pingcode api DELETE /v1/pjm/projects/<p>/sprints/<id>` is refused before any request too.
-   Treat `sprint create` and `sprint bulk` as irreversible.
+   Treat `sprint create` and `sprint bulk-create` as irreversible.
 3. **Sprints exist only in scrum and hybrid projects.** In a kanban or waterfall project the list
    is empty and a create fails with `'project'资源不存在` — *the project is fine*, sprints are not
    available in it. That exits **7**, not 5, precisely because the code cannot be told apart from a
@@ -317,7 +317,7 @@ pingcode project version create --project "Mobile App" --name 1.4.0 \
   --start 2026-09-01 --end 2026-09-30 --assignee wangxiao --json
 pingcode project version update "1.4.0" --project "Mobile App" --stage-id <id> --operate-at 2026-09-20 --json
 pingcode project version delete "1.4.0" --project "Mobile App" --yes --json
-pingcode project version bulk --project "Mobile App" --assignee wangxiao --file releases.json --json
+pingcode project version bulk-create --project "Mobile App" --assignee wangxiao --file releases.json --json
 ```
 
 **"version" is the most overloaded word in this API. This one is a project release 发布.** It is
@@ -350,14 +350,14 @@ schedule. Four different resources, one English word. `project version` only eve
   `pingcode api GET /v1/pjm/projects/<project_id>/version_categories`. A release name *is*
   resolvable: `pingcode resolve pjm-version "1.4.0" --parent <project_id>`.
 
-### Both families: dates, and the two `bulk` leaves
+### Both families: dates, and the two `bulk-create` leaves
 
 **`--start` and `--end` are dates, not instants.** The server stores `--start` at `00:00:00` and
 `--end` at `23:59:59` of the date given, in both families, on create and on update. Pass
 `2026-09-01`, not a timestamp, and do not try to express a partial day — it will be widened.
 Unlike `release deploy`, both ends may travel in one update and are validated against each other.
 
-Both `bulk` leaves take a JSON array (or the wire's own `{"sprints": […]}` / `{"versions": […]}`
+Both `bulk-create` leaves take a JSON array (or the wire's own `{"sprints": […]}` / `{"versions": […]}`
 wrapper) through `--file <path>`:
 
 ```json
@@ -376,5 +376,5 @@ wrapper) through `--file <path>`:
 - **The call is atomic.** If any entry is rejected, none is created — verified live. There is no
   entry limit (60 in one call was accepted), but two entries sharing a name inside one batch is an
   HTTP 500.
-- **Both bulk endpoints are 企业令牌 only and the docs declare no scope for them.** They work with
+- **Both `bulk-create` endpoints are 企业令牌 only and the docs declare no scope for them.** They work with
   the CLI's client-credentials token. `pingcode api describe pjm.sprints.bulk` reports the same.

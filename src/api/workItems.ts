@@ -267,7 +267,7 @@ export function iterateSearchWorkItems(
  *    is the use case this endpoint was documented for — answers HTTP 200 with
  *    `updates: 0` and changes nothing;
  *  - an id that does not exist is skipped silently, and the rest of the batch still
- *    lands (best-effort, unlike the **atomic** sprint/version bulks of design D15.5);
+ *    lands (best-effort, unlike the **atomic** sprint/version `bulk-create`s of design D15.5);
  *  - ids may span projects;
  *  - the change is recorded in **no** activity feed, so it is invisible to an audit.
  */

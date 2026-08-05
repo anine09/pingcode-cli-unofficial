@@ -234,7 +234,7 @@ export function registerVersionCommands(parent: Command): void {
 
   addGlobalOptions(
     group
-      .command('bulk')
+      .command('bulk-create')
       .description('create many releases in one atomic call — 企业令牌 only')
       .requiredOption('--file <path|->', 'JSON array of entries, or - for stdin (see below)')
       .option('--project <name|id>', 'default project for entries that name none')
@@ -553,7 +553,7 @@ function printBulk(results: BulkCreateResult<ProjectVersion>[], ctx: Ctx): void 
   );
   const mode = modeOf(ctx);
   if (mode.json) {
-    // Same reasoning as `project sprint bulk`: keep the wire's per-entry `{state,
+    // Same reasoning as `project sprint bulk-create`: keep the wire's per-entry `{state,
     // version}` shape, because `state` is the only per-entry acknowledgement there is.
     printCollection(results, [], mode);
     return;

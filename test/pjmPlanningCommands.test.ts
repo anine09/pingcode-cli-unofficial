@@ -260,7 +260,7 @@ describe('project sprint update', () => {
   });
 });
 
-describe('project sprint bulk', () => {
+describe('project sprint bulk-create', () => {
   it('resolves the shared flags once and stamps every entry', async () => {
     const file = withFile([
       { name: 'Sprint 5', start: '2026-09-01', end: '2026-09-14' },
@@ -271,7 +271,7 @@ describe('project sprint bulk', () => {
         [
           'project',
           'sprint',
-          'bulk',
+          'bulk-create',
           '--file',
           file.path,
           '--project',
@@ -312,7 +312,7 @@ describe('project sprint bulk', () => {
     ]);
     try {
       const run = await runCli(
-        ['project', 'sprint', 'bulk', '--file', file.path, '--project', PROJECT],
+        ['project', 'sprint', 'bulk-create', '--file', file.path, '--project', PROJECT],
         [],
       );
       expect(run.exit).toBe(2);
@@ -331,7 +331,7 @@ describe('project sprint bulk', () => {
     });
     try {
       const run = await runCli(
-        ['project', 'sprint', 'bulk', '--file', file.path],
+        ['project', 'sprint', 'bulk-create', '--file', file.path],
         [() => jsonResponse([{ state: 'success', sprint: sprintBody() }])],
       );
       expect(run.exit).toBe(0);
@@ -345,7 +345,7 @@ describe('project sprint bulk', () => {
   it('names the entry that has no project', async () => {
     const file = withFile([{ name: 'Sprint 5', start: '2026-09-01', end: '2026-09-14' }]);
     try {
-      const run = await runCli(['project', 'sprint', 'bulk', '--file', file.path], []);
+      const run = await runCli(['project', 'sprint', 'bulk-create', '--file', file.path], []);
       expect(run.exit).toBe(2);
       expect(run.stderr).toContain('entry 0');
     } finally {
@@ -357,7 +357,7 @@ describe('project sprint bulk', () => {
     const file = withFile([]);
     try {
       const run = await runCli(
-        ['project', 'sprint', 'bulk', '--file', file.path, '--project', PROJECT],
+        ['project', 'sprint', 'bulk-create', '--file', file.path, '--project', PROJECT],
         [],
       );
       expect(run.exit).toBe(2);
@@ -369,7 +369,7 @@ describe('project sprint bulk', () => {
 
   it('reports a missing file as a usage error, not a crash', async () => {
     const run = await runCli(
-      ['project', 'sprint', 'bulk', '--file', '/nonexistent/entries.json', '--project', PROJECT],
+      ['project', 'sprint', 'bulk-create', '--file', '/nonexistent/entries.json', '--project', PROJECT],
       [],
     );
     expect(run.exit).toBe(2);
@@ -597,7 +597,7 @@ describe('project version delete', () => {
   });
 });
 
-describe('project version bulk', () => {
+describe('project version bulk-create', () => {
   it('accepts stage_id per entry and wraps them in `versions`', async () => {
     const file = withFile([
       { name: '1.4.0', start: '2026-09-01', end: '2026-09-30', stage_id: STAGE },
@@ -608,7 +608,7 @@ describe('project version bulk', () => {
         [
           'project',
           'version',
-          'bulk',
+          'bulk-create',
           '--file',
           file.path,
           '--project',
@@ -645,7 +645,7 @@ describe('project version bulk', () => {
     ]);
     try {
       const run = await runCli(
-        ['project', 'version', 'bulk', '--file', file.path, '--json'],
+        ['project', 'version', 'bulk-create', '--file', file.path, '--json'],
         [() => jsonResponse([{ state: 'success', version: versionBody() }])],
       );
       expect(run.stderr).toBe('');
@@ -662,7 +662,7 @@ describe('project version bulk', () => {
       { name: '1.4.0', start: '2026-09-01', end: '2026-09-30', project: 'Mobile App', project_id: PROJECT },
     ]);
     try {
-      const run = await runCli(['project', 'version', 'bulk', '--file', file.path], []);
+      const run = await runCli(['project', 'version', 'bulk-create', '--file', file.path], []);
       expect(run.exit).toBe(2);
       expect(run.calls).toHaveLength(0);
     } finally {

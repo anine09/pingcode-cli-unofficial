@@ -5,8 +5,8 @@ import type { ResolveResult } from '../../../core/metadata';
 import { parseDateBoundaryFlag } from '../common';
 
 /**
- * Reading the entry list for a `POST …/bulk` leaf, shared by `project sprint bulk`
- * and `project version bulk`.
+ * Reading the entry list for a `POST …/bulk` leaf, shared by `project sprint bulk-create`
+ * and `project version bulk-create`.
  *
  * **Why a JSON document rather than repeatable flags.** Every entry of these two
  * endpoints carries its own name *and* its own date window, and a repeatable flag

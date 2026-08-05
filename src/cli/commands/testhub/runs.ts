@@ -177,13 +177,26 @@ export function registerRunCommands(parent: Command): void {
     .command('runs')
     .description(
       'test runs 执行用例 (scopes pcp:read:testhub:testplan / pcp:write:testhub:testplan)',
+    )
+    .addHelpText(
+      'after',
+      '\nThree batch verbs, and the naming difference between them is deliberate:\n' +
+        '`bulk-create` adds cases, `bulk-update` records results, and plain `bulk` is the one\n' +
+        'COMPOSITE call — inserts, updates and deletes in a single request, and the only way to\n' +
+        'delete a run. It keeps the bare name because no create/update pair describes it.\n' +
+        'Everywhere else in this CLI a batch leaf spells out what it does to each row.\n',
     );
 
   const list = addPagingOptions(
     group
       .command('list')
       .description(`search runs (POST /v1/testhub/runs/search) — ${RUN_LIBRARY_FILTER_CAVEAT}`)
-      .option('--case-id <id>', 'filter by case id')
+      .option(
+        '--case-id <id>',
+        'filter by case id — a full id only. There is deliberately no `--case <ref>` twin ' +
+          'here, unlike `runs create` / `runs bulk-create`: a short_id reaches the filter ' +
+          'unresolved and the search answers 400 `100044`',
+      )
       .option('--keywords <text>', 'fuzzy search over the case title'),
   );
   addPairOptions(list, 'library', `${LIBRARY_HELP}; used only to resolve the other names`);
@@ -220,7 +233,7 @@ export function registerRunCommands(parent: Command): void {
   );
 
   const patch = group
-    .command('patch')
+    .command('update')
     .description(
       'record a result on a run — always sends status_id, and re-sends the run\'s own executor ' +
         'unless you name another one',
@@ -286,7 +299,7 @@ export function registerRunCommands(parent: Command): void {
         'An omitted executor preserves each run\'s current one. Every applied entry appends a\n' +
         'row to that run\'s history, so a bulk result stays auditable.\n' +
         'Steps are deliberately not settable here: a step array replaces wholesale and a step\n' +
-        'sent without its status would be re-created. Use `runs patch --step` per run.\n' +
+        'sent without its status would be re-created. Use `runs update --step` per run.\n' +
         'Unlike `runs bulk`, this endpoint carries no plan or library in its URL, so it can span\n' +
         'plans — and it cannot delete anything.\n',
     );
@@ -987,7 +1000,7 @@ const RUN_BULK_UPDATE_SCHEMA = {
   refused: {
     steps:
       'a step array replaces wholesale and a step sent without its status would be re-created, ' +
-      'orphaning its results — record steps one run at a time with `testhub runs patch --step`',
+      'orphaning its results — record steps one run at a time with `testhub runs update --step`',
   },
 } as const;
 
@@ -1053,7 +1066,7 @@ const RUN_HISTORY_COLUMNS: Column<TestRunHistoryItem>[] = [
  * `runs history …` — the audit trail of one run, oldest first.
  *
  * This is the half a test report was missing: `runs list` shows only the latest
- * result, while every `runs patch` and every applied `runs bulk-update` entry appends
+ * result, while every `runs update` and every applied `runs bulk-update` entry appends
  * a row here.
  */
 function registerRunHistoryCommands(parent: Command): void {
@@ -1064,7 +1077,7 @@ function registerRunHistoryCommands(parent: Command): void {
   group.addHelpText(
     'after',
     '\nOldest first, one row per recorded result — `runs list` shows only the latest. A\n' +
-      '`runs patch` and every applied `runs bulk-update` entry both append a row, so a bulk\n' +
+      '`runs update` and every applied `runs bulk-update` entry both append a row, so a bulk\n' +
       'result is auditable (unlike a pjm bulk update, which appears in no feed).\n' +
       'For the latest result of every run of one CASE, use `testhub cases history list <case>`.\n' +
       'A history id belonging to a different run is refused as a mismatch (400 `100643`), not\n' +

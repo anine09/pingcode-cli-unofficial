@@ -54,7 +54,7 @@ why it is spelled out here). The others require `--library`.
 |---|---|---|---|
 | `meta case-states` | 设计 / 就绪 / 废弃 | per library | `cases update --state`, `cases bulk-update --state` |
 | `meta plan-states` | 未开始 / 进行中 / 已完成 | organisation | `plans update --state` |
-| `meta run-statuses` | 未测 / 通过 / 失败 / 受阻 / 跳过 | per library | `runs patch --status`, `runs bulk-update --status` |
+| `meta run-statuses` | 未测 / 通过 / 失败 / 受阻 / 跳过 | per library | `runs update --status`, `runs bulk-update --status` |
 
 `case-properties` lists the fields **effective in a library**, and its `KEY` column is what a write
 addresses. Read rule 11 before using one with `--set`: on this tenant every row is a *built-in*
@@ -142,16 +142,16 @@ There is still **no plan delete** — that endpoint does not exist.
 
 ### Runs 执行用例 — `testhub runs`
 
-A **run** is one case scheduled inside one plan; recording a result means patching the run.
+A **run** is one case scheduled inside one plan; recording a result means updating the run.
 
 ```bash
 pingcode testhub runs list --library LIB --plan "2026 S1 回归" --json
 pingcode testhub runs list --library LIB --plan "2026 S1 回归" --status 失败 --executor wangxiao --json
 pingcode testhub runs list --plan-id 5f0e1a2b3c4d5e6f70819200 --all --limit 200 --json
 
-pingcode testhub runs patch 7hK2mQ9x --status 通过 --remark "retested on iOS" --dry-run --json
-pingcode testhub runs patch 7hK2mQ9x --status 通过 --executor wangxiao --json
-pingcode testhub runs patch 7hK2mQ9x --status 失败 \
+pingcode testhub runs update 7hK2mQ9x --status 通过 --remark "retested on iOS" --dry-run --json
+pingcode testhub runs update 7hK2mQ9x --status 通过 --executor wangxiao --json
+pingcode testhub runs update 7hK2mQ9x --status 失败 \
   --step s1=通过 --step s2=失败 --step-actual s2="500 from /login" --json
 
 pingcode testhub runs bulk --library LIB --plan "2026 S1 回归" \
@@ -170,7 +170,7 @@ pingcode testhub runs history get 7hK2mQ9x <history-id> --json
 ```
 
 `results.json` for `bulk-update` is one object per run; `status` (or `status_id`) is **required** on
-every entry, and `steps` is refused — use `runs patch --step` for those:
+every entry, and `steps` is refused — use `runs update --step` for those:
 
 ```json
 {"runs": [{"run": "7hK2mQ9x", "status": "通过", "remark": "retested"},
@@ -190,8 +190,15 @@ So: read the `STATE` column of `bulk-create`, and trust `bulk-update` to be all-
 at **100** entries per call, checked locally. `runs bulk-update` carries no plan or library in its
 URL, so one call can span plans; it cannot delete anything.
 
-`testhub runs bulk` is the **only** way to delete a run, and the only way to add one. Every
-name-resolvable flag has an `--x-id` twin (`--status-id`, `--executor-id`, `--plan-id`,
+**Why one of the three is called just `bulk`, and that is deliberate.** `bulk-create` adds cases and
+`bulk-update` records results, so each says what it does to a row. Plain `runs bulk` is the
+**composite** call — `inserts` + `updates` + `deletes` in one request — and no create/update pair
+names that, so it keeps the bare word. It is the **only** way to *delete* a run. This is the one
+place in the CLI where `bulk` does not mean "create many": the pjm leaves that did mean that were
+renamed to `project sprint bulk-create` / `project version bulk-create` in the G3 closeout precisely
+so the word is unambiguous everywhere else. The `runs` group help says the same thing.
+
+Every name-resolvable flag has an `--x-id` twin (`--status-id`, `--executor-id`, `--plan-id`,
 `--library-id`, …) that is sent verbatim with no lookup; the two forms are mutually exclusive.
 
 ## 4c. Testhub rules that will bite you
@@ -204,7 +211,7 @@ sharper write path.
    never share a state, type or status id, even when the names are identical. `testhub cases list`,
    `plans list`, `plans get`, `plans create`, `runs bulk` and the five library-scoped `meta` leaves
    (`case-states`, `case-types`, `run-statuses`, `plan-types`, `suites`) all require
-   `--library <name|id>` and refuse to guess (exit 2). `cases get`, `cases update` and `runs patch`
+   `--library <name|id>` and refuse to guess (exit 2). `cases get`, `cases update` and `runs update`
    do not: they read the resource first and inherit its library. `runs list` needs one only to
    resolve a `--plan` or `--status` **by name** — `--plan-id` / `--status-id` work without it.
    `libraries create` is the one testhub command with no parent at all.
@@ -220,7 +227,7 @@ sharper write path.
    refuses a partial `--step` edit and lists every step id you must supply. Pass a status for
    **every** step, or none at all. The same "replaces, never merges" applies to `--set`/`properties`
    on a case.
-4. **`testhub runs patch` always sends `status_id`, and carries the executor over for you.**
+4. **`testhub runs update` always sends `status_id`, and carries the executor over for you.**
    `status_id` is required by the API even on PATCH, so the CLI reads the run first and re-sends the
    run's current result when you do not name one — patching only a remark is safe here, and would
    not be if you called the API directly. The run's own executor is re-sent the same way. When the
@@ -260,7 +267,7 @@ sharper write path.
    a case is created in the library's initial state and can only be moved with
    `pingcode testhub cases update <case> --state <s>`.
 10. **`short_id` is read-only.** `testhub cases get`, `plans get` and the run read accept an id or a
-    `short_id`, but every write documents `id` only. `testhub cases update` and `testhub runs patch`
+    `short_id`, but every write documents `id` only. `testhub cases update` and `testhub runs update`
     therefore read the resource first and use the real id — which is also where they learn the
     library, so a name lookup works without repeating `--library`.
 11. **`--set` keys now have a discovery command, and it is a warning as much as a lookup.**
@@ -370,7 +377,7 @@ Reachable, just not as named commands — say that rather than reporting a limit
 | case-module (**suite**) writes | the suite tree is read to resolve `--suite`; editing it is a configuration act | `pingcode api list --module testhub --search suites` |
 | plan **delete** | no test plan DELETE exists upstream at all | — |
 | every configuration **write** (case states, types, property schemes) | tenant configuration, and a wrong write is felt by everyone in the library | `pingcode api list --module testhub --search plans` |
-| `PUT /v1/testhub/runs/{run_id}` | full replacement, and documented to blank the executor when the field is omitted — `runs patch` covers the same ground without that risk | `pingcode api PUT /v1/testhub/runs/<id>` |
+| `PUT /v1/testhub/runs/{run_id}` | full replacement, and documented to blank the executor when the field is omitted — `runs update` covers the same ground without that risk | `pingcode api PUT /v1/testhub/runs/<id>` |
 | `GET /v1/testhub/cases` and `GET /v1/testhub/runs` (the simple lists) | unfiltered they scan every library the token can see; `POST …/search` is the only sane read path, and it is what `cases list` / `runs list` use | `pingcode api GET /v1/testhub/cases` |
 | `GET /v1/testhub/plan_states/{state_id}` | the *list* (`meta plan-states`) is wired and is the only thing a plan write needs | `pingcode api GET /v1/testhub/plan_states/<id>` |
 

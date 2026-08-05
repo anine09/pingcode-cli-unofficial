@@ -50,7 +50,7 @@ describe('testhub command surface', () => {
       'testhub plans update',
       'testhub runs list',
       'testhub runs create',
-      'testhub runs patch',
+      'testhub runs update',
       'testhub runs bulk-create',
       'testhub runs bulk-update',
       'testhub runs bulk',
@@ -96,7 +96,9 @@ describe('testhub command surface', () => {
     // refined layer (design D8.4): a full replacement forces the whole `steps[]` array
     // and blanks the executor when `executor_id` is omitted ([TH§7]). Asserted per
     // group rather than globally — S1d's rule is that each group owns its own list, so
-    // this names the only two update spellings testhub is allowed to have.
+    // this names every update spelling testhub is allowed to have. There is exactly
+    // one verb for a partial update, `update`: the G3 closeout renamed `runs patch`,
+    // which had been the only `patch` leaf among all 254.
     const updateLeaves = leavesOf('testhub').filter((path) =>
       /\b(update|patch|replace|put)$/.test(path),
     );
@@ -104,7 +106,7 @@ describe('testhub command surface', () => {
       'testhub cases update',
       'testhub cases bulk-update',
       'testhub plans update',
-      'testhub runs patch',
+      'testhub runs update',
       'testhub runs bulk-update',
     ]);
   });
@@ -145,6 +147,18 @@ describe('testhub command surface', () => {
     // per-element failures inside a 200, the update half rejects the whole batch.
     expect(fullHelpFor(['testhub', 'runs', 'bulk-create'])).toMatch(/PER-ELEMENT BEST EFFORT/);
     expect(fullHelpFor(['testhub', 'runs', 'bulk-update'])).toMatch(/ATOMIC/);
+  });
+
+  it('explains why plain `bulk` keeps a bare name next to two spelled-out siblings', () => {
+    // The one remaining naming asymmetry in the module, and it is deliberate: `bulk`
+    // is the composite insert/update/delete call, so no create/update pair names it.
+    // The G3 closeout renamed the pjm leaves that *did* mean "create many" to
+    // `bulk-create`, which left this one as the only bare `bulk` — say so at the group
+    // a reader lands on rather than leaving it to look like residue.
+    const help = fullHelpFor(['testhub', 'runs']);
+    expect(help).toMatch(/COMPOSITE call/);
+    expect(help).toContain('the only way to');
+    expect(leavesOf('testhub')).toContain('testhub runs bulk');
   });
 
   it('disambiguates the three vocabularies called "state" in this module', () => {

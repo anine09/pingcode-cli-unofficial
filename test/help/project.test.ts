@@ -53,13 +53,13 @@ describe('project command surface', () => {
       'project sprint get',
       'project sprint create',
       'project sprint update',
-      'project sprint bulk',
+      'project sprint bulk-create',
       'project version list',
       'project version get',
       'project version create',
       'project version update',
       'project version delete',
-      'project version bulk',
+      'project version bulk-create',
       'project member list',
       'project member get',
       'project member add',
@@ -332,8 +332,8 @@ describe('project --help', () => {
     expect(helpFor(['project', 'sprint', 'create'])).toMatchSnapshot();
   });
 
-  it('project sprint bulk (the entry schema and the ENT-only note)', () => {
-    expect(helpFor(['project', 'sprint', 'bulk'])).toMatchSnapshot();
+  it('project sprint bulk-create (the entry schema and the ENT-only note)', () => {
+    expect(helpFor(['project', 'sprint', 'bulk-create'])).toMatchSnapshot();
   });
 
   it('project version (the four-way name collision is in the group help)', () => {

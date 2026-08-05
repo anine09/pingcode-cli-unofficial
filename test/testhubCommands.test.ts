@@ -19,7 +19,7 @@ import { createFakeFetch, jsonResponse, type FakeCall } from './helpers/fake';
  * What is proven here and cannot be proven at the api or metadata layer:
  *  - every `--x` / `--x-id` pair is mutually exclusive **before** any request;
  *  - an empty `cases update` patch is exit 2 with nothing sent;
- *  - `runs patch` reads the run first, re-emits its current `status_id` (which
+ *  - `runs update` reads the run first, re-emits its current `status_id` (which
  *    the API demands even on PATCH) and its current executor, and omits
  *    `executor_id` outright — with a warning — when the run has none;
  *  - `runs bulk` refuses more than 50 entries client-side, on **all three** lists;
@@ -1121,7 +1121,7 @@ describe('testhub runs list', () => {
   });
 });
 
-describe('testhub runs patch — the read-then-patch contract (design §7)', () => {
+describe('testhub runs update — the read-then-patch contract (design §7)', () => {
   const patched = () =>
     jsonResponse({
       id: 'run-1',
@@ -1136,7 +1136,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
 
   it('re-emits the current status_id when --status was not given', async () => {
     const run = await runCli(
-      ['testhub', 'runs', 'patch', 'run-1', '--remark', 'smoke', '--json'],
+      ['testhub', 'runs', 'update', 'run-1', '--remark', 'smoke', '--json'],
       [runDetail, patched],
     );
     expect(run.exit).toBe(0);
@@ -1154,7 +1154,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
 
   it('re-sends the executor the run already has, so a remark-only patch keeps it', async () => {
     const run = await runCli(
-      ['testhub', 'runs', 'patch', 'run-1', '--status-id', 'rs-block', '--json'],
+      ['testhub', 'runs', 'update', 'run-1', '--status-id', 'rs-block', '--json'],
       [runDetail, patched],
     );
     expect(run.exit).toBe(0);
@@ -1176,7 +1176,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
         is_archived: 0,
       });
     const run = await runCli(
-      ['testhub', 'runs', 'patch', 'run-3', '--remark', 'smoke', '--json'],
+      ['testhub', 'runs', 'update', 'run-3', '--remark', 'smoke', '--json'],
       [unassigned, patched],
     );
     expect(run.exit).toBe(0);
@@ -1191,7 +1191,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
 
   it('resolves --status against the library the run itself reports', async () => {
     const run = await runCli(
-      ['testhub', 'runs', 'patch', 'r4m2', '--status', '受阻', '--json'],
+      ['testhub', 'runs', 'update', 'r4m2', '--status', '受阻', '--json'],
       [runDetail, runStatusesPage, patched],
     );
     expect(run.exit).toBe(0);
@@ -1212,7 +1212,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
         steps: [],
         is_archived: 0,
       });
-    const run = await runCli(['testhub', 'runs', 'patch', 'run-2', '--remark', 'x', '--json'], [never]);
+    const run = await runCli(['testhub', 'runs', 'update', 'run-2', '--remark', 'x', '--json'], [never]);
     expect(run.exit).toBe(2);
     expect(mutations(run)).toHaveLength(0);
     expect(run.stderr).toContain('--status is required');
@@ -1220,7 +1220,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
 
   it('surfaces a failed pre-read and never attempts the PATCH', async () => {
     const run = await runCli(
-      ['testhub', 'runs', 'patch', 'nope', '--status-id', 'rs-pass', '--json'],
+      ['testhub', 'runs', 'update', 'nope', '--status-id', 'rs-pass', '--json'],
       [() => jsonResponse({ code: '404', message: 'not found' }, { status: 404 })],
     );
     expect(run.exit).toBe(5);
@@ -1230,7 +1230,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
 
   it('--dry-run shows the full inherited body and sends nothing', async () => {
     const run = await runCli(
-      ['testhub', 'runs', 'patch', 'run-1', '--remark', 'x', '--dry-run', '--json'],
+      ['testhub', 'runs', 'update', 'run-1', '--remark', 'x', '--dry-run', '--json'],
       [runDetail],
     );
     expect(run.exit).toBe(0);
@@ -1246,7 +1246,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
 
   it('refuses a partial step edit rather than orphaning the untouched steps', async () => {
     const run = await runCli(
-      ['testhub', 'runs', 'patch', 'run-1', '--step', 'st-1=通过', '--json'],
+      ['testhub', 'runs', 'update', 'run-1', '--step', 'st-1=通过', '--json'],
       [runDetail],
     );
     expect(run.exit).toBe(2);
@@ -1259,7 +1259,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
       [
         'testhub',
         'runs',
-        'patch',
+        'update',
         'run-1',
         '--step',
         'st-1=通过',
@@ -1285,7 +1285,7 @@ describe('testhub runs patch — the read-then-patch contract (design §7)', () 
 
   it('rejects a step the run does not have', async () => {
     const run = await runCli(
-      ['testhub', 'runs', 'patch', 'run-1', '--step', 'st-9=通过', '--json'],
+      ['testhub', 'runs', 'update', 'run-1', '--step', 'st-9=通过', '--json'],
       [runDetail],
     );
     expect(run.exit).toBe(2);
@@ -2217,7 +2217,7 @@ describe('testhub runs create / bulk-create / bulk-update', () => {
     expect(noStatus.calls).toHaveLength(0);
   });
 
-  it('refuses steps in a --file entry, pointing at `runs patch --step`', async () => {
+  it('refuses steps in a --file entry, pointing at `runs update --step`', async () => {
     const run = await runCli(
       ['testhub', 'runs', 'bulk-update', '--file', entryFile([
         { run_id: 'run-1', status_id: 'rs-pass', steps: [{ step_id: 'st-1', status_id: 'rs-pass' }] },
@@ -2225,7 +2225,7 @@ describe('testhub runs create / bulk-create / bulk-update', () => {
       [],
     );
     expect(run.exit).toBe(2);
-    expect(run.stderr).toContain('runs patch --step');
+    expect(run.stderr).toContain('runs update --step');
     expect(run.calls).toHaveLength(0);
   });
 });

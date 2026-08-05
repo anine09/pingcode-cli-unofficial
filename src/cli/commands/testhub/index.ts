@@ -33,7 +33,7 @@ import { registerRunCommands } from './runs';
  *    the two are mutually exclusive (design §6).
  *  - **`PATCH /runs/{id}` is a read-modify-write.** `status_id` is required even
  *    on PATCH, and the executor has to be carried over by hand (GOTCHA #7/#8).
- *    `runs patch` therefore always reads the run first, always sends
+ *    `runs update` therefore always reads the run first, always sends
  *    `status_id`, and re-sends the run's executor unless the run has none
  *    (design §7).
  *  - **Arrays replace, they never merge.** `steps[]` and `properties` overwrite
