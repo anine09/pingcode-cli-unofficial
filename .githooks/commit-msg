@@ -1,0 +1,14 @@
+#!/bin/sh
+# commit-msg: `npm run check:commits -- --file "$1"`.
+#
+# Every command a hook runs is a command CI runs too, so `--no-verify` defers
+# feedback to CI rather than skipping a check.
+#
+# Why this stage: CI can only validate commit messages that already exist, which
+# means a bad message is reported after the commit is written and the fix is a
+# rebase. The same validator run against the message file catches it before the
+# commit is born. The hook adds no rule of its own — the rules live in
+# `.trellis/spec/guides/commit-conventions.md` and in `scripts/check-commits.ts`.
+set -eu
+
+npm run check:commits -- --file "$1"

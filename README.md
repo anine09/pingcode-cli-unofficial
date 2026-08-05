@@ -786,6 +786,7 @@ npm run scan:secrets                        # tracked files
 npm run scan:secrets -- origin/main..HEAD    # + those commit messages
 npm run check:commits                        # whole history
 npm run check:commits -- origin/main..HEAD   # just your branch
+npm run check:commits -- --file .git/COMMIT_EDITMSG   # one message file (what the hook runs)
 ```
 
 `scan:secrets` (`scripts/scan-secrets.ts`) looks for `client_secret=…` assignments,
@@ -806,6 +807,43 @@ too because a squash merge turns it into the commit subject.
 > matrix leg the `skill:install --dry-run` step is therefore skipped, and the hygiene job runs on
 > Node 24. `engines` still says `>=20` because the *published bundle* is built for Node 20 and is
 > smoke-tested there; the restriction is on the repository's own scripts, not on the CLI.
+
+### Git hooks
+
+Native git hooks in [`.githooks/`](.githooks), pointed at by `core.hooksPath`. `npm install` wires
+them up through `prepare`; to do it by hand:
+
+```bash
+npm run hooks:install     # git config core.hooksPath .githooks
+```
+
+| Stage | What it runs |
+| --- | --- |
+| `pre-commit` | `npm run scan:secrets`, `npm run typecheck` |
+| `commit-msg` | `npm run check:commits -- --file "$1"` |
+| `pre-push` | `npm test`, `npm run build`, then the built bundle's `--version` and `--help` |
+
+**A hook only ever runs a command CI also runs.** No rule lives in a hook alone, so `git commit
+--no-verify` / `git push --no-verify` *defers* feedback to CI rather than skipping a check — which is
+exactly what you want when you are mid-thought and the fix is one commit away. The split follows how
+expensive a mistake is to undo: a leaked credential is the only irreversible one here (the
+`client_secret` travels in a query string, and history already needed one sanitisation pass), so the
+secret scan sits in the cheapest, most frequent gate. `check:commits` gained a `--file` mode for the
+hook, because in CI it can only look at commits that already exist — a bad message is found after the
+commit is written and the fix is a rebase, whereas `commit-msg` catches it before the commit is born.
+The slow suite waits for `pre-push`, the point at which code starts reaching other people.
+
+> **Caveat worth knowing: `pre-commit` validates the working tree, not the staged snapshot.** With
+> unstaged changes present, `typecheck` and `scan:secrets` check something other than what is being
+> committed. Stashing around the hook (`git stash --keep-index`) would fix that and is deliberately
+> *not* implemented: an interrupted hook can then lose work, and a documented limitation beats an
+> unexplainable failure mode. `scan:secrets` does enumerate `git ls-files`, so newly staged files are
+> included — it just reads their contents from disk. CI has the last word either way.
+
+The installer (`scripts/install-hooks.mjs`) no-ops when `CI` is set or when it is not inside a git
+work tree, so it can never fail an install. It is plain `.mjs` rather than `.ts` like everything else
+in `scripts/` for one reason: `prepare` runs during `npm ci`, including on the Node 20 leg, where
+`--experimental-strip-types` does not exist.
 
 **`.github/workflows/release.yml`** — on tags matching `v*`. To cut a release:
 

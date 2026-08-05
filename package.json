@@ -25,7 +25,9 @@
     "catalog:check": "node --experimental-strip-types scripts/catalog-sync.ts --check",
     "skill:install": "node --experimental-strip-types scripts/install-skill.ts",
     "scan:secrets": "node --experimental-strip-types scripts/scan-secrets.ts",
-    "check:commits": "node --experimental-strip-types scripts/check-commits.ts"
+    "check:commits": "node --experimental-strip-types scripts/check-commits.ts",
+    "hooks:install": "node scripts/install-hooks.mjs",
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "commander": "^12.1.0",

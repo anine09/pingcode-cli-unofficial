@@ -1,0 +1,24 @@
+#!/bin/sh
+# pre-commit: `npm run scan:secrets` then `npm run typecheck`.
+#
+# Every command a hook runs is a command CI runs too. A hook is never the only
+# place a rule lives, so `--no-verify` defers feedback to CI rather than skipping
+# a check — nothing here can be bypassed permanently.
+#
+# Why these two at this stage: a leaked credential is the only irreversible
+# mistake in this repository (the `client_secret` travels in a query string, and
+# history already needed one sanitisation pass), so the secret scan belongs in
+# the cheapest, most frequent gate. Typecheck joins it because it is the fastest
+# way to catch a change that cannot possibly be correct.
+#
+# Known limitation, stated rather than worked around: both commands read the
+# **working tree**, not the staged snapshot. With unstaged changes present they
+# validate something other than what is being committed. The obvious fix
+# (`git stash --keep-index`) is deliberately not implemented: an interrupted hook
+# can then lose work, and a documented limitation beats an unexplainable one.
+# `scan:secrets` enumerates `git ls-files`, so newly staged files *are* included,
+# but their contents still come from disk.
+set -eu
+
+npm run scan:secrets
+npm run typecheck

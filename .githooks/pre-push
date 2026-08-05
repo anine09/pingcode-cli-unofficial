@@ -1,0 +1,18 @@
+#!/bin/sh
+# pre-push: `npm test`, `npm run build`, then smoke the built bundle.
+#
+# Every command a hook runs is a command CI runs too, so `--no-verify` defers
+# feedback to CI rather than skipping a check.
+#
+# Why this stage: this is the expensive half of the gate, and push is the moment
+# code starts reaching other people. Running it per commit would tax every local
+# checkpoint for no extra safety, since nothing has left the machine yet.
+#
+# The bundle smoke is the same pair CI runs: a build that emits an unrunnable
+# entry point still passes both typecheck and the test suite.
+set -eu
+
+npm test
+npm run build
+node dist/bin/pingcode.js --version
+node dist/bin/pingcode.js --help
