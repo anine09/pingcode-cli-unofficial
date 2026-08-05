@@ -22,14 +22,22 @@
  * Deliberately dependency-free — only `node:` builtins and no relative
  * TypeScript imports, so `node --experimental-strip-types` can run it.
  *
- * Usage: node --experimental-strip-types scripts/check-commits.ts [<git-range>]
- *   npm run check:commits                      # whole history reachable from HEAD
- *   npm run check:commits -- origin/main..HEAD # a range
+ * Usage: node --experimental-strip-types scripts/check-commits.ts [<git-range> | --file <path>]
+ *   npm run check:commits                       # whole history reachable from HEAD
+ *   npm run check:commits -- origin/main..HEAD  # a range
  *   PR_TITLE='fix(cli): …' npm run check:commits -- origin/main..HEAD
+ *   npm run check:commits -- --file .git/COMMIT_EDITMSG   # one message file
+ *
+ * `--file` is what the `commit-msg` hook calls: in CI this gate can only look at
+ * commits that already exist, so a bad message is found after the fact and the
+ * fix is a rebase. Validating the file git is about to commit catches it before
+ * the commit is born, with the same validator and the same rules — the hook adds
+ * no rule of its own. `--file` and a range are mutually exclusive.
  *
  * Exit codes: 0 = all valid, 1 = at least one offender, 2 = bad usage.
  */
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -104,6 +112,27 @@ export function validateHeader(header: string): string[] {
   return errors;
 }
 
+/**
+ * The header of a commit-message *file* (`COMMIT_EDITMSG`), which is not the
+ * same thing as its first line: git appends its own instruction block, so the
+ * file usually starts or ends with `#` comments and blank lines. Those are
+ * stripped first, then the first remaining line is the header.
+ *
+ * Returns `''` when nothing is left — the editor was closed without writing a
+ * message. That is not an offence to report: git aborts the commit by itself,
+ * and a second error here would only be confusing noise.
+ */
+export function headerFromMessageFile(text: string): string {
+  const lines = text
+    .split('\n')
+    .map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line)) // CRLF editors
+    .filter((line) => !line.startsWith('#'));
+  for (const line of lines) {
+    if (line.trim() !== '') return line;
+  }
+  return '';
+}
+
 function repoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 }
@@ -132,18 +161,74 @@ function commitsIn(range: string): Commit[] | null {
   return commits;
 }
 
+/**
+ * `--file` mode: validate the single header in a commit-message file. Same
+ * validator, same report shape and same exit codes as the range path, minus the
+ * sha (the commit does not exist yet — that is the point).
+ */
+function checkMessageFile(file: string): number {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    process.stderr.write(`check-commits: cannot read message file ${file}\n`);
+    return 2;
+  }
+
+  const header = headerFromMessageFile(text);
+  if (header === '') return 0; // aborted editor; git stops the commit on its own
+  if (isMergeHeader(header)) return 0;
+
+  const errors = validateHeader(header);
+  if (errors.length > 0) {
+    process.stderr.write(`${header}\n`);
+    for (const error of errors) process.stderr.write(`    - ${error}\n`);
+    process.stderr.write('\ncheck-commits: 1 offender(s). See .trellis/spec/guides/commit-conventions.md.\n');
+    return 1;
+  }
+
+  process.stdout.write('check-commits: commit message is conventional\n');
+  return 0;
+}
+
+const USAGE = 'usage: npm run check:commits [-- <git-range> | -- --file <path>]   (PR_TITLE is checked when set)\n';
+
 function main(argv: string[]): number {
   const ranges: string[] = [];
-  for (const arg of argv) {
+  let file: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
     if (arg === '--help' || arg === '-h') {
-      process.stdout.write('usage: npm run check:commits [-- <git-range>]   (PR_TITLE is checked when set)\n');
+      process.stdout.write(USAGE);
       return 0;
     }
+    if (arg === '--file' || arg.startsWith('--file=')) {
+      const value = arg === '--file' ? argv[index + 1] : arg.slice('--file='.length);
+      if (value === undefined || value === '' || value.startsWith('-')) {
+        process.stderr.write(`check-commits: --file needs a path\n${USAGE}`);
+        return 2;
+      }
+      if (file !== undefined) {
+        process.stderr.write('check-commits: pass at most one --file\n');
+        return 2;
+      }
+      file = value;
+      if (arg === '--file') index += 1;
+      continue;
+    }
     if (arg.startsWith('-')) {
-      process.stderr.write(`unknown option: ${arg}\nusage: npm run check:commits [-- <git-range>]\n`);
+      process.stderr.write(`unknown option: ${arg}\n${USAGE}`);
       return 2;
     }
     ranges.push(arg);
+  }
+
+  if (file !== undefined) {
+    if (ranges.length > 0) {
+      process.stderr.write('check-commits: --file and a git range are mutually exclusive\n');
+      return 2;
+    }
+    return checkMessageFile(file);
   }
 
   const range = ranges[0] ?? 'HEAD';

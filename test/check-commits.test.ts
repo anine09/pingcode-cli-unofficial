@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isMergeHeader, TYPES, validateHeader } from '../scripts/check-commits';
+import { headerFromMessageFile, isMergeHeader, TYPES, validateHeader } from '../scripts/check-commits';
 
 /**
  * The rules under test are written in `.trellis/spec/guides/commit-conventions.md`.
@@ -101,5 +101,52 @@ describe('isMergeHeader', () => {
   it('does not exempt an ordinary commit that happens to mention merging', () => {
     expect(isMergeHeader('feat(cli): merge two flags into one')).toBe(false);
     expect(isMergeHeader('Merged the branch')).toBe(false);
+  });
+});
+
+/**
+ * `--file` is the `commit-msg` hook's entry point, so what it reads is a
+ * `COMMIT_EDITMSG` file rather than a bare header: git's own instruction block is
+ * in there, and it is the reason "the first line" is not simply `text.split('\n')[0]`.
+ */
+describe('headerFromMessageFile', () => {
+  it('takes the first line of a plain message', () => {
+    expect(headerFromMessageFile('feat(cli): add a thing\n')).toBe('feat(cli): add a thing');
+    expect(headerFromMessageFile('feat(cli): add a thing\n\nA body paragraph.\n')).toBe('feat(cli): add a thing');
+  });
+
+  it("strips git's comment block, wherever it sits", () => {
+    const editmsg = [
+      'fix(http): retry once on a 429 without retry-after',
+      '',
+      '# Please enter the commit message for your changes. Lines starting',
+      "# with '#' will be ignored, and an empty message aborts the commit.",
+      '#',
+      '# On branch main',
+      '',
+    ].join('\n');
+    expect(headerFromMessageFile(editmsg)).toBe('fix(http): retry once on a 429 without retry-after');
+    // `commit --verbose` puts the diff in the comment block; a `#` line first must
+    // not become the header.
+    expect(headerFromMessageFile('# On branch main\n\ndocs: add a thing\n')).toBe('docs: add a thing');
+  });
+
+  it('survives CRLF, because a Windows editor writes it', () => {
+    expect(headerFromMessageFile('docs: add a thing\r\n\r\n# comment\r\n')).toBe('docs: add a thing');
+  });
+
+  it('reports an aborted editor as empty rather than as an offender', () => {
+    // Exit 0 in that case: git aborts the commit itself, and a second error here
+    // would only be confusing. `''` is how the caller learns to say nothing.
+    expect(headerFromMessageFile('')).toBe('');
+    expect(headerFromMessageFile('\n\n')).toBe('');
+    expect(headerFromMessageFile('# Please enter the commit message…\n#\n# On branch main\n')).toBe('');
+  });
+
+  it('feeds the same validator the range path uses', () => {
+    // No second set of rules for the hook: one validator, one spec.
+    expect(validateHeader(headerFromMessageFile('Fixed stuff.\n\n# comment\n'))).toHaveLength(1);
+    expect(validateHeader(headerFromMessageFile('chore(hooks): install a commit-msg gate\n'))).toEqual([]);
+    expect(isMergeHeader(headerFromMessageFile("Merge branch 'main' into topic\n\n# comment\n"))).toBe(true);
   });
 });
