@@ -442,6 +442,24 @@ describe('request: code-aware overrides (S8b, F2/F3)', () => {
     expect((error as NotFoundError).code).toBe('100303');
   });
 
+  it('leaves pjm 100379 (unreachable transition) on exit 7, so 100303 can mean absence', async () => {
+    // The pair that justifies the row above, probed live 2026-08-05 (G3 closeout, and
+    // the transcript is in `wire.ts` beside the table). Unlike ship's 100702/100719,
+    // pjm does NOT reuse its not-found code for a state that exists but has no edge
+    // from the current one — it has 100379 for that. Pin both halves: if a future API
+    // change collapsed them, `100303` would start lying and this test would say so.
+    const error = await request(
+      ctxWith(() =>
+        jsonResponse({ code: '100379', message: '工作项状态不能流转到当前状态' }, { status: 400 }),
+      ),
+      { method: 'PATCH', path: '/v1/pjm/work_items/abc', body: { state_id: 'real-but-unreachable' } },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).exitCode).toBe(7);
+    expect((error as ApiError).code).toBe('100379');
+    expect(ERROR_CODE_OVERRIDES['100379']).toBeUndefined();
+  });
+
   it('leaves codes outside the allowlist on the status-first mapping', async () => {
     const error = await request(
       ctxWith(() => jsonResponse({ code: '100318', message: '别的错误' }, { status: 400 })),

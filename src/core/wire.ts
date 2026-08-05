@@ -178,6 +178,29 @@ const SCOPE_HINT =
  * | `100317` | `GET /v1/pjm/work_items/{unknown id}` | 400 | `NotFoundError` (5) |
  * | `100303` | `PATCH` with an unknown `state_id` | 400 | `NotFoundError` (5) |
  *
+ * **`100303` re-verified 2026-08-05 (G3 closeout) against the standard the ship and
+ * testhub rows below are held to**, because its only prior evidence was an MVP-era
+ * probe with an all-zeros `state_id` and nobody had checked whether pjm repeats
+ * ship's conflation. It does **not**: pjm emits a *separate* code for a state that
+ * exists but is unreachable, so `100303` really does mean "no such state".
+ * Probed on a scratch `[CLI smoke]` story in a scrum project whose story state plan
+ * (`68389e7f33ee52bc5c2584d6`) has `关闭 → {打开, 挂起}` as its only outgoing edges:
+ *
+ * | attempted from `关闭` | HTTP | code | message |
+ * |---|---|---|---|
+ * | → `已完成`, in the scheme, **not** adjacent | 400 | `100379` | `工作项状态不能流转到当前状态` |
+ * | → an unused-but-syntactically-valid 24-hex id | 400 | `100303` | `'state'资源不存在` |
+ * | → `新提交`, a real state of a *different* type's scheme | 400 | `100303` | `'state'资源不存在` |
+ * | → `notanid` | 400 | `100003` | `'state_id'不是有效的字符串(不是有效的id)` |
+ *
+ * Both `project work-item transition` and `project work-item update --state` produce
+ * the identical pairs, so the split is the server's, not a command-layer artefact.
+ * Row 3 is why the row survives rather than merely being defensible: a state outside
+ * the addressed type's scheme genuinely is absent at the address given — `project meta
+ * states --type story` does not list it — so exit 5 is the honest answer, and the
+ * reachability case that would have made exit 5 a lie has its own code (`100379`,
+ * left on exit 7 with the state-flow codes below).
+ *
  * **Evidence: `research/s7-smoke.md` F1** — ship repeats the pattern with its own
  * per-resource codes, so the same mistake had different exits per module until
  * these two rows existed:
@@ -197,7 +220,7 @@ const SCOPE_HINT =
  *
  * Both are stable across a nonexistent 24-hex id, a malformed id and an unknown
  * `short_id`, which is what makes them safe to key on. They also cover the
- * pre-read that `testhub cases update` and `testhub runs patch` perform, so a
+ * pre-read that `testhub cases update` and `testhub runs update` perform, so a
  * missing case or run exits 5 on the write paths too.
  *
  * Deliberately **not** here: ship's `100719` / `100702` ("state does not exist"
@@ -205,6 +228,14 @@ const SCOPE_HINT =
  * exists but is unreachable under the state plan (`research/s7-smoke.md` F5), so
  * mapping them to `not_found` would tell an agent a state is missing when it is
  * merely forbidden. They stay on exit 7.
+ *
+ * Deliberately **not** here either, and for the mirror-image reason: pjm's
+ * `100379` (`工作项状态不能流转到当前状态`, G3 closeout probe above). It is *only* the
+ * unreachable-transition case — pjm never uses it for an absent state — which is
+ * exactly why `100303` above is safe. It is a refused transition, not an absence,
+ * so exit 7 is right; `explainStates` in `cli/commands/workItem.ts` supplies the
+ * configured states and the "you also need a legal workflow transition" sentence
+ * that the server message omits.
  *
  * Deliberately **not** here either, from the same testhub smoke:
  * - `100649` (`测试用例状态不存在` on an unknown `state_id`) — the exact analogue of
