@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
+import { configFilePath } from '../../core/config';
 import type { Ctx } from '../../core/context';
 import { AuthError, UsageError } from '../../core/errors';
 import { redactUrl } from '../../core/redact';
@@ -169,8 +170,8 @@ export function captureCodeFromLoopback(
           reject(
             new UsageError(`the loopback port ${port} is already in use`, {
               hint:
-                `another process is listening on ${redirectUri}; stop it, or register a ` +
-                `free port with \`pingcode config set oauthRedirectUri http://127.0.0.1:<free-port>/callback\``,
+                `another process is listening on ${redirectUri}; stop it, or set a free port in ` +
+                `${configFilePath(process.env)} as "oauthRedirectUri": "http://127.0.0.1:<free-port>/callback"`,
             }),
           ),
         );
