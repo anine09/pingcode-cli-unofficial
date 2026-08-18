@@ -1,0 +1,29 @@
+{
+  "id": "user-token-auth",
+  "name": "user-token-auth",
+  "title": "Add user-token (authorization_code) auth mode coexisting with enterprise token",
+  "description": "Let pingcode CLI authenticate as the current human user via OAuth2 authorization_code flow (用户令牌), coexisting with the existing client_credentials enterprise token (企业令牌). Login chooses mode (default user token); authorization supports both browser redirect and manual code paste. User token carries refresh_token and attributes operations to the real user.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "epsilon",
+  "assignee": "epsilon",
+  "createdAt": "2026-08-18",
+  "completedAt": "2026-08-18",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "commit": "c3bf78d",
+    "followup": "AC4 DONE 2026-08-18: live-verified user-token attribution. Logged in as 骆秀韬 (GET /v1/myself). Added a comment to YYHC-16 (元一 project); read-back confirmed created_by=骆秀韬, not the bot. Test comment soft-deleted. Commits c3bf78d..fb07dcb (4, ahead of origin, unpushed). oauthRoot/token-lifetimes not yet live-verified (N/A for paste channel)."
+  }
+}
