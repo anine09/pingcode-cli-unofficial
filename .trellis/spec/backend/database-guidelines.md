@@ -13,11 +13,81 @@ There is no ORM, no migrations, no SQL. Persistence is two things under `~/.ping
 
 | Path | Contents | Written by |
 |---|---|---|
-| `~/.pingcode/config.json` | `host`, `clientId`, `clientSecret` (only with `--save`), `token{accessToken, expiresAtMs, obtainedAtMs}` | `core/config.ts` |
+| `~/.pingcode/config.json` | `host`, `clientId`, `clientSecret` (only with `--save`), the active token slot + its `kind`, `authMode`, `oauthRedirectUri` | `core/config.ts` |
 | `~/.pingcode/cache/<sha256>.json` | resolved metadata lists (types, states, priorities, sprints, users, projects) | `core/metadata.ts` |
 
 Nothing else in the codebase may read or write these files. `cli/` is forbidden from importing
 `node:fs` at all (enforced by `test/layering.test.ts`).
+
+---
+
+## Dual-auth storage contract (two grants, two slots)
+
+The CLI holds **two coexisting token kinds** via two grants on the same token endpoint
+`GET {apiBase}/v1/auth/token` (all params in the query string):
+
+| Grant | `kind` | Stored in | `refresh_token`? | Authority |
+|---|---|---|---|---|
+| `client_credentials` | `enterprise` | `token` | no | system-admin, all resources, **not user-bound** (the bot "Ping") |
+| `authorization_code` | `user` | `userToken` | **yes** | bound to the authorizing human, that user's own permissions |
+
+**Config shape** (`src/core/config.ts`):
+
+```ts
+type TokenRecord = {
+  accessToken: string;
+  expiresAtMs: number;   // always absolute ms (never raw expires_in)
+  obtainedAtMs: number;
+  scope?: string;
+  kind?: 'enterprise' | 'user';   // absent => coerced to 'enterprise' (legacy compat)
+  refreshToken?: string;           // present only for user tokens
+};
+type UserTokenRecord = TokenRecord & { kind: 'user'; refreshToken: string };
+type Config = {
+  host?; apiBase?;
+  clientId?; clientSecret?;        // app creds shared by BOTH grants
+  oauthRedirectUri?: string;        // registered loopback callback for the browser channel
+  token?: TokenRecord;              // ENTERPRISE slot (legacy field name kept)
+  userToken?: UserTokenRecord;      // USER slot
+  authMode?: 'enterprise' | 'user'; // which slot is active
+};
+```
+
+### Rules (executable, test-covered)
+
+1. **Active-mode inference (`resolveSettings`, when `authMode` is absent):** `userToken`
+   present → `user`; else `token` present → `enterprise`; else neither → `user` (the default
+   for brand-new setups). An explicit `authMode` always wins. A **legacy config** with only
+   an enterprise token (no `authMode`) infers `enterprise` — it is never flipped to `user` on
+   upgrade.
+2. **`kind` defaults to `enterprise`.** `coerceToken` must stamp a missing `kind` to
+   `'enterprise'`, so a legacy `token` record keeps working and `UserTokenRecord` (which
+   requires `kind:'user'` + `refreshToken`) never matches it. `coerceUserToken` rejects a
+   `userToken` whose `kind !== 'user'` or that lacks a `refreshToken`.
+3. **`coerceConfig` must coerce every known key.** It drops unknown keys; the NEW keys
+   (`userToken`, `authMode`, `oauthRedirectUri`, `kind`, `refreshToken`) are known and MUST be
+   coerced or they vanish on the next save (silent data loss).
+4. **Mode-aware `persistToken`.** The single hook routes by `token.kind`: `kind==='user'`
+   writes `{ userToken, authMode:'user' }`; otherwise `{ token, authMode:'enterprise' }`. Every
+   token persistence stamps `authMode`.
+5. **Refresh rotation retains the `refresh_token`.** `grant_type=refresh_token` returns a new
+   `access_token` but **no** new `refresh_token` — keep the stored one. Enterprise tokens have
+   no refresh: "refresh" = re-acquire via `client_credentials`.
+6. **`ensureFreshToken` is mode-aware** but keeps a single in-flight serialization per active
+   token. In user mode, the reactive 401→re-acquire path must NOT clear `ctx.auth.token` (the
+   `refresh_token` lives on it) — only clear `inflight`. Enterprise force-refresh clears both.
+
+### Logout semantics
+
+- **default** — clears the **active** slot + `authMode` (clearing `authMode` is required: with
+  it still pointing at an emptied slot, `resolveSettings` would hide the surviving slot). The
+  other slot + app credentials survive for instant switch-back.
+- **`--all`** — wipes both slots + `authMode` + app credentials; `host` is kept.
+
+> **Gotcha — don't conflate the two identities.** An enterprise token is NOT a user token. The
+> 7 USER-only endpoints are refused while an enterprise token is held and allowed when a user
+> token is held (`refuseUserTokenEndpoint` gates on `ctx.auth.mode`). Verification differs too:
+> enterprise verifies via `GET /v1/pjm/projects`; user mode verifies via `GET /v1/myself`.
 
 ---
 

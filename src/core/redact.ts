@@ -14,7 +14,7 @@
 export const REDACTED = '***REDACTED***';
 
 /** Query params that must never be printed. */
-const SENSITIVE_QUERY_PARAMS = ['client_secret', 'code'];
+const SENSITIVE_QUERY_PARAMS = ['client_secret', 'code', 'refresh_token'];
 
 /** Headers that must never be printed. */
 const SENSITIVE_HEADERS = ['authorization', 'proxy-authorization', 'cookie', 'set-cookie'];

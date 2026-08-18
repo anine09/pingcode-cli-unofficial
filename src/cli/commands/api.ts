@@ -235,7 +235,12 @@ async function runVerb(
   self: Command,
 ): Promise<void> {
   const { candidates, path } = resolveEntry(method, pathArgument);
-  refuseUserTokenEndpoint(candidates);
+
+  // The held-kind gate needs the active token's mode, so the context is built
+  // before it (it used to be built after this line; the move is the whole of
+  // threading `ctx` in — design D9). Nothing here reads a file or the network.
+  const { ctx } = contextFor(self);
+  refuseUserTokenEndpoint(ctx, candidates);
 
   const query = parseQueryFlags(flags.query);
   refuseUnconfirmedDelete(method, path, query, flags);
@@ -243,8 +248,6 @@ async function runVerb(
   const body = await readBodyFlags(flags);
   const entry = chooseEntry(candidates, query, body);
   const paging = readPagingFor(entry, flags);
-
-  const { ctx } = contextFor(self);
 
   try {
     await send(ctx, entry, path, query, body, paging);
@@ -419,9 +422,8 @@ function resolveEntry(
 }
 
 const AUTHORIZE_HINT =
-  'this CLI authenticates with the client_credentials grant, which yields an 企业令牌; the ' +
-  'authorization-code flow (and therefore anything needing a 用户令牌) is a separate task. ' +
-  'Run `pingcode auth login`.';
+  'this CLI supports both the client_credentials grant (an 企业令牌) and the ' +
+  'authorization-code grant (a 用户令牌). To hold a user token, run `pingcode auth login --mode user`.';
 
 function unknownPath(path: string): UsageError {
   if (segmentsOf(path).includes('authorize')) {
@@ -509,12 +511,18 @@ function isPlaceholder(segment: string): boolean {
  *    shared path could in principle mix token types and refusing then would block a
  *    reachable endpoint.
  */
-function refuseUserTokenEndpoint(candidates: readonly CatalogEntry[]): void {
+function refuseUserTokenEndpoint(ctx: Ctx, candidates: readonly CatalogEntry[]): void {
+  // Not a USER-only call: an absent tokenType, or a path where some candidate
+  // accepts another token, is reachable regardless of the held kind (design D8.5).
   if (!candidates.every((entry) => entry.tokenType === 'USER')) return;
+  // A user token CAN call these (R7). `ctx.auth.mode` may be undefined for a
+  // context built with no token — treat that as enterprise (refuse), the safe
+  // default (design D9).
+  if (ctx.auth.mode === 'user') return;
   const entry = candidates[0];
   if (entry === undefined) return;
   throw new UsageError(
-    `${entry.method} ${entry.path} requires a 用户令牌 (user token), and this CLI only holds an 企业令牌 (enterprise token)`,
+    `${entry.method} ${entry.path} requires a 用户令牌 (user token), but the active token is an 企业令牌 (enterprise) — run \`pingcode auth login --mode user\` to hold a user token`,
     {
       hint:
         'seven endpoints are user-token-only — /v1/myself, /v1/permission/my/* and /v1/permission/check/*. ' +
@@ -899,7 +907,9 @@ function tokenLine(entry: CatalogEntry): string {
   if (entry.tokenType === 'ENT') {
     return 'ENT — 企业令牌 only (reachable: this CLI holds an enterprise token)';
   }
-  if (entry.tokenType === 'USER') return 'USER — 用户令牌 only (NOT reachable with this CLI)';
+  if (entry.tokenType === 'USER') {
+    return 'USER — 用户令牌 only (reachable once a user token is active: `pingcode auth login --mode user`)';
+  }
   return 'APP — 企业令牌 or 用户令牌';
 }
 
@@ -938,7 +948,7 @@ function warningsFor(entry: CatalogEntry): string[] {
   }
   if (entry.tokenType === 'USER') {
     warnings.push(
-      'user-token-only: this CLI refuses it with exit 2 before sending anything (the authorization-code flow is not implemented).',
+      'user-token-only: with an enterprise token active this CLI refuses it with exit 2 before sending anything; it is reachable once a user token is active (`pingcode auth login --mode user`).',
     );
   }
   if (entry.scopes.length === 0 && entry.tokenType !== undefined) {

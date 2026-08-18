@@ -5,17 +5,22 @@ import { redactUrl } from './redact';
 import { buildUrl, readResponse, sendRequest } from './wire';
 
 /**
- * Auth (design §4). MVP uses **`client_credentials` only** (D4).
+ * Auth (design §4). Two grants share the single token endpoint
+ * `GET {apiBase}/v1/auth/token` (all params in the query string, `client_secret`
+ * included — research §6.1):
  *
- * The token request is a **GET with query parameters under the REST root** —
- * not POST + form, and *not* under `/oauth2` (research §1.1, §1.3):
+ *   client_credentials  → `client_id`, `client_secret`
+ *                         → { access_token, token_type, expires_in }   (no refresh)
+ *   authorization_code  → `client_id`, `client_secret`, `code`
+ *                         → { access_token, refresh_token, token_type, expires_in }
+ *   refresh_token       → `refresh_token`
+ *                         → { access_token, token_type, expires_in }  (NO new refresh_token)
  *
- *   GET {apiBase}/v1/auth/token?grant_type=client_credentials&client_id=…&client_secret=…
- *   → { access_token, token_type: "Bearer", expires_in }
- *
- * The resulting token is not tied to a user, carries **org-wide
- * system-administrator** authority, is valid 30 days, and has **no refresh
- * token** — "refresh" therefore means "re-acquire from the stored credentials".
+ * `acquireToken` is the enterprise (`client_credentials`) acquirer. `acquireUserToken`
+ * performs the initial authorization_code exchange (login only), `refreshUserToken`
+ * rotates a user token's access token while retaining the stored `refresh_token`
+ * (D6). `ensureFreshToken` routes by the active `ctx.auth.mode` (D7); the reactive
+ * 401→re-acquire→replay loop in `core/http.ts` is mode-agnostic (D8).
  */
 
 export const THIRTY_DAYS_MS = 30 * 24 * 3600 * 1000;
@@ -30,6 +35,8 @@ export type TokenResponse = {
   token_type?: unknown;
   expires_in?: unknown;
   scope?: unknown;
+  /** Only the `authorization_code` grant returns one (design D1). */
+  refresh_token?: unknown;
 };
 
 /**
@@ -120,6 +127,108 @@ export async function acquireToken(ctx: Ctx): Promise<TokenRecord> {
   return token;
 }
 
+/** Shared: GET the token endpoint and read its JSON body. */
+async function callTokenEndpoint(
+  ctx: Ctx,
+  query: Record<string, unknown>,
+): Promise<TokenResponse | undefined> {
+  const url = buildUrl(ctx.apiBase, TOKEN_PATH, query);
+  // The URL now also carries `code` (authorize) and/or `refresh_token`; redactUrl
+  // masks `client_secret` + `code` (design §5.0, R9).
+  ctx.logger.debug(`→ GET ${redactUrl(url)}`);
+  const response = await sendRequest(ctx, {
+    method: 'GET',
+    url,
+    headers: { Accept: 'application/json' },
+  });
+  ctx.logger.debug(`← ${response.status} ${redactUrl(url)}`);
+  return await readResponse<TokenResponse | undefined>(response, { method: 'GET', url });
+}
+
+/** Shared: build a `TokenRecord` from a token-endpoint payload + a known refresh token. */
+function tokenFromResponse(
+  ctx: Ctx,
+  payload: TokenResponse | undefined,
+  refreshToken: string,
+  missingAccessHint: string,
+): TokenRecord {
+  const accessToken =
+    payload !== undefined && typeof payload.access_token === 'string' ? payload.access_token : '';
+  if (accessToken === '') {
+    throw new AuthError('the token endpoint did not return an access_token', { hint: missingAccessHint });
+  }
+  const obtainedAtMs = ctx.now();
+  const { at, clamped } = normalizeExpiry(payload?.expires_in, obtainedAtMs);
+  if (clamped && !ctx.auth.clampWarned) {
+    ctx.auth.clampWarned = true;
+    ctx.logger.warn(
+      `the token endpoint reported expires_in=${String(payload?.expires_in)}, which is already ` +
+        'expired or unusable; assuming the documented 30-day validity',
+    );
+  }
+  const token: TokenRecord = { kind: 'user', accessToken, refreshToken, expiresAtMs: at, obtainedAtMs };
+  if (typeof payload?.scope === 'string' && payload.scope !== '') token.scope = payload.scope;
+  return token;
+}
+
+/**
+ * Exchange an operator-supplied authorization `code` for a user token (D6, R3/R4).
+ * Login only — `ensureFreshToken` never calls this; it only ever refreshes.
+ */
+export async function acquireUserToken(ctx: Ctx, code: string): Promise<TokenRecord> {
+  const { clientId, clientSecret } = ctx.credentials;
+  if (clientId === undefined || clientSecret === undefined) {
+    throw new AuthError('no PingCode credentials available', {
+      hint: 'run `pingcode auth login --client-id <id> --client-secret <secret>`, or set PINGCODE_CLIENT_ID / PINGCODE_CLIENT_SECRET',
+    });
+  }
+
+  const payload = await callTokenEndpoint(ctx, {
+    grant_type: 'authorization_code',
+    client_id: clientId,
+    client_secret: clientSecret,
+    code,
+  });
+
+  const refreshToken =
+    payload !== undefined && typeof payload.refresh_token === 'string' ? payload.refresh_token : '';
+  if (refreshToken === '') {
+    throw new AuthError('the authorization_code exchange did not return a refresh_token', {
+      hint: 'a user token requires a refresh_token; verify the grant and re-run `pingcode auth login`',
+    });
+  }
+
+  const token = tokenFromResponse(
+    ctx,
+    payload,
+    refreshToken,
+    'verify the authorization code and that the app uses the Authorization Code grant',
+  );
+  ctx.auth.token = token;
+  ctx.persistToken?.(token);
+  return token;
+}
+
+/**
+ * Refresh a user token (D6, R5). `grant_type=refresh_token` returns a new
+ * `access_token` but **no** new `refresh_token`, so the stored one is retained.
+ */
+export async function refreshUserToken(ctx: Ctx, refreshToken: string): Promise<TokenRecord> {
+  const payload = await callTokenEndpoint(ctx, {
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  });
+  const token = tokenFromResponse(
+    ctx,
+    payload,
+    refreshToken,
+    'the refresh token may have been revoked; run `pingcode auth login`',
+  );
+  ctx.auth.token = token;
+  ctx.persistToken?.(token);
+  return token;
+}
+
 /**
  * Return a usable access token, acquiring one if needed.
  *
@@ -137,7 +246,14 @@ export async function ensureFreshToken(
   options: { force?: boolean } = {},
 ): Promise<string> {
   const force = options.force === true;
-  if (force) ctx.auth.token = undefined;
+  if (force) {
+    ctx.auth.inflight = undefined;
+    // Enterprise re-acquires from the stored credentials, so the stale token can
+    // be dropped. User mode refreshes from the `refresh_token` that lives *on*
+    // the token record — clearing it here would orphan that credential and break
+    // the reactive 401→refresh path (AC5). Preserve it for user mode.
+    if (ctx.auth.mode !== 'user') ctx.auth.token = undefined;
+  }
 
   if (!force && tokenIsFresh(ctx.auth.token, ctx.now())) {
     return ctx.auth.token?.accessToken ?? '';
@@ -145,12 +261,38 @@ export async function ensureFreshToken(
 
   const pending =
     ctx.auth.inflight ??
-    (ctx.auth.inflight = acquireToken(ctx).finally(() => {
+    (ctx.auth.inflight = acquireForMode(ctx).finally(() => {
       ctx.auth.inflight = undefined;
     }));
 
   const token = await pending;
   return token.accessToken;
+}
+
+/**
+ * Acquire a usable token for the active `ctx.auth.mode` (D7): enterprise
+ * re-acquires from credentials (`acquireToken`); user mode refreshes from the
+ * stored `refresh_token`. A rejected refresh (revoked/expired refresh token →
+ * non-2xx `AuthError` from `readResponse`, or a missing access token) is **not**
+ * swallowed — it surfaces as an actionable `AuthError` (R5).
+ */
+async function acquireForMode(ctx: Ctx): Promise<TokenRecord> {
+  if (ctx.auth.mode === 'user') {
+    const refreshToken = ctx.auth.token?.refreshToken;
+    if (refreshToken === undefined) {
+      // ensureFreshToken only ever refreshes; the initial code exchange is done
+      // by `runLogin` via `acquireUserToken`. No token here is a logic error.
+      throw new AuthError('no user token to refresh', { hint: 'run `pingcode auth login`' });
+    }
+    try {
+      return await refreshUserToken(ctx, refreshToken);
+    } catch (error) {
+      throw new AuthError('user token refresh failed — run `pingcode auth login`', {
+        cause: error,
+      });
+    }
+  }
+  return await acquireToken(ctx);
 }
 
 /** Forget the in-memory token. Persistence is the caller's business. */

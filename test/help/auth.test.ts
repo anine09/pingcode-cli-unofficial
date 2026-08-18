@@ -27,3 +27,15 @@ describe('auth --help', () => {
     expect(helpFor(['auth'])).toMatchSnapshot();
   });
 });
+
+describe('auth login --help', () => {
+  it('pins the mode/channel/code flag surface (design D10/D12)', () => {
+    expect(helpFor(['auth', 'login'])).toMatchSnapshot();
+  });
+});
+
+describe('auth logout --help', () => {
+  it('pins the --all flag (design D14)', () => {
+    expect(helpFor(['auth', 'logout'])).toMatchSnapshot();
+  });
+});

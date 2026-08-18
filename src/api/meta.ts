@@ -1,6 +1,7 @@
 import type { Ctx } from '../core/context';
 import { ENDPOINTS } from '../core/endpoints';
 import type { Page, PageRequest, PaginateOptions } from '../core/paginate';
+import { request } from '../core/http';
 import type { Sprint, User, WorkItemPriority, WorkItemState, WorkItemType } from '../types/api';
 import {
   fetchPageOf,
@@ -93,6 +94,17 @@ export async function listUsers(
   page: PageRequest = {},
 ): Promise<Page<User>> {
   return await fetchPageOf(ctx, ENDPOINTS.users, { ...query }, page, parseUser);
+}
+
+/**
+ * `GET /v1/myself` — the current user (获取个人信息). USER-only
+ * (`pcp:read:account:personal`). It is the identity-proof call a user-token
+ * login verifies with: an enterprise token would also answer here but is not
+ * user-bound, so only user mode uses it (design D12 step 6).
+ */
+export async function getMyself(ctx: Ctx): Promise<User> {
+  const raw = await request<unknown>(ctx, { method: 'GET', path: ENDPOINTS.myself });
+  return parseUser(raw);
 }
 
 export function iterateUsers(

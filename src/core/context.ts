@@ -7,8 +7,11 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 /**
  * In-process auth state. Kept mutable and per-context so `ensureFreshToken` can
  * serialise re-acquisition behind a single in-flight promise (design §4.2).
+ * `mode` is the active grant; `buildContext` stamps it from the resolved config
+ * (the safe process default, when no auth is supplied, is `enterprise`).
  */
 export type AuthSession = {
+  mode?: 'enterprise' | 'user' | undefined;
   token?: TokenRecord | undefined;
   inflight?: Promise<TokenRecord> | undefined;
   /** The past-expiry clamp warns once per process (design §4.1). */
@@ -29,6 +32,8 @@ export type Ctx = {
     clientSecret?: string | undefined;
   };
   auth: AuthSession;
+  /** Loopback callback info for the browser authorize channel (D13). */
+  oauth: { redirectUri?: string | undefined };
   /** `--dry-run`: mutating requests throw `DryRunHalt` instead of being sent. */
   dryRun: boolean;
   /** `--json` */
@@ -58,7 +63,8 @@ export function createContext(options: ContextOptions = {}): Ctx {
   return {
     apiBase: options.apiBase ?? deriveApiBase(DEFAULT_HOST),
     credentials: options.credentials ?? {},
-    auth: options.auth ?? { clampWarned: false },
+    auth: options.auth ?? { clampWarned: false, mode: 'enterprise' },
+    oauth: options.oauth ?? {},
     dryRun: options.dryRun ?? false,
     json: options.json ?? false,
     verbose,

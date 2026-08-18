@@ -162,6 +162,28 @@ describe('config file storage', () => {
     expect(after.token?.accessToken).toBe('t');
   });
 
+  it('round-trips the user-token keys through save/load (D3)', () => {
+    saveConfig(
+      {
+        oauthRedirectUri: 'http://127.0.0.1:8732/callback',
+        authMode: 'user',
+        userToken: {
+          accessToken: 'u',
+          refreshToken: 'rt',
+          expiresAtMs: 5,
+          obtainedAtMs: 1,
+          kind: 'user',
+        },
+      },
+      env,
+    );
+    const after = loadConfig(env);
+    expect(after.oauthRedirectUri).toBe('http://127.0.0.1:8732/callback');
+    expect(after.authMode).toBe('user');
+    expect(after.userToken?.accessToken).toBe('u');
+    expect(after.userToken?.refreshToken).toBe('rt');
+  });
+
   it('deletes fields on an explicit null', () => {
     saveConfig({ clientId: 'abc', clientSecret: 'shh' }, env);
     saveConfig({ clientSecret: null }, env);
@@ -210,7 +232,7 @@ describe('coerceConfig', () => {
       }),
     ).toEqual({
       host: 'https://open.pingcode.com',
-      token: { accessToken: 'tok', expiresAtMs: 5, obtainedAtMs: 1, scope: 'a' },
+      token: { accessToken: 'tok', expiresAtMs: 5, obtainedAtMs: 1, scope: 'a', kind: 'enterprise' },
     });
   });
 
@@ -218,5 +240,106 @@ describe('coerceConfig', () => {
     expect(coerceConfig({ token: { expiresAtMs: 5 } })).toEqual({});
     expect(coerceConfig(null)).toEqual({});
     expect(coerceConfig('nope')).toEqual({});
+  });
+
+  it('coerces the new user-token keys (D1/D3)', () => {
+    expect(
+      coerceConfig({
+        oauthRedirectUri: 'http://127.0.0.1:8732/callback',
+        authMode: 'user',
+        userToken: {
+          accessToken: 'u',
+          refreshToken: 'rt',
+          expiresAtMs: 5,
+          obtainedAtMs: 1,
+          kind: 'user',
+        },
+      }),
+    ).toEqual({
+      oauthRedirectUri: 'http://127.0.0.1:8732/callback',
+      authMode: 'user',
+      userToken: {
+        accessToken: 'u',
+        refreshToken: 'rt',
+        expiresAtMs: 5,
+        obtainedAtMs: 1,
+        kind: 'user',
+      },
+    });
+  });
+
+  it('drops a userToken without a refresh token or with the wrong kind', () => {
+    expect(coerceConfig({ userToken: { accessToken: 'u', kind: 'user' } })).toEqual({});
+    expect(
+      coerceConfig({
+        userToken: {
+          accessToken: 'u',
+          refreshToken: 'rt',
+          expiresAtMs: 5,
+          obtainedAtMs: 1,
+          kind: 'enterprise',
+        },
+      }),
+    ).toEqual({});
+  });
+
+  it('drops an invalid authMode', () => {
+    expect(coerceConfig({ authMode: 'bogus' })).toEqual({});
+  });
+
+  it('defaults a legacy token (no kind) to enterprise (R6)', () => {
+    expect(coerceConfig({ token: { accessToken: 'tok', expiresAtMs: 5, obtainedAtMs: 1 } })).toEqual(
+      {
+        token: { accessToken: 'tok', expiresAtMs: 5, obtainedAtMs: 1, kind: 'enterprise' },
+      },
+    );
+  });
+});
+
+describe('resolveSettings auth-mode inference (D2)', () => {
+  it('prefers user when a userToken is present', () => {
+    const file = {
+      token: { accessToken: 'ent', expiresAtMs: 5, obtainedAtMs: 1, kind: 'enterprise' as const },
+      userToken: {
+        accessToken: 'usr',
+        refreshToken: 'rt',
+        expiresAtMs: 6,
+        obtainedAtMs: 2,
+        kind: 'user' as const,
+      },
+    };
+    const resolved = resolveSettings({ env: {}, file });
+    expect(resolved.authMode).toBe('user');
+    expect(resolved.token?.accessToken).toBe('usr'); // active slot = user
+  });
+
+  it('infers enterprise for a legacy token-only config (R6)', () => {
+    const file = { token: { accessToken: 'ent', expiresAtMs: 5, obtainedAtMs: 1 } };
+    const resolved = resolveSettings({ env: {}, file });
+    expect(resolved.authMode).toBe('enterprise');
+    expect(resolved.token?.accessToken).toBe('ent');
+  });
+
+  it('defaults to user for a brand-new config with no token (R2)', () => {
+    const resolved = resolveSettings({ env: {} });
+    expect(resolved.authMode).toBe('user');
+    expect(resolved.token).toBeUndefined();
+  });
+
+  it('honours an explicit authMode over inference', () => {
+    const file = {
+      authMode: 'enterprise' as const,
+      token: { accessToken: 'ent', expiresAtMs: 5, obtainedAtMs: 1, kind: 'enterprise' as const },
+      userToken: {
+        accessToken: 'usr',
+        refreshToken: 'rt',
+        expiresAtMs: 6,
+        obtainedAtMs: 2,
+        kind: 'user' as const,
+      },
+    };
+    const resolved = resolveSettings({ env: {}, file });
+    expect(resolved.authMode).toBe('enterprise'); // explicit wins despite userToken present
+    expect(resolved.token?.accessToken).toBe('ent'); // active slot = enterprise
   });
 });

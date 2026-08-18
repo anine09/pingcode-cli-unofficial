@@ -74,10 +74,19 @@ The mechanism, not just the intention:
 - Every printable URL goes through **`redactUrl()`** (`src/core/redact.ts`) — `--verbose` traces,
   the dry-run plan, `TransportError` messages, error snippets. On this API the `client_secret`
   travels in the **URL query string** on the token endpoint, so a raw URL in a log line is a leaked
-  secret. Sensitive query params: `client_secret`, `code`.
+  secret. Sensitive query params: `client_secret`, `code`, `refresh_token`.
 - **`redactHeaders()`** masks `authorization`, `proxy-authorization`, `cookie`, `set-cookie`.
 - **`redactSnippet()`** masks `access_token` / `refresh_token` / `client_secret` values inside a
   quoted response body before it lands in an error message.
+
+> **Gotcha — a new secret-bearing query param must be added to `SENSITIVE_QUERY_PARAMS`, not
+> just `SENSITIVE_JSON_KEYS`.** `refresh_token` was initially added only to `SENSITIVE_JSON_KEYS`
+> (body redaction). But the user-token *refresh* call carries `refresh_token` in the **query
+> string** (`GET /v1/auth/token?grant_type=refresh_token&refresh_token=…`), so `redactUrl` would
+> have printed it in `--verbose` logs. Whenever a grant/endpoint puts a credential in the query
+> string, add it to `SENSITIVE_QUERY_PARAMS` **and** `SENSITIVE_JSON_KEYS` (the query regex
+> `SENSITIVE_QUERY_RE` and the URL-parser loop both read the query list; the JSON regex reads the
+> key list — they are independent).
 - Redaction **fails safe**: the query-value pattern is lazy and only hands back a *trailing* run of
   `)`, `"`, `'`, `,` so an embedded URL keeps its closing paren, while a secret that itself contains
   one of those characters is still masked in full. Over-redacting by a character is acceptable;

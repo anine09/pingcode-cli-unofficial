@@ -124,16 +124,33 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   const ctx = createContext({
     apiBase: settings.apiBase,
     credentials: { clientId: settings.clientId, clientSecret: settings.clientSecret },
-    auth: { token: settings.token, clampWarned: false },
+    auth: {
+      token: settings.token, // the active slot's token (D2/D5)
+      clampWarned: false,
+      mode: settings.authMode,
+    },
+    oauth: { redirectUri: settings.oauthRedirectUri },
     dryRun: input.globals.dryRun,
     json: input.globals.json,
     verbose: input.globals.verbose,
     useCache: input.globals.useCache,
     logger,
     env,
-    // A token refresh writes back `token` alone — never a whole stale Config.
+    // Mode-aware persist (D5): route by the token's kind to the right slot and
+    // stamp the active mode. saveConfig re-reads + merges, so this writes only
+    // the owned field (never a whole stale Config).
     persistToken: (token: TokenRecord) => {
-      saveConfig({ token }, env);
+      if (token.kind === 'user') {
+        saveConfig(
+          {
+            userToken: { ...token, kind: 'user', refreshToken: token.refreshToken ?? '' },
+            authMode: 'user',
+          },
+          env,
+        );
+      } else {
+        saveConfig({ token, authMode: 'enterprise' }, env);
+      }
     },
   });
 

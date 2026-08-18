@@ -48,6 +48,16 @@ describe('redactUrl (design §5.0, AC3/AC11)', () => {
     expect(redactUrl('https://x/y?code=abc123&keep=1')).toContain('keep=1');
   });
 
+  it('masks the refresh_token param (user-token refresh grant)', () => {
+    // The `refresh_token` grant keeps the rotating secret in the query string, so
+    // it must be redacted the same way `client_secret` and `code` are (R9).
+    const url = 'https://open.pingcode.com/v1/auth/token?grant_type=refresh_token&refresh_token=rt-secret';
+    const redacted = redactUrl(url);
+    expect(redacted).not.toContain('rt-secret');
+    expect(redacted).toContain('refresh_token=***REDACTED***');
+    expect(redacted).toContain('grant_type=refresh_token'); // the grant name itself is not secret
+  });
+
   it('masks repeated occurrences and relative URLs', () => {
     const relative = `/v1/auth/token?client_secret=${SECRET}&client_secret=${SECRET}`;
     expect(redactUrl(relative)).not.toContain(SECRET);

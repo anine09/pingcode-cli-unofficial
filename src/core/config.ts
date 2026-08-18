@@ -28,27 +28,49 @@ export const ENV_CLIENT_ID = 'PINGCODE_CLIENT_ID';
 export const ENV_CLIENT_SECRET = 'PINGCODE_CLIENT_SECRET';
 
 /**
+ * The grant a token came from. `enterprise` = `client_credentials` (app/admin,
+ * no refresh); `user` = `authorization_code` (human-bound, refreshable). A
+ * legacy on-disk token with no `kind` coerces to `enterprise` (R6).
+ */
+export type TokenKind = 'enterprise' | 'user';
+
+/**
  * A token as stored locally. `expiresAtMs` is **always** an absolute local
- * timestamp in milliseconds — never the raw `expires_in` (design §4.1).
+ * timestamp in milliseconds — never the raw `expires_in` (design §4.1). `kind`
+ * is optional at the type level so legacy/constructed tokens without it still
+ * typecheck; `coerceToken` defaults an absent `kind` to `enterprise` (R6).
  */
 export type TokenRecord = {
   accessToken: string;
   expiresAtMs: number;
   obtainedAtMs: number;
   scope?: string | undefined;
+  kind?: TokenKind | undefined;
+  /** Only `user` tokens carry a refresh token (design D1). */
+  refreshToken?: string | undefined;
 };
 
+/** A user-slot token: always `kind:'user'` and always refreshable (design D1). */
+export type UserTokenRecord = TokenRecord & { kind: 'user'; refreshToken: string };
+
 /**
- * On-disk config shape (design §3). `grantType` and `refreshToken` are omitted
- * deliberately: the grant is single-valued in MVP (D4) and `client_credentials`
- * never returns a refresh token (research §1.3).
+ * On-disk config shape (design §3). Two token slots coexist: `token` is the
+ * enterprise slot (existing), `userToken` is the user slot (new). `authMode`
+ * says which is active. A legacy file has only `token` + no `authMode` (D2).
  */
 export type Config = {
   host?: string | undefined;
   apiBase?: string | undefined;
   clientId?: string | undefined;
   clientSecret?: string | undefined;
+  /** Enterprise slot (existing, backward-compatible). */
   token?: TokenRecord | undefined;
+  /** User slot (authorization_code / refresh_token). */
+  userToken?: UserTokenRecord | undefined;
+  /** Which slot is active; absent → inferred (D2). */
+  authMode?: TokenKind | undefined;
+  /** Registered loopback callback for the browser authorize channel (D13). */
+  oauthRedirectUri?: string | undefined;
 };
 
 /** A patch for `saveConfig`: `undefined` leaves a field alone, `null` deletes it. */
@@ -70,7 +92,12 @@ export type ResolvedSettings = {
   apiBase: string;
   clientId: string | undefined;
   clientSecret: string | undefined;
+  /** The active slot's token (user slot when `authMode==='user'`, else enterprise). */
   token: TokenRecord | undefined;
+  /** Which slot is active, inferred per D2 when the config does not state it. */
+  authMode: TokenKind;
+  /** Loopback callback for the browser authorize channel (config only). */
+  oauthRedirectUri: string | undefined;
   sources: {
     host: SettingSource;
     apiBase: SettingSource;
@@ -272,15 +299,51 @@ export function coerceConfig(raw: unknown): Config {
   if (clientSecret !== undefined) config.clientSecret = clientSecret;
   const token = coerceToken(record.token);
   if (token !== undefined) config.token = token;
+  const userToken = coerceUserToken(record.userToken);
+  if (userToken !== undefined) config.userToken = userToken;
+  const authMode = asAuthMode(record.authMode);
+  if (authMode !== undefined) config.authMode = authMode;
+  const oauthRedirectUri = asString(record.oauthRedirectUri);
+  if (oauthRedirectUri !== undefined) config.oauthRedirectUri = oauthRedirectUri;
   return config;
+}
+
+function asAuthMode(raw: unknown): TokenKind | undefined {
+  return raw === 'enterprise' || raw === 'user' ? raw : undefined;
+}
+
+/** Coerce a user-slot token: must be `kind:'user'` and carry a refresh token. */
+function coerceUserToken(raw: unknown): UserTokenRecord | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (asAuthMode(record.kind) !== 'user') return undefined;
+  const base = coerceTokenBase(record);
+  if (base === undefined) return undefined;
+  const refreshToken = asString(record.refreshToken);
+  if (refreshToken === undefined) return undefined;
+  return { ...base, kind: 'user', refreshToken };
 }
 
 function coerceToken(raw: unknown): TokenRecord | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const record = raw as Record<string, unknown>;
+  // A legacy enterprise token has no `kind` — default to enterprise (R6).
+  const kind = asAuthMode(record.kind) ?? 'enterprise';
+  const base = coerceTokenBase(record);
+  if (base === undefined) return undefined;
+  const token: TokenRecord = { ...base, kind };
+  const refreshToken = asString(record.refreshToken);
+  if (refreshToken !== undefined) token.refreshToken = refreshToken;
+  return token;
+}
+
+/** Shared coercion for the core token fields; returns the shape minus `kind`. */
+function coerceTokenBase(
+  record: Record<string, unknown>,
+): Omit<TokenRecord, 'kind'> | undefined {
   const accessToken = asString(record.accessToken);
   if (accessToken === undefined) return undefined;
-  const token: TokenRecord = {
+  const token: Omit<TokenRecord, 'kind'> = {
     accessToken,
     expiresAtMs: asFiniteNumber(record.expiresAtMs) ?? 0,
     obtainedAtMs: asFiniteNumber(record.obtainedAtMs) ?? 0,
@@ -320,12 +383,20 @@ export function resolveSettings(input: {
     file.clientSecret,
   );
 
+  // Active-mode inference (D2): an explicit authMode wins; otherwise userToken→user,
+  // token→enterprise (legacy), neither→user (brand-new default).
+  const authMode = inferAuthMode(file);
+  // The active slot's token: the user slot when in user mode, else the enterprise slot.
+  const activeToken = authMode === 'user' ? file.userToken : file.token;
+
   return {
     host,
     apiBase,
     clientId: clientIdPick.value,
     clientSecret: clientSecretPick.value,
-    token: file.token,
+    token: activeToken,
+    authMode,
+    oauthRedirectUri: file.oauthRedirectUri,
     sources: {
       host: hostSource,
       apiBase: apiBaseSource,
@@ -333,6 +404,18 @@ export function resolveSettings(input: {
       clientSecret: clientSecretPick.value === undefined ? 'none' : clientSecretPick.source,
     },
   };
+}
+
+/**
+ * Infer the active mode when the config does not state it (D2, R6):
+ * `userToken` present → `user`; else `token` present → `enterprise` (legacy,
+ * never flipped on upgrade); else neither → `user` (brand-new default, R2).
+ */
+function inferAuthMode(file: Config): TokenKind {
+  if (file.authMode !== undefined) return file.authMode;
+  if (file.userToken !== undefined) return 'user';
+  if (file.token !== undefined) return 'enterprise';
+  return 'user';
 }
 
 /**

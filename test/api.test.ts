@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listSprints, listUsers, listWorkItemStates, listWorkItemTypes } from '../src/api/meta';
+import { getMyself, listSprints, listUsers, listWorkItemStates, listWorkItemTypes } from '../src/api/meta';
 import {
   asBooleanFlag,
   parseProject,
@@ -258,5 +258,24 @@ describe('meta api', () => {
     const page = await listUsers(ctx, { emails: ['a@x.com', 'b@x.com'] });
     expect(page.values[0]?.is_deleted).toBe(false);
     expect(new URL(fake.urls()[0] ?? '').searchParams.get('emails')).toBe('a@x.com,b@x.com');
+  });
+
+  it('reads the current user from /v1/myself', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          id: 'a0417f68e846aae315c85d24643678a9',
+          name: '张三',
+          display_name: '张三',
+          username: 'zhangsan',
+          email: 'zs@x.com',
+          is_deleted: 0,
+        }),
+    ]);
+    const me = await getMyself(ctx);
+    expect(me.id).toBe('a0417f68e846aae315c85d24643678a9');
+    expect(me.display_name).toBe('张三');
+    expect(me.is_deleted).toBe(false);
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/myself');
   });
 });

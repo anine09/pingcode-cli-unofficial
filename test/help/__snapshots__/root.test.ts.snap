@@ -16,7 +16,7 @@ Options:
   -h, --help      display help for command
 
 Commands:
-  auth            authenticate against PingCode (Client Credentials app)
+  auth            authenticate against PingCode (enterprise app or user token)
   api             通用逃生舱: call any documented v1 endpoint directly (catalog-checked passthrough)
   resolve         name → id: resolve a name, alias or id for any of the CLI's lookup kinds
   product         产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)

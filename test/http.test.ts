@@ -221,6 +221,35 @@ describe('request: 401 replay (gate G3)', () => {
     expect(fake.calls).toHaveLength(3);
   });
 
+  it('re-acquires a user token via refresh_token on 401 and replays once (design D8)', async () => {
+    const fake = createFakeFetch([
+      () => jsonResponse({ message: 'token expired' }, { status: 401 }),
+      () => jsonResponse({ access_token: 'tok-2', expires_in: 3600 }), // refresh_token grant
+      () => jsonResponse({ id: 'w1' }),
+    ]);
+    const ctx = createTestContext({
+      fetch: fake.fetch,
+      now: NOW,
+      token: {
+        kind: 'user',
+        accessToken: 'tok-1',
+        refreshToken: 'rt-1',
+        expiresAtMs: NOW + THIRTY_DAYS_MS, // fresh → no proactive refresh
+        obtainedAtMs: NOW,
+      },
+    });
+    ctx.auth.mode = 'user';
+
+    const result = await request<{ id: string }>(ctx, { method: 'GET', path: '/v1/pjm/work_items/w1' });
+
+    expect(result).toEqual({ id: 'w1' });
+    expect(fake.calls).toHaveLength(3);
+    expect(fake.calls[0]?.headers.Authorization).toBe('Bearer tok-1');
+    expect(fake.urls()[1]).toContain('grant_type=refresh_token');
+    expect(fake.urls()[1]).toContain('refresh_token=rt-1');
+    expect(fake.calls[2]?.headers.Authorization).toBe('Bearer tok-2');
+  });
+
   it('does not replay when auth was skipped', async () => {
     const fake = createFakeFetch(() => jsonResponse({ message: 'bad client' }, { status: 401 }));
     const ctx = createTestContext({ fetch: fake.fetch, clientId: 'id', clientSecret: SECRET });

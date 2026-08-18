@@ -90,7 +90,13 @@ type CliRun = {
 };
 
 /** Run one `pingcode api …` invocation exactly as `bin/pingcode.ts` does. */
-async function runCli(argv: string[], responses: Array<() => Response> = []): Promise<CliRun> {
+async function runCli(argv: string[], responses: Array<() => Response> = [], config?: object): Promise<CliRun> {
+  // A per-run config override (used to stand up a user-mode context for the gating
+  // test). When given it replaces the default enterprise-token file that `beforeEach`
+  // wrote; `authMode` (and the active slot) drive `ctx.auth.mode`.
+  if (config !== undefined) {
+    writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config), { mode: 0o600 });
+  }
   const fake = createFakeFetch(responses);
   let stdout = '';
   let stderr = '';
@@ -201,6 +207,8 @@ describe('the catalog answers before anything is sent (design D3.2)', () => {
   });
 
   it('refuses the seven user-token endpoints before any IO (design D8.5)', async () => {
+    // Default config holds only an enterprise token, so `ctx.auth.mode` is
+    // enterprise (inferred from the token slot) and the gate must still refuse.
     for (const target of [
       ['GET', '/v1/myself'],
       ['GET', '/v1/permission/my/global'],
@@ -209,7 +217,33 @@ describe('the catalog answers before anything is sent (design D3.2)', () => {
       const run = await runCli(['api', ...target]);
       expect(run.exit, target.join(' ')).toBe(2);
       expect(run.calls, target.join(' ')).toHaveLength(0);
-      expect(run.stderr).toContain('用户令牌');
+      expect(run.stderr, target.join(' ')).toContain('用户令牌');
+    }
+  });
+
+  it('allows the user-token endpoints once a user token is active (design D9 / R7)', async () => {
+    // With authMode:'user' + a fresh user-slot token, `ctx.auth.mode==='user'`, so the
+    // USER-only gate must NOT refuse — the request goes through.
+    const userConfig = {
+      clientId: 'test-client',
+      clientSecret: CLIENT_SECRET,
+      authMode: 'user',
+      userToken: {
+        accessToken: 'user-access-token',
+        refreshToken: 'user-refresh-token',
+        expiresAtMs: Date.now() + THIRTY_DAYS_MS,
+        obtainedAtMs: Date.now(),
+        kind: 'user',
+      },
+    };
+    for (const target of [
+      ['GET', '/v1/myself'],
+      ['GET', '/v1/permission/my/global'],
+    ] as const) {
+      const run = await runCli(['api', ...target], [object({ values: [], count: 0 })], userConfig);
+      expect(run.exit, target.join(' ')).toBe(0);
+      expect(run.calls, target.join(' ')).toHaveLength(1);
+      expect(run.stderr, target.join(' ')).not.toContain('用户令牌');
     }
   });
 

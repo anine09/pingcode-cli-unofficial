@@ -296,6 +296,12 @@ export const ENDPOINTS = {
     `/v1/pjm/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(memberId)}`,
 
   users: '/v1/directory/users',
+  /**
+   * `GET /v1/myself` — the current user as seen by the held token (design D12
+   * step 6). A user token proves itself here; an enterprise token would answer
+   * but is not user-bound, which is why only user mode verifies with it.
+   */
+  myself: '/v1/myself',
 
   // -------------------------------------------------------------------------
   // Ship (产品管理) — ship research §2 tables A/B/D/J/J3/K/K3/M

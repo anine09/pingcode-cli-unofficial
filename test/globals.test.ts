@@ -99,6 +99,67 @@ describe('buildContext', () => {
     expect(stored.token?.accessToken).toBe('fresh');
   });
 
+  it('routes a user token to the userToken slot and stamps authMode (D5)', () => {
+    saveConfig({ host: DEFAULT_HOST, clientId: 'keep-me' }, env);
+    const { ctx } = buildContext({ globals, env });
+    ctx.persistToken?.({
+      accessToken: 'user-access',
+      refreshToken: 'rt-1',
+      expiresAtMs: 99,
+      obtainedAtMs: 9,
+      kind: 'user',
+    });
+    const stored = loadConfig(env);
+    expect(stored.clientId).toBe('keep-me'); // not clobbered
+    expect(stored.userToken?.accessToken).toBe('user-access');
+    expect(stored.userToken?.refreshToken).toBe('rt-1');
+    expect(stored.userToken?.kind).toBe('user');
+    expect(stored.authMode).toBe('user');
+    expect(stored.token).toBeUndefined(); // enterprise slot untouched
+  });
+
+  it('stamps authMode enterprise when persisting an enterprise token (D5)', () => {
+    const { ctx } = buildContext({ globals, env });
+    ctx.persistToken?.({ accessToken: 'ent', expiresAtMs: 5, obtainedAtMs: 1 });
+    const stored = loadConfig(env);
+    expect(stored.token?.accessToken).toBe('ent');
+    expect(stored.authMode).toBe('enterprise');
+    expect(stored.userToken).toBeUndefined();
+  });
+
+  it('loads the active slot token and stamps ctx.auth.mode from settings', () => {
+    saveConfig(
+      {
+        host: DEFAULT_HOST,
+        token: { accessToken: 'ent', expiresAtMs: 5, obtainedAtMs: 1, kind: 'enterprise' },
+        userToken: {
+          accessToken: 'usr',
+          refreshToken: 'rt',
+          expiresAtMs: 6,
+          obtainedAtMs: 2,
+          kind: 'user',
+        },
+        authMode: 'user',
+      },
+      env,
+    );
+    const { ctx, settings } = buildContext({ globals, env });
+    expect(settings.authMode).toBe('user');
+    expect(ctx.auth.mode).toBe('user');
+    expect(ctx.auth.token?.accessToken).toBe('usr'); // active slot = user
+    expect(ctx.oauth.redirectUri).toBeUndefined();
+  });
+
+  it('surfaces oauthRedirectUri on ctx.oauth and settings', () => {
+    saveConfig(
+      { host: DEFAULT_HOST, oauthRedirectUri: 'http://127.0.0.1:8732/callback' },
+      env,
+    );
+    const { ctx, settings } = buildContext({ globals, env });
+    expect(settings.oauthRedirectUri).toBe('http://127.0.0.1:8732/callback');
+    expect(ctx.oauth.redirectUri).toBe('http://127.0.0.1:8732/callback');
+  });
+
   it('maps --dry-run / --json / --no-cache onto the context', () => {
     const { ctx } = buildContext({
       globals: { host: undefined, json: true, dryRun: true, useCache: false, verbose: true },

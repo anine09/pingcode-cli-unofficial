@@ -3,16 +3,19 @@ import {
   REFRESH_WINDOW_MS,
   THIRTY_DAYS_MS,
   acquireToken,
+  acquireUserToken,
   clearToken,
   ensureFreshToken,
   normalizeExpiry,
+  refreshUserToken,
   tokenIsFresh,
 } from '../src/core/auth';
 import type { TokenRecord } from '../src/core/config';
-import { AuthError, TransportError } from '../src/core/errors';
+import { ApiError, AuthError, TransportError } from '../src/core/errors';
 import { createFakeFetch, createTestContext, jsonResponse, textResponse } from './helpers/fake';
 
 const NOW = 1_700_000_000_000; // 2023-11-14T22:13:20Z in ms
+const SECRET_VAL = 'sh';
 
 /**
  * Gate G2: `normalizeExpiry` is the riskiest arithmetic in the project — the doc's
@@ -197,6 +200,140 @@ describe('acquireToken', () => {
   });
 });
 
+/** A user-mode context: an expired user token carrying a refresh token. */
+function userContext(fake: ReturnType<typeof createFakeFetch>, refreshToken = 'rt-1') {
+  const ctx = createTestContext({
+    fetch: fake.fetch,
+    clientId: 'id',
+    clientSecret: SECRET_VAL,
+    now: NOW,
+    token: {
+      kind: 'user',
+      accessToken: 'stale-user',
+      refreshToken,
+      expiresAtMs: NOW + 60_000, // inside the refresh window → must refresh
+      obtainedAtMs: NOW,
+    },
+  });
+  ctx.auth.mode = 'user';
+  return ctx;
+}
+
+describe('acquireUserToken (authorization_code, design D6)', () => {
+  it('exchanges the code for a user token via GET with all params in the query', async () => {
+    const fake = createFakeFetch(() =>
+      jsonResponse({
+        access_token: 'user-tok',
+        refresh_token: 'rt-new',
+        token_type: 'Bearer',
+        expires_in: 3600,
+      }),
+    );
+    const ctx = createTestContext({
+      fetch: fake.fetch,
+      clientId: 'id-1',
+      clientSecret: 'secret-1',
+      now: NOW,
+    });
+
+    const token = await acquireUserToken(ctx, 'the-code');
+
+    expect(fake.calls).toHaveLength(1);
+    const url = fake.urls()[0] ?? '';
+    expect(url).toContain('/v1/auth/token?');
+    expect(url).toContain('grant_type=authorization_code');
+    expect(url).toContain('client_id=id-1');
+    expect(url).toContain('client_secret=secret-1');
+    expect(url).toContain('code=the-code');
+    expect(token).toEqual({
+      kind: 'user',
+      accessToken: 'user-tok',
+      refreshToken: 'rt-new',
+      expiresAtMs: NOW + 3_600_000,
+      obtainedAtMs: NOW,
+    });
+    expect(ctx.auth.token).toEqual(token);
+  });
+
+  it('fails with an AuthError when the response has no refresh_token', async () => {
+    const fake = createFakeFetch(() =>
+      jsonResponse({ access_token: 'tok', token_type: 'Bearer', expires_in: 3600 }),
+    );
+    const ctx = createTestContext({ fetch: fake.fetch, clientId: 'id', clientSecret: 'sh' });
+    await expect(acquireUserToken(ctx, 'c')).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it('fails with an AuthError when the response has no access_token', async () => {
+    const fake = createFakeFetch(() =>
+      jsonResponse({ refresh_token: 'rt', token_type: 'Bearer', expires_in: 3600 }),
+    );
+    const ctx = createTestContext({ fetch: fake.fetch, clientId: 'id', clientSecret: 'sh' });
+    await expect(acquireUserToken(ctx, 'c')).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it('redacts the code and secret from the debug log (R9)', async () => {
+    const fake = createFakeFetch(() =>
+      jsonResponse({ access_token: 'tok', refresh_token: 'rt', expires_in: 3600 }),
+    );
+    const ctx = createTestContext({
+      fetch: fake.fetch,
+      clientId: 'id',
+      clientSecret: 'super-secret-value',
+      verbose: true,
+    });
+    await acquireUserToken(ctx, 'the-secret-code');
+    const logs = ctx.logLines.join('\n');
+    expect(logs).not.toContain('super-secret-value');
+    expect(logs).not.toContain('the-secret-code');
+    expect(logs).toContain('client_secret=***REDACTED***');
+    expect(logs).toContain('code=***REDACTED***');
+  });
+});
+
+describe('refreshUserToken (design D6, R5)', () => {
+  it('refreshes via grant_type=refresh_token and RETAINS the same refresh_token', async () => {
+    const fake = createFakeFetch(() =>
+      jsonResponse({ access_token: 'refreshed', token_type: 'Bearer', expires_in: 3600 }),
+    );
+    const ctx = createTestContext({ fetch: fake.fetch, now: NOW });
+
+    const token = await refreshUserToken(ctx, 'rt-keep');
+
+    expect(fake.calls).toHaveLength(1);
+    const url = fake.urls()[0] ?? '';
+    expect(url).toContain('grant_type=refresh_token');
+    expect(url).toContain('refresh_token=rt-keep');
+    expect(url).not.toContain('client_credentials');
+    expect(token).toEqual({
+      kind: 'user',
+      accessToken: 'refreshed',
+      refreshToken: 'rt-keep', // SAME refresh token — the response returns none
+      expiresAtMs: NOW + 3_600_000,
+      obtainedAtMs: NOW,
+    });
+  });
+
+  it('fails with an AuthError when the response has no access_token', async () => {
+    const fake = createFakeFetch(() => jsonResponse({ token_type: 'Bearer' }));
+    const ctx = createTestContext({ fetch: fake.fetch });
+    await expect(refreshUserToken(ctx, 'rt')).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it('redacts the refresh_token from the debug log (R9)', async () => {
+    const fake = createFakeFetch(() =>
+      jsonResponse({ access_token: 'refreshed', token_type: 'Bearer', expires_in: 3600 }),
+    );
+    const ctx = createTestContext({
+      fetch: fake.fetch,
+      verbose: true,
+    });
+    await refreshUserToken(ctx, 'super-refresh-token-value');
+    const logs = ctx.logLines.join('\n');
+    expect(logs).not.toContain('super-refresh-token-value');
+    expect(logs).toContain('refresh_token=***REDACTED***');
+  });
+});
+
 describe('ensureFreshToken', () => {
   it('reuses a token that is outside the refresh window', async () => {
     const fake = createFakeFetch(() => jsonResponse({ access_token: 'new', expires_in: 3600 }));
@@ -282,5 +419,108 @@ describe('ensureFreshToken', () => {
     clearToken(ctx);
     expect(ctx.auth.token).toBeUndefined();
     expect(ctx.auth.inflight).toBeUndefined();
+  });
+
+  describe('user mode (design D7)', () => {
+    it('refreshes via grant_type=refresh_token, not client_credentials, when the token is stale', async () => {
+      const fake = createFakeFetch(() =>
+        jsonResponse({ access_token: 'refreshed', expires_in: 3600 }),
+      );
+      const ctx = userContext(fake);
+
+      expect(await ensureFreshToken(ctx)).toBe('refreshed');
+      expect(fake.calls).toHaveLength(1);
+      const url = fake.urls()[0] ?? '';
+      expect(url).toContain('grant_type=refresh_token');
+      expect(url).toContain('refresh_token=rt-1');
+      expect(url).not.toContain('client_credentials');
+    });
+
+    it('still re-acquires via client_credentials in enterprise mode', async () => {
+      const fake = createFakeFetch(() =>
+        jsonResponse({ access_token: 'ent-new', expires_in: 3600 }),
+      );
+      const ctx = createTestContext({
+        fetch: fake.fetch,
+        clientId: 'id',
+        clientSecret: SECRET_VAL,
+        now: NOW,
+        token: { accessToken: 'stale', expiresAtMs: NOW + 60_000, obtainedAtMs: NOW },
+      });
+      // mode defaults to enterprise in createContext.
+
+      expect(await ensureFreshToken(ctx)).toBe('ent-new');
+      expect(fake.urls()[0]).toContain('grant_type=client_credentials');
+      expect(fake.urls()[0]).not.toContain('refresh_token');
+    });
+
+    it('refreshes when forced, even with a fresh user token (AC5)', async () => {
+      const fake = createFakeFetch(() =>
+        jsonResponse({ access_token: 'forced-refresh', expires_in: 3600 }),
+      );
+      const ctx = createTestContext({
+        fetch: fake.fetch,
+        clientId: 'id',
+        clientSecret: SECRET_VAL,
+        now: NOW,
+        token: {
+          kind: 'user',
+          accessToken: 'fresh-user',
+          refreshToken: 'rt-1',
+          expiresAtMs: NOW + THIRTY_DAYS_MS, // fresh
+          obtainedAtMs: NOW,
+        },
+      });
+      ctx.auth.mode = 'user';
+
+      expect(await ensureFreshToken(ctx, { force: true })).toBe('forced-refresh');
+      expect(fake.calls).toHaveLength(1);
+      expect(fake.urls()[0]).toContain('grant_type=refresh_token');
+    });
+
+    it('surfaces a rejected refresh as an AuthError pointing at auth login (R5)', async () => {
+      const fake = createFakeFetch(() =>
+        jsonResponse({ code: '100034', message: 'refresh token invalid' }, { status: 400 }),
+      );
+      const ctx = userContext(fake);
+      const error = await ensureFreshToken(ctx).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).message).toContain('user token refresh failed');
+      expect((error as AuthError).message).toContain('auth login');
+      expect((error as AuthError).cause).toBeInstanceOf(ApiError);
+    });
+
+    it('throws a logic-error AuthError when there is no user token to refresh', async () => {
+      const fake = createFakeFetch(() => jsonResponse({ access_token: 'x', expires_in: 3600 }));
+      const ctx = createTestContext({ fetch: fake.fetch, clientId: 'id', clientSecret: SECRET_VAL });
+      ctx.auth.mode = 'user'; // no token at all
+      const error = await ensureFreshToken(ctx).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).message).toContain('no user token to refresh');
+      expect(fake.calls).toHaveLength(0);
+    });
+
+    it('serialises concurrent user-mode refreshers behind a single request', async () => {
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const fake = createFakeFetch(async () => {
+        await gate;
+        return jsonResponse({ access_token: 'one', expires_in: 3600 });
+      });
+      const ctx = userContext(fake);
+
+      const all = Promise.all([
+        ensureFreshToken(ctx),
+        ensureFreshToken(ctx),
+        ensureFreshToken(ctx),
+        ensureFreshToken(ctx),
+      ]);
+      release?.();
+      expect(await all).toEqual(['one', 'one', 'one', 'one']);
+      expect(fake.calls).toHaveLength(1);
+      expect(fake.urls()[0]).toContain('grant_type=refresh_token');
+    });
   });
 });
