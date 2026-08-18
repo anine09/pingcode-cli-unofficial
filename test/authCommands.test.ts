@@ -182,6 +182,56 @@ describe('auth login — user mode (authorization_code)', () => {
     expect(cfg.authMode).toBe('user');
     expect((cfg.userToken as { accessToken?: string }).accessToken).toBe('user-tok');
   });
+
+  it('two-app isolation: user login routes --client-id to the user slot, leaving the enterprise app intact', async () => {
+    // Base config holds the ENTERPRISE app (test-client/test-secret).
+    loginHooks.captureCode = async () => ({ code: 'BROWSER-CODE' });
+    const run = await runCli(
+      [
+        'auth',
+        'login',
+        '--mode',
+        'user',
+        '--client-id',
+        'user-app-id',
+        '--client-secret',
+        'user-app-secret',
+        '--save',
+        '--json',
+      ],
+      [tokenUser, myself],
+    );
+
+    expect(run.exit).toBe(0);
+    // The authorize URL + token exchange use the USER app, not the enterprise one.
+    expect(run.stderr).toContain('client_id=user-app-id');
+    expect(run.calls[0]?.url ?? '').toContain('client_id=user-app-id');
+    expect(run.calls[0]?.url ?? '').toContain('client_secret=user-app-secret');
+
+    const cfg = readConfig();
+    // Enterprise app untouched (R1 coexistence — the two apps do not clobber).
+    expect(cfg.clientId).toBe(CLIENT_ID);
+    expect(cfg.clientSecret).toBe(CLIENT_SECRET);
+    // User app persisted to its own slot.
+    expect(cfg.userClientId).toBe('user-app-id');
+    expect(cfg.userClientSecret).toBe('user-app-secret');
+    expect(cfg.authMode).toBe('user');
+  });
+
+  it('user login falls back to the stored userClientId (file) when no --client-id is given', async () => {
+    writeConfig({
+      ...baseConfig(),
+      userClientId: 'stored-user-id',
+      userClientSecret: 'stored-user-secret',
+    });
+    loginHooks.captureCode = async () => ({ code: 'BROWSER-CODE' });
+    const run = await runCli(['auth', 'login', '--mode', 'user', '--json'], [tokenUser, myself]);
+
+    expect(run.exit).toBe(0);
+    // The stored USER app is used, not the enterprise test-client.
+    expect(run.calls[0]?.url ?? '').toContain('client_id=stored-user-id');
+    expect(run.calls[0]?.url ?? '').not.toContain('client_id=test-client');
+  });
 });
 
 describe('auth login — enterprise mode (unchanged, D11)', () => {

@@ -44,11 +44,13 @@ import {
 export function contextFor(
   command: Command,
   credentials?: { clientId?: string | undefined; clientSecret?: string | undefined } | undefined,
+  mode?: 'enterprise' | 'user' | undefined,
 ): BuiltContext {
   const globals = readGlobalOptions(command);
   return buildContext({
     globals,
     ...(credentials === undefined ? {} : { credentials }),
+    ...(mode === undefined ? {} : { mode }),
     env: process.env,
   });
 }

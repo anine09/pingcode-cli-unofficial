@@ -5,6 +5,7 @@ import {
   saveConfig,
   type Config,
   type ResolvedSettings,
+  type TokenKind,
   type TokenRecord,
 } from '../core/config';
 import { createContext, type Ctx } from '../core/context';
@@ -86,10 +87,16 @@ export function readGlobalOptions(command: Command): GlobalOptions {
 
 export type BuildContextInput = {
   globals: GlobalOptions;
-  /** Credentials supplied by flags (`auth login`). */
+  /** Credentials supplied by flags (`auth login`) — routed to the active mode's slot. */
   credentials?:
     | { clientId?: string | undefined; clientSecret?: string | undefined }
     | undefined;
+  /**
+   * The intended auth mode, when known at build time (`auth login`). Routes the
+   * `credentials` override to the matching app slot (user vs enterprise). Absent
+   * → inferred from the config file (D2).
+   */
+  mode?: TokenKind | undefined;
   env?: NodeJS.ProcessEnv | undefined;
 };
 
@@ -121,13 +128,31 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     file,
   });
 
+  // The effective mode: an explicit `input.mode` (auth login) wins, else the
+  // mode inferred from the config file (D2). It drives which app's credentials
+  // and which token slot are active, so a two-app setup (separate enterprise +
+  // user apps) never has one login clobber the other's.
+  const mode: TokenKind = input.mode ?? settings.authMode;
+  const override = input.credentials;
+  const activeClientId =
+    mode === 'user'
+      ? override?.clientId ?? settings.userClientId ?? settings.clientId
+      : override?.clientId ?? settings.clientId;
+  const activeClientSecret =
+    mode === 'user'
+      ? override?.clientSecret ?? settings.userClientSecret ?? settings.clientSecret
+      : override?.clientSecret ?? settings.clientSecret;
+  // The token for the effective mode (may differ from settings.token when a login
+  // is switching mode — `auth login` clears it anyway, but keep them consistent).
+  const activeToken = mode === 'user' ? file.userToken : file.token;
+
   const ctx = createContext({
     apiBase: settings.apiBase,
-    credentials: { clientId: settings.clientId, clientSecret: settings.clientSecret },
+    credentials: { clientId: activeClientId, clientSecret: activeClientSecret },
     auth: {
-      token: settings.token, // the active slot's token (D2/D5)
+      token: activeToken,
       clampWarned: false,
-      mode: settings.authMode,
+      mode,
     },
     oauth: { redirectUri: settings.oauthRedirectUri },
     dryRun: input.globals.dryRun,

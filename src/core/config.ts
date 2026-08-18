@@ -26,6 +26,9 @@ export const ENV_CONFIG_DIR = 'PINGCODE_CONFIG_DIR';
 export const ENV_HOST = 'PINGCODE_HOST';
 export const ENV_CLIENT_ID = 'PINGCODE_CLIENT_ID';
 export const ENV_CLIENT_SECRET = 'PINGCODE_CLIENT_SECRET';
+/** User-token app credentials (authorization_code). Separate from the enterprise app. */
+export const ENV_USER_CLIENT_ID = 'PINGCODE_USER_CLIENT_ID';
+export const ENV_USER_CLIENT_SECRET = 'PINGCODE_USER_CLIENT_SECRET';
 
 /**
  * The grant a token came from. `enterprise` = `client_credentials` (app/admin,
@@ -61,10 +64,14 @@ export type UserTokenRecord = TokenRecord & { kind: 'user'; refreshToken: string
 export type Config = {
   host?: string | undefined;
   apiBase?: string | undefined;
+  /** Enterprise app credentials (client_credentials grant). */
   clientId?: string | undefined;
   clientSecret?: string | undefined;
   /** Enterprise slot (existing, backward-compatible). */
   token?: TokenRecord | undefined;
+  /** User-token app credentials (authorization_code grant). Separate app. */
+  userClientId?: string | undefined;
+  userClientSecret?: string | undefined;
   /** User slot (authorization_code / refresh_token). */
   userToken?: UserTokenRecord | undefined;
   /** Which slot is active; absent → inferred (D2). */
@@ -90,8 +97,12 @@ export type SettingsFlags = {
 export type ResolvedSettings = {
   host: string;
   apiBase: string;
+  /** Enterprise app credentials (client_credentials). */
   clientId: string | undefined;
   clientSecret: string | undefined;
+  /** User-token app credentials (authorization_code). Separate app. */
+  userClientId: string | undefined;
+  userClientSecret: string | undefined;
   /** The active slot's token (user slot when `authMode==='user'`, else enterprise). */
   token: TokenRecord | undefined;
   /** Which slot is active, inferred per D2 when the config does not state it. */
@@ -297,6 +308,10 @@ export function coerceConfig(raw: unknown): Config {
   if (clientId !== undefined) config.clientId = clientId;
   const clientSecret = asString(record.clientSecret);
   if (clientSecret !== undefined) config.clientSecret = clientSecret;
+  const userClientId = asString(record.userClientId);
+  if (userClientId !== undefined) config.userClientId = userClientId;
+  const userClientSecret = asString(record.userClientSecret);
+  if (userClientSecret !== undefined) config.userClientSecret = userClientSecret;
   const token = coerceToken(record.token);
   if (token !== undefined) config.token = token;
   const userToken = coerceUserToken(record.userToken);
@@ -383,6 +398,15 @@ export function resolveSettings(input: {
     file.clientSecret,
   );
 
+  // User-token app credentials (file + env only — a --client-id flag is routed to
+  // the active mode's slot by buildContext, not resolved here).
+  const userClientId = pick(undefined, readEnv(env, ENV_USER_CLIENT_ID), file.userClientId).value;
+  const userClientSecret = pick(
+    undefined,
+    readEnv(env, ENV_USER_CLIENT_SECRET),
+    file.userClientSecret,
+  ).value;
+
   // Active-mode inference (D2): an explicit authMode wins; otherwise userToken→user,
   // token→enterprise (legacy), neither→user (brand-new default).
   const authMode = inferAuthMode(file);
@@ -394,6 +418,8 @@ export function resolveSettings(input: {
     apiBase,
     clientId: clientIdPick.value,
     clientSecret: clientSecretPick.value,
+    userClientId,
+    userClientSecret,
     token: activeToken,
     authMode,
     oauthRedirectUri: file.oauthRedirectUri,

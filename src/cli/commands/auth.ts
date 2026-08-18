@@ -146,34 +146,42 @@ export function registerAuthCommands(program: Command): void {
 // ---------------------------------------------------------------------------
 
 async function runLogin(flags: LoginFlags, command: Command): Promise<void> {
-  let built = contextFor(command, {
-    clientId: flags.clientId,
-    clientSecret: flags.clientSecret,
-  });
+  // 1. Target mode first — it decides which app's credentials to use (design D12).
+  //    A throwaway context gives us `--json` for the (interactive) mode prompt.
+  const probe = contextFor(command);
+  const authMode = await resolveMode(flags.mode, probe.ctx.json);
 
-  // Prompt only when we are attached to a terminal and not in --json mode:
-  // a prompt on stdout would break the stdout-is-pure-JSON contract, so the
-  // prompts are written to stderr.
+  // 2. Build the context routed to the target mode's app slot (user vs enterprise).
+  let built = contextFor(
+    command,
+    { clientId: flags.clientId, clientSecret: flags.clientSecret },
+    authMode,
+  );
+
+  // 3. Prompt for the target slot's credentials if none are available (stderr,
+  //    TTY-only). User mode reads the userClientId/userClientSecret slot;
+  //    enterprise reads clientId/clientSecret. `ctx.credentials` is the ACTIVE
+  //    set (override or slot), so an explicit --client-id satisfies it.
   let promptedClientId: string | undefined;
   let promptedClientSecret: string | undefined;
-  if (built.settings.clientId === undefined) {
+  if (built.ctx.credentials.clientId === undefined) {
     promptedClientId = await promptVisible('PingCode client id: ', built.ctx.json);
   }
-  if (built.settings.clientSecret === undefined) {
+  if (built.ctx.credentials.clientSecret === undefined) {
     promptedClientSecret = await promptHidden('PingCode client secret: ', built.ctx.json);
   }
   if (promptedClientId !== undefined || promptedClientSecret !== undefined) {
-    built = contextFor(command, {
-      clientId: flags.clientId ?? promptedClientId,
-      clientSecret: flags.clientSecret ?? promptedClientSecret,
-    });
+    built = contextFor(
+      command,
+      {
+        clientId: flags.clientId ?? promptedClientId,
+        clientSecret: flags.clientSecret ?? promptedClientSecret,
+      },
+      authMode,
+    );
   }
 
   const { ctx, settings } = built;
-
-  // Resolve the mode: an explicit --mode wins; otherwise default to user (R2)
-  // unless a terminal operator is prompted.
-  const authMode = await resolveMode(flags.mode, ctx.json);
 
   // Always start from scratch: a login is an explicit "use these credentials".
   clearToken(ctx);
@@ -196,7 +204,7 @@ async function runLogin(flags: LoginFlags, command: Command): Promise<void> {
   }
 
   // --- user (authorization_code) path (design D12) ---
-  const clientId = requireClientId(settings.clientId);
+  const clientId = requireClientId(ctx.credentials.clientId);
 
   // 1. channel: browser (loopback) or paste (manual code).
   const channel = await resolveChannel(flags.channel, ctx.json);
@@ -238,27 +246,61 @@ type LoginOutcome = {
   user?: { id: string; name?: string; display_name?: string; username?: string } | undefined;
 };
 
-/** Shared tail of both login branches: persist client creds, then print. */
+/** Shared tail of both login branches: persist the mode's app creds, then print. */
 function finishLogin(
   built: ReturnType<typeof contextFor>,
   flags: LoginFlags,
   outcome: LoginOutcome,
 ): void {
-  const { settings } = built;
+  const { settings, file } = built;
   const save = flags.save === true;
   const patch: ConfigPatch = { host: settings.host };
-  const storeClientId = shouldPersistSecret(settings.sources.clientId, save);
-  const storeClientSecret = shouldPersistSecret(settings.sources.clientSecret, save);
-  if (storeClientId) patch.clientId = settings.clientId;
-  if (storeClientSecret) patch.clientSecret = settings.clientSecret;
+  let storeId = false;
+  let storeSecret = false;
+
+  // Route the app credentials to the logged-in mode's slot (design D12). A login
+  // into user mode writes userClientId/userClientSecret (the user-token app);
+  // enterprise writes clientId/clientSecret. The gate is symmetric: a credential
+  // that already lives in the target slot (== file) is not rewritten; one from a
+  // flag/env is persisted only with --save — mirroring the enterprise behaviour.
+  if (outcome.authMode === 'user') {
+    // The USER app credential: an explicit --client-id (this invocation) or the
+    // stored userClientId. The enterprise fallback (single-app, no user app) is
+    // NOT written to the user slot. Source gating mirrors the enterprise branch:
+    // file → never (already there); flag/env → only with --save.
+    const userId = flags.clientId ?? settings.userClientId;
+    if (userId !== undefined) {
+      const fromFile = settings.userClientId !== undefined && settings.userClientId === file.userClientId;
+      const source = flags.clientId !== undefined ? 'flag' : fromFile ? 'file' : 'env';
+      if (shouldPersistSecret(source, save)) {
+        patch.userClientId = userId;
+        storeId = true;
+      }
+    }
+    const userSecret = flags.clientSecret ?? settings.userClientSecret;
+    if (userSecret !== undefined) {
+      const fromFile =
+        settings.userClientSecret !== undefined && settings.userClientSecret === file.userClientSecret;
+      const source = flags.clientSecret !== undefined ? 'flag' : fromFile ? 'file' : 'env';
+      if (shouldPersistSecret(source, save)) {
+        patch.userClientSecret = userSecret;
+        storeSecret = true;
+      }
+    }
+  } else {
+    storeId = shouldPersistSecret(settings.sources.clientId, save);
+    storeSecret = shouldPersistSecret(settings.sources.clientSecret, save);
+    if (storeId) patch.clientId = settings.clientId;
+    if (storeSecret) patch.clientSecret = settings.clientSecret;
+  }
   saveConfig(patch, process.env);
 
-  // Credentials that came *from* the config file are already on disk, so
-  // `shouldPersistSecret` correctly declines to rewrite them — but the "not
-  // written to disk" note would then be true of this invocation and misleading
-  // in context (research/s8-smoke.md, cosmetic nits).
-  const alreadyStored = built.file.clientId !== undefined && built.file.clientSecret !== undefined;
-  const credentialsStored = alreadyStored || (storeClientId && storeClientSecret);
+  // Whether the logged-in mode's app creds are now on disk (for the not-stored note).
+  const alreadyInFile =
+    outcome.authMode === 'user'
+      ? file.userClientId !== undefined && file.userClientSecret !== undefined
+      : file.clientId !== undefined && file.clientSecret !== undefined;
+  const credentialsStored = alreadyInFile || (storeId && storeSecret);
 
   const mode = modeOf(built.ctx);
   if (mode.json) {
