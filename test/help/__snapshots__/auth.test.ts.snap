@@ -27,6 +27,8 @@ Options:
   --save                    also store the client id/secret in the config file (mode 0600)
   --mode <mode>             auth mode: user (authorization_code, default) or enterprise
                             (client_credentials)
+  --channel <channel>       user authorize channel: browser (default) | paste
+  --code <code>             authorization code (paste channel, or to skip the browser loopback)
   -h, --help                display help for command
 "
 `;

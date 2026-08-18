@@ -54,6 +54,10 @@ type LoginFlags = {
   clientSecret?: string | undefined;
   save?: boolean | undefined;
   mode?: string | undefined;
+  /** Authorize channel: browser (loopback) | paste (manual code). Omit → interactive prompt. */
+  channel?: string | undefined;
+  /** Authorization code (paste channel, or to skip the browser loopback entirely). */
+  code?: string | undefined;
 };
 
 type StatusFlags = {
@@ -108,7 +112,9 @@ export function registerAuthCommands(program: Command): void {
       .option(
         '--mode <mode>',
         'auth mode: user (authorization_code, default) or enterprise (client_credentials)',
-      ),
+      )
+      .option('--channel <channel>', 'user authorize channel: browser (default) | paste')
+      .option('--code <code>', 'authorization code (paste channel, or to skip the browser loopback)'),
     { hidden: true },
   ).action(async (flags: LoginFlags, command: Command) => {
     await runLogin(flags, command);
@@ -193,15 +199,19 @@ async function runLogin(flags: LoginFlags, command: Command): Promise<void> {
   const clientId = requireClientId(settings.clientId);
 
   // 1. channel: browser (loopback) or paste (manual code).
-  const channel = await resolveChannel(ctx.json);
+  const channel = await resolveChannel(flags.channel, ctx.json);
   // 2. build + print the authorize URL (stderr); best-effort open the browser.
   const authorizeUrl = buildAuthorizeUrl(settings.host, clientId);
   printAuthorizeUrl(authorizeUrl);
   if (channel === 'browser') loginHooks.openBrowser(authorizeUrl);
 
-  // 3. obtain the code.
+  // 3. obtain the code. An explicit --code skips the channel entirely (non-interactive).
   const code =
-    channel === 'paste' ? await loginHooks.readCode(ctx.json) : (await loginHooks.captureCode(ctx)).code;
+    flags.code !== undefined && flags.code !== ''
+      ? flags.code
+      : channel === 'paste'
+        ? await loginHooks.readCode(ctx.json)
+        : (await loginHooks.captureCode(ctx)).code;
 
   // 4. exchange the code → user token (persists userToken + authMode='user').
   const token = await acquireUserToken(ctx, code);
@@ -304,8 +314,12 @@ async function resolveMode(flag: string | undefined, json: boolean): Promise<Aut
   return await loginHooks.selectMode(json);
 }
 
-/** Resolve the authorize channel via the hook (default respects TTY/--json). */
-async function resolveChannel(json: boolean): Promise<AuthorizeChannel> {
+/** Resolve the authorize channel: an explicit --channel wins, else the interactive hook. */
+async function resolveChannel(flag: string | undefined, json: boolean): Promise<AuthorizeChannel> {
+  if (flag === 'browser' || flag === 'paste') return flag;
+  if (flag !== undefined && flag !== '') {
+    throw new UsageError(`--channel must be "browser" or "paste", got "${flag}"`);
+  }
   return await loginHooks.selectChannel(json);
 }
 

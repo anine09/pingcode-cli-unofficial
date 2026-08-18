@@ -165,6 +165,23 @@ describe('auth login — user mode (authorization_code)', () => {
     expect(cfg.authMode).toBe('user');
     expect((cfg.userToken as { accessToken?: string }).accessToken).toBe('user-tok');
   });
+
+  it('--code flag uses the code directly, bypassing the channel and hooks (non-interactive)', async () => {
+    // If the flag path were wrong, these would be invoked and throw.
+    loginHooks.captureCode = async () => {
+      throw new Error('captureCode must not be called when --code is given');
+    };
+    loginHooks.readCode = async () => {
+      throw new Error('readCode must not be called when --code is given');
+    };
+    const run = await runCli(['auth', 'login', '--mode', 'user', '--code', 'FLAG-CODE', '--json'], [tokenUser, myself]);
+
+    expect(run.exit).toBe(0);
+    expect(run.calls[0]?.url ?? '').toContain('code=FLAG-CODE');
+    const cfg = readConfig();
+    expect(cfg.authMode).toBe('user');
+    expect((cfg.userToken as { accessToken?: string }).accessToken).toBe('user-tok');
+  });
 });
 
 describe('auth login — enterprise mode (unchanged, D11)', () => {
