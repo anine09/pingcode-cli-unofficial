@@ -23,6 +23,8 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Versioning Guide](./versioning.md) | Semantic versioning + GitFlow branch model | Every release — this is a rule, not a suggestion |
+| [GitFlow Guide](./gitflow.md) | Branch-based development rules (feature/release/hotfix workflow) | Starting new work, cutting releases, urgent fixes |
 | [Commit Conventions](./commit-conventions.md) | Conventional Commits format, scopes, and history rules | Every commit — this is a rule, not a suggestion |
 
 ---
@@ -51,6 +53,16 @@ These guides help you **ask the right questions before coding**.
 - [ ] Multiple branches update the same derived state from `kind` / `action`
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+
+### When to Think About Versioning
+
+- [ ] You're about to cut a release or tag
+- [ ] You're adding/removing a command, flag, or config key
+- [ ] You're unsure whether a change is breaking
+- [ ] You're on `main` and considering a direct commit
+- [ ] You need to know whether to bump MAJOR/MINOR/PATCH
+
+→ Read [Versioning Guide](./versioning.md)
 
 ### Before Every Commit
 
