@@ -20,15 +20,28 @@ See [Coverage](#coverage-reach-vs-ergonomics) for the per-module split.
 
 Requires **Node.js >= 20**. The package is not published; build it from a checkout.
 
+### One-click (recommended)
+
+From the repo checkout, one command installs deps, builds, and links `pingcode` onto your
+`PATH` — compatible with Linux, macOS, and Windows. Re-run it after `git pull` to rebuild +
+relink the latest code:
+
+```bash
+./install.sh            # Linux / macOS  (or: npm run install:cli)
+```
+
+```powershell
+.\install.ps1           # Windows PowerShell  (or: npm run install:cli)
+```
+
+The Windows variant needs PowerShell (`pwsh` or Windows PowerShell); the `install:cli` npm
+script is the cross-platform fallback (`node scripts/install.mjs`).
+
+### Manual
+
 ```bash
 npm install
 npm run build            # → dist/bin/pingcode.js
-node dist/bin/pingcode.js --help
-```
-
-To get `pingcode` on your `PATH`:
-
-```bash
 npm link                 # then just: pingcode --help
 ```
 
