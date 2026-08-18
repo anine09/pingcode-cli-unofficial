@@ -45,7 +45,8 @@ type TokenRecord = {
 type UserTokenRecord = TokenRecord & { kind: 'user'; refreshToken: string };
 type Config = {
   host?; apiBase?;
-  clientId?; clientSecret?;        // app creds shared by BOTH grants
+  clientId?; clientSecret?;         // ENTERPRISE app creds (client_credentials)
+  userClientId?; userClientSecret?; // USER app creds (authorization_code) — a SEPARATE app
   oauthRedirectUri?: string;        // registered loopback callback for the browser channel
   token?: TokenRecord;              // ENTERPRISE slot (legacy field name kept)
   userToken?: UserTokenRecord;      // USER slot
@@ -76,6 +77,18 @@ type Config = {
 6. **`ensureFreshToken` is mode-aware** but keeps a single in-flight serialization per active
    token. In user mode, the reactive 401→re-acquire path must NOT clear `ctx.auth.token` (the
    `refresh_token` lives on it) — only clear `inflight`. Enterprise force-refresh clears both.
+7. **Credentials are per-mode, not shared.** The two grants can use **two separate apps**:
+   enterprise reads/writes `clientId`/`clientSecret` (env `PINGCODE_CLIENT_ID`/`PINGCODE_CLIENT_SECRET`);
+   user mode reads/writes `userClientId`/`userClientSecret` (env `PINGCODE_USER_CLIENT_ID`/
+   `PINGCODE_USER_CLIENT_SECRET`). `buildContext` routes the ACTIVE credentials (`ctx.credentials`)
+   by the effective mode: user mode → `override ?? userClientId ?? clientId` (falls back to the
+   enterprise app for a single-app setup); enterprise → `override ?? clientId`. This is what lets
+   a user login with a new app **without clobbering** the stored enterprise app.
+8. **Login routes persistence to the mode's slot.** `finishLogin` writes the app credential to
+   `userClientId`/`userClientSecret` in user mode, `clientId`/`clientSecret` in enterprise. Gate
+   (mirrors the enterprise rule): a credential already equal to the file's slot value is not
+   rewritten (file source); one from a flag/env persists only with `--save`. The enterprise
+   fallback (no user app configured) is **not** written to the user slot.
 
 ### Logout semantics
 
@@ -88,6 +101,20 @@ type Config = {
 > 7 USER-only endpoints are refused while an enterprise token is held and allowed when a user
 > token is held (`refuseUserTokenEndpoint` gates on `ctx.auth.mode`). Verification differs too:
 > enterprise verifies via `GET /v1/pjm/projects`; user mode verifies via `GET /v1/myself`.
+
+> **Gotcha — the credential names an APP, not a USER.** `client_id` identifies which app is
+> requesting, never which human. In the authorization-code flow the **user is whoever logs in at
+> `{host}/oauth2/authorize` and consents** — the resulting `code` (and thus the user token) is
+> bound to that logged-in identity. This is why the paste channel works for a self-serve user:
+> they log in as themselves, copy the `code`, and `/v1/myself` returns them. Do not expect the
+> backend credential to "point at" a user — it cannot.
+
+> **Gotcha — `redirect_uri` registration is MANDATORY (even for the paste channel).** Without a
+> `redirect_uri` registered in 凭据管理 for the app, `{host}/oauth2/authorize` returns
+> "应用未配置'redirect_uri'" and no `code` is ever produced. Register a loopback address
+> (`http://127.0.0.1:8732/callback`); for paste the user just copies `code` off the (failed)
+> redirect in the address bar — no listener required. The authorize error message is the symptom
+> to recognize (live-verified 2026-08-18).
 
 ---
 
