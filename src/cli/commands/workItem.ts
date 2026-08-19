@@ -262,7 +262,7 @@ export function registerWorkItemCommands(parent: Command): void {
         .option('--title <text>', 'new title')
         .option('--description <text>', 'new description (replaces the old one)')
         .option('--type <name|id>', TYPE_FLAG_HELP)
-        .option('--assignee <name|id>', 'new assignee')
+        .option('--assignee <name|id>', 'new assignee (the Open API cannot clear it — use the Web UI to unassign)')
         .option('--priority <name|id>', 'new priority')
         .option('--parent <ref>', 'new parent work item')
         .option('--sprint <name|id>', 'move into this sprint (scrum/hybrid projects only)')
@@ -1091,8 +1091,20 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
       flags.priority === undefined || projectId === undefined
         ? undefined
         : await resolveWorkItemPriority(attemptCtx, projectId, flags.priority);
-    const assignee =
-      flags.assignee === undefined ? undefined : await resolveUser(attemptCtx, flags.assignee);
+    // An empty `--assignee` is the natural way a user tries to *clear* the assignee,
+    // but the PingCode Open API cannot (research/clear-assignee-api.md): `null` is a
+    // silent 200 no-op and `""` is a 400. Catch the clear-intent *before* resolveUser
+    // (whose generic empty guard would only say "user must not be empty") and answer it
+    // honestly — no request is sent, no false success.
+    let assignee: ResolveResult | undefined;
+    if (flags.assignee !== undefined) {
+      if (flags.assignee.trim() === '') {
+        throw new UsageError("the PingCode Open API cannot clear a work item's assignee", {
+          hint: 'clearing the assignee is only supported in the PingCode web UI — `--assignee ""` is not accepted by the API',
+        });
+      }
+      assignee = await resolveUser(attemptCtx, flags.assignee);
+    }
     const parent =
       flags.parent === undefined ? undefined : await resolveWorkItem(attemptCtx, flags.parent);
     // Both are project-scoped, and the project came off the item — so unlike `create`

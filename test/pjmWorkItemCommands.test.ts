@@ -414,6 +414,34 @@ describe('project work-item update — --sprint and --release', () => {
     expect(run.calls).toHaveLength(0);
   });
 
+  it('refuses to clear the assignee — the Open API cannot, and sends no PATCH', async () => {
+    // `--assignee ""` is how a user tries to unassign. The guard fires inside the
+    // resolve closure, after the item is read but before any write — so the only
+    // round-trip is the item read, and no PATCH ever goes out (no false 200 no-op).
+    const run = await runCli(
+      ['project', 'work-item', 'update', ITEM, '--assignee', ''],
+      [itemResponse],
+    );
+
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('cannot clear');
+    expect(run.stderr).toContain('web UI');
+    expect(run.calls).toHaveLength(1);
+    expect(run.calls[0]?.method).toBe('GET');
+    expect(run.writes).toHaveLength(0);
+  });
+
+  it('still assigns a real user by name and sends only assignee_id', async () => {
+    // Regression guard: the clear-intent branch must not shadow a normal assign.
+    const run = await runCli(
+      ['project', 'work-item', 'update', ITEM, '--assignee', 'wangxiao'],
+      [itemResponse, usersPage, itemResponse],
+    );
+
+    expect(run.exit).toBe(0);
+    expect(run.writes[0]?.body).toEqual({ assignee_id: USER });
+  });
+
   it('resolves both names under --dry-run and still sends nothing', async () => {
     const run = await runCli(
       [

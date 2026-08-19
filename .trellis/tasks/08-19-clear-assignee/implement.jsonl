@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/08-19-clear-assignee/prd.md", "reason": "requirements R1–R5, constraints, acceptance criteria for the clear-assignee honesty guard"}
+{"file": ".trellis/tasks/08-19-clear-assignee/design.md", "reason": "intercept point (workItem.ts runUpdate assignee block), why empty-string is the only clear-intent signal, rejected alternatives"}
+{"file": ".trellis/tasks/08-19-clear-assignee/implement.md", "reason": "ordered execution checklist, validation commands, rollback points"}
+{"file": ".trellis/tasks/08-19-clear-assignee/research/clear-assignee-api.md", "reason": "authoritative API finding (HIGH): Open REST API cannot clear assignee; null=no-op, empty=400; root cause is omitempty DTO"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "exit-code contract (UsageError=exit 2), hint rule, never match API message text, never send mutating body twice"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "testing policy, API-fact discipline, no-network-in-unit-tests via injected fetch"}
