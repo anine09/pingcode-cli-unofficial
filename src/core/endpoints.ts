@@ -268,6 +268,27 @@ export const ENDPOINTS = {
   workItemStates: '/v1/pjm/work_item/states',
   workItemPriorities: '/v1/pjm/work_item/priorities',
   /**
+   * `GET /v1/pjm/projects/{project_id}/boards` — the boards of one project
+   * (catalog `pjm.projects.boards.list`). Project-scoped: the id rides in the
+   * path, like sprints and versions.
+   */
+  projectBoards: (projectId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/boards`,
+  /**
+   * `GET /v1/pjm/projects/{project_id}/boards/{board_id}/entries` — the
+   * columns of one board (catalog `pjm.projects.boards.entries.list`).
+   * Board-scoped: both ids ride in the path.
+   */
+  projectBoardEntries: (projectId: string, boardId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(boardId)}/entries`,
+  /**
+   * `GET /v1/pjm/projects/{project_id}/boards/{board_id}/swimlanes` — the
+   * swimlanes of one board (catalog `pjm.projects.boards.swimlanes.list`).
+   * Board-scoped: both ids ride in the path.
+   */
+  projectBoardSwimlanes: (projectId: string, boardId: string): string =>
+    `/v1/pjm/projects/${encodeURIComponent(projectId)}/boards/${encodeURIComponent(boardId)}/swimlanes`,
+  /**
    * ⚠️ **Singular `work_item` segment**, like the three above. Org-level: 9 system
    * rows, no query parameters at all, each with a stable `category` slug and a
    * per-tenant 24-hex `id`. The **only** source for the `relation_type` that
@@ -394,6 +415,25 @@ export const ENDPOINTS = {
   shipTicketTypes: '/v1/ship/ticket/types',
   shipTicketChannels: '/v1/ship/ticket/channels',
   shipTicketProperties: '/v1/ship/ticket/properties',
+  /**
+   * Customer (客户) list — `GET /v1/ship/products/{id}/customers` (ship §H). The parent rides
+   * in the **path** (no `?product_id=`), exactly like `shipProductMembers`. A customer is
+   * product-scoped (ship §5), so `ticket list --customer` resolves a name against it.
+   */
+  shipProductCustomers: (productId: string): string =>
+    `/v1/ship/products/${encodeURIComponent(productId)}/customers`,
+  /**
+   * Ticket tag vocabulary — `GET /v1/ship/ticket/tags?product_id=` (ship §K3, catalog L346).
+   * The same rows are also served as product tags at `/v1/ship/products/{id}/tags`
+   * (catalog L332, scope R:cfg); the ticket-scoped view is what `ticket list --tag` addresses.
+   */
+  shipTicketTags: '/v1/ship/ticket/tags',
+  /**
+   * Ticket solution vocabulary — `GET /v1/ship/ticket/solutions?product_id=` (ship §K3,
+   * catalog L344). Note the **slash** spelling (`ticket/solutions`), not the underscored
+   * `/v1/ship/ticket_solutions` (catalog L361), which is the org-level configuration view.
+   */
+  shipTicketSolutions: '/v1/ship/ticket/solutions',
 
   /**
    * Transition pre-validation for tickets (PRD D11). The plan list has **no**

@@ -398,25 +398,44 @@ exports[`project --help > project work-item list (the two transports and their d
 list work items of a project (some filters switch to the search endpoint)
 
 Options:
-  --project <name|id>      project name or id
-  --type <name|id>         work-item type
-  --assignee <name|id>     assignee: display name, username, email or id
-  --sprint <name|id>       sprint (scrum/hybrid projects only)
-  --parent <ref>           only children of this work item: id, short_id, identifier or URL
-  --keywords <text>        fuzzy search over title and description
-  --unassigned             (search) only work items with no assignee
-  --title-contains <text>  (search) substring of the title
-  --created-after <date>   (search) created on or after this DATE (00:00 local)
-  --created-before <date>  (search) created on or before this DATE (23:59 local)
-  --updated-after <date>   (search) updated on or after this DATE
-  --updated-before <date>  (search) updated on or before this DATE
-  --page <n>               page index, 0-based (default: "0")
-  --page-size <n>          rows per page, 1-100 (default: "30")
-  --all                    walk every page (best effort: the API guarantees no ordering)
-  --limit <n>              stop after this many rows with --all (default: "500")
-  --state <name>           filter by state, resolved by name (requires --type)
-  --state-id <id>          filter by state, given as an id (no lookup, no --type needed)
-  -h, --help               display help for command
+  --project <name|id>            project name or id
+  --type <name|id>               work-item type
+  --assignee <name|id>           assignee: display name, username, email or id
+  --sprint <name|id>             sprint (scrum/hybrid projects only)
+  --parent <ref>                 only children of this work item: id, short_id, identifier or URL
+  --keywords <text>              fuzzy search over title and description
+  --identifier <text>            work-item identifier such as SCR-5 (REST list only)
+  --priority <name|id>           priority
+  --board <name|id>              board
+  --entry <name|id>              board entry (column)
+  --swimlane <name|id>           swimlane
+  --phase <name|id>              phase
+  --release <name|id>            release / version
+  --tag <name|id>                tag
+  --bug-type <id>                bug type id (REST list only, pass-through)
+  --created-by <name|id>         creator: display name, username, email or id
+  --participant <name|id>        participant: display name, username, email or id
+  --unassigned                   (search) only work items with no assignee
+  --title-contains <text>        (search) substring of the title
+  --description-contains <text>  (search) substring of the description
+  --start-after <date>           (search) start on or after this DATE
+  --start-before <date>          (search) start on or before this DATE
+  --end-after <date>             (search) end on or after this DATE
+  --end-before <date>            (search) end on or before this DATE
+  --completed-after <date>       (search) completed on or after this DATE
+  --completed-before <date>      (search) completed on or before this DATE
+  --story-points <n>             (search) story points (exact match)
+  --created-after <date>         (search) created on or after this DATE (00:00 local)
+  --created-before <date>        (search) created on or before this DATE (23:59 local)
+  --updated-after <date>         (search) updated on or after this DATE
+  --updated-before <date>        (search) updated on or before this DATE
+  --page <n>                     page index, 0-based (default: "0")
+  --page-size <n>                rows per page, 1-100 (default: "30")
+  --all                          walk every page (best effort: the API guarantees no ordering)
+  --limit <n>                    stop after this many rows with --all (default: "500")
+  --state <name>                 filter by state, resolved by name (requires --type)
+  --state-id <id>                filter by state, given as an id (no lookup, no --type needed)
+  -h, --help                     display help for command
 
 Flags marked (search) can only be expressed by POST /v1/pjm/work_items/search, so
 passing any of them switches this command to that endpoint. Paging, --all and the
@@ -424,7 +443,11 @@ reported total behave identically on both transports (verified live 2026-08-04),
 the switch is invisible except for which filters are available.
 The two endpoints do filter on different things. Search cannot filter by
 identifier, short_id or bug type at all; the simple list cannot filter by date,
-title text or "unassigned". Everything else works in both.
+title/description text, "unassigned" or story points. Everything else works in both.
+Search-only flags: --title-contains, --description-contains, --unassigned,
+--start-after/before, --end-after/before, --completed-after/before, --story-points,
+--created-after/before, --updated-after/before.
+REST-only flags: --identifier, --bug-type.
 
 "
 `;

@@ -73,20 +73,32 @@ exports[`product --help > product idea list (the search filter surface) 1`] = `
 search ideas in a product (POST /v1/ship/ideas/search)
 
 Options:
-  --product <name|id>   product name, identifier or id
-  --priority <name|id>  priority
-  --assignee <name|id>  assignee — must be a member of this product
-  --suite <name|id>     requirement module 需求模块 — filtering ideas by suite is undocumented: the API
-                        lists suite.id in neither the filterable nor the unfilterable set (ship
-                        §9.5), so verify the result rather than trusting an empty one
-  --keywords <text>     fuzzy search over identifier and title
-  --page <n>            page index, 0-based (default: "0")
-  --page-size <n>       rows per page, 1-100 (default: "30")
-  --all                 walk every page (best effort: the API guarantees no ordering)
-  --limit <n>           stop after this many rows with --all (default: "500")
-  --state <name|id>     filter by state, resolved by name against the product's states
-  --state-id <id>       filter by state, given as an id (sent unchanged, no lookup)
-  -h, --help            display help for command
+  --product <name|id>            product name, identifier or id
+  --priority <name|id>           priority
+  --assignee <name|id>           assignee — must be a member of this product
+  --participant <name|id>        participant — must be a member of this product
+  --suite <name|id>              requirement module 需求模块 — filtering ideas by suite is
+                                 undocumented: the API lists suite.id in neither the filterable nor
+                                 the unfilterable set (ship §9.5), so verify the result rather than
+                                 trusting an empty one
+  --keywords <text>              fuzzy search over identifier and title
+  --title-contains <text>        title contains this text
+  --description-contains <text>  description contains this text
+  --created-after <date>         created at or after (YYYY-MM-DD or 10-digit unix seconds)
+  --created-before <date>        created at or before
+  --updated-after <date>         updated at or after
+  --updated-before <date>        updated at or before
+  --completed-after <date>       completed at or after
+  --completed-before <date>      completed at or before
+  --score <n>                    numeric score, compared with {eq: n}
+  --progress <n>                 numeric progress between 0 and 1, compared with {eq: n}
+  --page <n>                     page index, 0-based (default: "0")
+  --page-size <n>                rows per page, 1-100 (default: "30")
+  --all                          walk every page (best effort: the API guarantees no ordering)
+  --limit <n>                    stop after this many rows with --all (default: "500")
+  --state <name|id>              filter by state, resolved by name against the product's states
+  --state-id <id>                filter by state, given as an id (sent unchanged, no lookup)
+  -h, --help                     display help for command
 "
 `;
 
@@ -140,6 +152,10 @@ Commands:
   ticket-channels [options]    ticket channels of a product (set once, at create time)
   ticket-properties [options]  writable ticket property keys and their option ids — the only source
                                for --set values
+  ticket-customers [options]   customers 客户 of a product — values for ticket list --customer
+  ticket-solutions [options]   ticket solutions 解决方案 of a product — values for ticket list
+                               --solution
+  ticket-tags [options]        ticket tags 标签 of a product — values for ticket list --tag
   help [command]               display help for command
 "
 `;
@@ -228,6 +244,43 @@ Options:
   --set <key=value>     custom property, repeatable: --set key=value. Values for select-type
                         properties are option ids, not labels. Replaces, never merges
   -h, --help            display help for command
+"
+`;
+
+exports[`product --help > product ticket list (the POST /search filter surface) 1`] = `
+"Usage: pingcode product ticket list [options]
+
+search tickets in a product (POST /v1/ship/tickets/search)
+
+Options:
+  --product <name|id>            product name, identifier or id
+  --type <name|id>               ticket type
+  --priority <name|id>           priority
+  --assignee <name|id>           assignee — must be a member of this product
+  --channel <name|id>            submission channel 工单渠道
+  --keywords <text>              fuzzy search over identifier and title
+  --submitted-by <name|id>       submitter 提交人 — resolved as an org user
+  --customer <name|id>           customer 客户 — scoped to this product
+  --solution <name|id>           solution 解决方案 — scoped to this product
+  --tag <name|id>                ticket tag 标签 — scoped to this product
+  --participant <name|id>        participant 关注人 — must be a member of this product
+  --title-contains <text>        title contains this text
+  --description-contains <text>  description contains this text
+  --submitted-after <date>       submitted at or after (YYYY-MM-DD or 10-digit unix seconds)
+  --submitted-before <date>      submitted at or before
+  --created-after <date>         created at or after (YYYY-MM-DD or 10-digit unix seconds)
+  --created-before <date>        created at or before
+  --updated-after <date>         updated at or after (YYYY-MM-DD or 10-digit unix seconds)
+  --updated-before <date>        updated at or before
+  --completed-after <date>       completed at or after (YYYY-MM-DD or 10-digit unix seconds)
+  --completed-before <date>      completed at or before
+  --page <n>                     page index, 0-based (default: "0")
+  --page-size <n>                rows per page, 1-100 (default: "30")
+  --all                          walk every page (best effort: the API guarantees no ordering)
+  --limit <n>                    stop after this many rows with --all (default: "500")
+  --state <name|id>              filter by state, resolved by name against the product's states
+  --state-id <id>                filter by state, given as an id (sent unchanged, no lookup)
+  -h, --help                     display help for command
 "
 `;
 

@@ -35,8 +35,10 @@ import {
   addShipStateOptions,
   collectValue,
   contextFor,
+  dateRangeFilter,
   mergeFilters,
   modeOf,
+  parseDateBoundaryFlag,
   parseNumberFlag,
   parseSetFlags,
   printCollection,
@@ -81,6 +83,18 @@ type ListFlags = PagingFlags &
     assignee?: string | undefined;
     suite?: string | undefined;
     keywords?: string | undefined;
+    // POST /search-only filters (the single idea read path). Resolved inside runList.
+    participant?: string | undefined;
+    titleContains?: string | undefined;
+    descriptionContains?: string | undefined;
+    createdAfter?: string | undefined;
+    createdBefore?: string | undefined;
+    updatedAfter?: string | undefined;
+    updatedBefore?: string | undefined;
+    completedAfter?: string | undefined;
+    completedBefore?: string | undefined;
+    score?: string | undefined;
+    progress?: string | undefined;
   };
 
 type CreateFlags = {
@@ -138,8 +152,19 @@ export function registerIdeaCommands(parent: Command): void {
           .requiredOption('--product <name|id>', 'product name, identifier or id')
           .option('--priority <name|id>', 'priority')
           .option('--assignee <name|id>', 'assignee — must be a member of this product')
+          .option('--participant <name|id>', 'participant — must be a member of this product')
           .option('--suite <name|id>', `requirement module 需求模块 — ${SUITE_FILTER_CAVEAT}`)
-          .option('--keywords <text>', 'fuzzy search over identifier and title'),
+          .option('--keywords <text>', 'fuzzy search over identifier and title')
+          .option('--title-contains <text>', 'title contains this text')
+          .option('--description-contains <text>', 'description contains this text')
+          .option('--created-after <date>', 'created at or after (YYYY-MM-DD or 10-digit unix seconds)')
+          .option('--created-before <date>', 'created at or before')
+          .option('--updated-after <date>', 'updated at or after')
+          .option('--updated-before <date>', 'updated at or before')
+          .option('--completed-after <date>', 'completed at or after')
+          .option('--completed-before <date>', 'completed at or before')
+          .option('--score <n>', 'numeric score, compared with {eq: n}')
+          .option('--progress <n>', 'numeric progress between 0 and 1, compared with {eq: n}'),
       ),
       'filter by state',
     ),
@@ -357,19 +382,69 @@ async function runList(flags: ListFlags, command: Command): Promise<void> {
     flags.assignee === undefined
       ? undefined
       : await resolveProductMember(ctx, product.id, flags.assignee);
+  const participant =
+    flags.participant === undefined
+      ? undefined
+      : await resolveProductMember(ctx, product.id, flags.participant);
   const suite =
     flags.suite === undefined ? undefined : await resolveIdeaSuite(ctx, product.id, flags.suite);
 
   if (suite !== undefined) ctx.logger.warn(SUITE_FILTER_CAVEAT);
 
+  // Date boundaries (unix seconds) and bare numbers. parseDateBoundaryFlag throws on
+  // a malformed value, so each is guarded; a bare number is compared with {eq}.
+  const createdAfter =
+    flags.createdAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.createdAfter, '--created-after', 'start');
+  const createdBefore =
+    flags.createdBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.createdBefore, '--created-before', 'end');
+  const updatedAfter =
+    flags.updatedAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.updatedAfter, '--updated-after', 'start');
+  const updatedBefore =
+    flags.updatedBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.updatedBefore, '--updated-before', 'end');
+  const completedAfter =
+    flags.completedAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.completedAfter, '--completed-after', 'start');
+  const completedBefore =
+    flags.completedBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.completedBefore, '--completed-before', 'end');
+  const score = parseNumberFlag(flags.score, '--score');
+  const progress = parseNumberFlag(flags.progress, '--progress');
+
+  // Reference fields ride `refFilter` + `mergeFilters`; the operator-bearing fields
+  // (contains / date range / eq) bypass it, one operator per field (ship §4).
+  const filter: Record<string, unknown> = mergeFilters([
+    refFilter('product', product.id),
+    refFilter('state', state?.id),
+    refFilter('priority', priority?.id),
+    refFilter('assignee', assignee?.id),
+    refFilter('suite', suite?.id),
+  ]);
+  if (participant !== undefined) filter['participants.id'] = { in: [participant.id] };
+  if (flags.titleContains !== undefined) filter.title = { contains: flags.titleContains };
+  if (flags.descriptionContains !== undefined) {
+    filter.description = { contains: flags.descriptionContains };
+  }
+  const created = dateRangeFilter(createdAfter, createdBefore);
+  if (created !== undefined) filter.created_at = created;
+  const updated = dateRangeFilter(updatedAfter, updatedBefore);
+  if (updated !== undefined) filter.updated_at = updated;
+  const completed = dateRangeFilter(completedAfter, completedBefore);
+  if (completed !== undefined) filter.completed_at = completed;
+  if (score !== undefined) filter.score = { eq: score };
+  if (progress !== undefined) filter.progress = { eq: progress };
+
   const payload: SearchPayload = {
-    filter: mergeFilters([
-      refFilter('product', product.id),
-      refFilter('state', state?.id),
-      refFilter('priority', priority?.id),
-      refFilter('assignee', assignee?.id),
-      refFilter('suite', suite?.id),
-    ]),
+    filter,
     ...(flags.keywords === undefined ? {} : { keywords: flags.keywords }),
   };
 

@@ -78,6 +78,79 @@ const TABLE = {
   work_item_priority: { label: 'priority', path: ENDPOINTS.workItemPriorities, ...PROJECT_SCOPED },
 
   /**
+   * 看板 — `GET /v1/pjm/projects/{project_id}/boards`. Project-scoped through
+   * the path, like sprints and versions. Board names are unique per project
+   * (a duplicate create is 400 `100001`), so the project-scoped cache key is
+   * what keeps two projects' identically named boards apart.
+   *
+   * Needed by `work-item list --board <name>`: the REST list takes `board_id`
+   * and the search filter takes `board.id`.
+   */
+  'pjm-board': {
+    label: 'board',
+    path: ENDPOINTS.projectBoards,
+    ...PROJECT_SCOPED,
+    hint: 'list boards with `pingcode project board list --project <p>`',
+  },
+
+  /**
+   * 看板栏 (board entries / columns). Board-scoped: both the project id and the
+   * board id ride in the path. The resolver is project-scoped (parent = project)
+   * and uses a custom `boardChildren` loader that lists every board of the
+   * project, then lists the entries of each — because the user does not always
+   * know which board an entry belongs to, and the API has no project-level
+   * entry list.
+   *
+   * Needed by `work-item list --entry <name>`: the REST list takes `entry_id`
+   * and the search filter takes `entry.id`.
+   */
+  'pjm-board-entry': {
+    label: 'board entry',
+    path: ENDPOINTS.projectBoards,
+    ...PROJECT_SCOPED,
+    load: 'boardChildren',
+    boardChildPath: ENDPOINTS.projectBoardEntries,
+    hint: 'entries belong to a board — list them with `pingcode project board entry list --project <p> --board <b>`',
+  },
+
+  /**
+   * 泳道 (swimlanes). Same two-level shape as board entries: board-scoped on
+   * the API, project-scoped in the resolver with a `boardChildren` loader.
+   *
+   * Needed by `work-item list --swimlane <name>`: the REST list takes
+   * `swimlane_id` and the search filter takes `swimlane.id`.
+   */
+  'pjm-board-swimlane': {
+    label: 'swimlane',
+    path: ENDPOINTS.projectBoards,
+    ...PROJECT_SCOPED,
+    load: 'boardChildren',
+    boardChildPath: ENDPOINTS.projectBoardSwimlanes,
+    hint: 'swimlanes belong to a board — list them with `pingcode project board swimlane list --project <p> --board <b>`',
+  },
+
+  /**
+   * 工作项标签 — `GET /v1/pjm/work_item/tags?project_id=`. The endpoint
+   * **requires** `project_id` but **ignores** it (returns the whole org's tag
+   * list regardless — see the block above `workItemTagVocabulary` in
+   * `core/endpoints.ts`), and tag names are not unique. The resolver is
+   * therefore project-scoped for cache-key purposes only: the actual list is
+   * the same for every project. A name that matches multiple tags produces an
+   * ambiguity error listing the candidates — pass the id instead.
+   *
+   * Needed by `work-item list --tag <name>`: the REST list takes `tag_id` and
+   * the search filter takes `tags.id`.
+   */
+  'pjm-work-item-tag': {
+    label: 'work item tag',
+    path: ENDPOINTS.workItemTagVocabulary,
+    ...PROJECT_SCOPED,
+    hint:
+      'the tag endpoint ignores project_id (returns the whole org list), and names repeat — ' +
+      'pass the id if a name is ambiguous',
+  },
+
+  /**
    * 工作项关联类型 — the vocabulary `POST /v1/pjm/work_items/{id}/relations` cannot be
    * called without, and the **only** row S2b adds.
    *
@@ -281,6 +354,37 @@ const TABLE = {
     hint:
       'property ids are often slugs (solution, identifier), never 24-hex — list them with ' +
       '`pingcode product meta ticket-properties --product <p>`',
+  },
+  /**
+   * `GET /v1/ship/products/{id}/customers` (ship §H) — the vocabulary `--customer` resolves
+   * a name against. The product id rides in the **path** (no `parentQuery`), exactly like
+   * `sprint`, so the parent slot names `ship-product` for cache keying only. Customer
+   * `name` is the resolvable key; ids are 24-hex ([S§]5).
+   */
+  'ship-ticket-customer': {
+    label: 'ticket customer',
+    path: ENDPOINTS.shipProductCustomers,
+    parent: 'ship-product',
+    hint: 'customers are scoped to the product — list them with `pingcode product meta ticket-customers --product <p>`',
+  },
+  /** `GET /v1/ship/ticket/solutions?product_id=` (ship §K3) — the `--solution` vocabulary. */
+  'ship-ticket-solution': {
+    label: 'ticket solution',
+    path: ENDPOINTS.shipTicketSolutions,
+    ...PRODUCT_SCOPED,
+    hint: 'list solutions with `pingcode product meta ticket-solutions --product <p>`',
+  },
+  /**
+   * `GET /v1/ship/ticket/tags?product_id=` (ship §K3) — the `--tag` vocabulary. The same
+   * rows are also reachable as product tags (`/v1/ship/products/{id}/tags`, catalog L332);
+   * the ticket-scoped view is the one the ticket `tags.id` search filter addresses, so it is
+   * the resolver's source ([S§]K3).
+   */
+  'ship-ticket-tag': {
+    label: 'ticket tag',
+    path: ENDPOINTS.shipTicketTags,
+    ...PRODUCT_SCOPED,
+    hint: 'list ticket tags with `pingcode product meta ticket-tags --product <p>`',
   },
 
   /**
@@ -609,7 +713,13 @@ export type ResolverSpec = {
   /** An empty candidate list means "unbounded set, assume an id" rather than a typo. */
   passThroughWhenEmpty?: boolean;
   /** Non-default candidate loader; `undefined` is the plain paged list. */
-  load?: 'suiteTree' | 'productMembers';
+  load?: 'suiteTree' | 'productMembers' | 'boardChildren';
+  /**
+   * For `load: 'boardChildren'`: builds the child-list path from the project id
+   * and a board id. The loader lists every board of the project, then lists the
+   * children (entries or swimlanes) of each.
+   */
+  boardChildPath?: (projectId: string, boardId: string) => string;
   /**
    * This kind is a **cache namespace, not a name lookup**: something else (a scan, a
    * transition graph) produces its ids, so `pingcode resolve` does not offer it and

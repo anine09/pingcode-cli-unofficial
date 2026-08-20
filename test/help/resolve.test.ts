@@ -54,16 +54,22 @@ describe('resolve command surface', () => {
     // 31 → 32 with S2b's `pjm-relation-type` (nine org-level system rows with unique
     // names *and* unique stable `category` slugs), 32 → 33 with S3's
     // `testhub-plan-state` (three org-level system rows — 未开始 / 进行中 / 已完成 —
-    // whose ids are what a plan PATCH takes as `state_id`).
+    // whose ids are what a plan PATCH takes as `state_id`), 33 → 36 with P3's
+    // three ticket resolvers (`ship-ticket-customer`, `ship-ticket-solution`,
+    // `ship-ticket-tag`), 36 → 40 with P1's four work-item resolvers
+    // (`pjm-board`, `pjm-board-entry`, `pjm-board-swimlane`, `pjm-work-item-tag`).
     //
-    // Two children have now **declined** a row, and those declines are why this is 33
-    // rather than 35: S2b's work-item tags (the list ignores the `project_id` it demands
-    // while the write enforces it) and S3's case properties (the rows are built-in field
-    // keys, so a resolved id would make `--set` edit a different field — one spelling
-    // answers HTTP 500, another silently rewrites the top-level `description`). Both
-    // arguments are spelled out in `core/metadata/registry.ts`.
-    expect(META_KINDS).toHaveLength(33);
-    expect(RESOLVABLE_KINDS).toHaveLength(31);
+    // Two children have still **declined** a row, and those declines are why this
+    // is 40 rather than 42: S2b's original argument for work-item tags (the list
+    // ignores the `project_id` it demands while the write enforces it) was
+    // revisited by P1, which added `pjm-work-item-tag` for list-filtering use —
+    // the resolver returns ids that work for filtering even if the write refuses
+    // them; and S3's case properties (the rows are built-in field keys, so a
+    // resolved id would make `--set` edit a different field — one spelling
+    // answers HTTP 500, another silently rewrites the top-level `description`).
+    // Both arguments are spelled out in `core/metadata/registry.ts`.
+    expect(META_KINDS).toHaveLength(40);
+    expect(RESOLVABLE_KINDS).toHaveLength(38);
 
     // Ticket state plans are found by scanning for an embedded `product.id` (ship
     // GOTCHA #23) and their flows are graph edges — neither is addressed by a name, so

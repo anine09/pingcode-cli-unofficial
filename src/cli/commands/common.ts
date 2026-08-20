@@ -358,6 +358,22 @@ export function mergeFilters(
   return filter;
 }
 
+/**
+ * One search-filter entry for a date-ish field. `between` when both ends are
+ * given, otherwise the one-sided comparison (one operator per field — ship §4).
+ * Used by work-item / idea / ticket `list` to turn two unix-second boundaries
+ * into a single `SearchPayload.filter` value.
+ */
+export function dateRangeFilter(
+  from: number | undefined,
+  to: number | undefined,
+): Record<string, unknown> | undefined {
+  if (from !== undefined && to !== undefined) return { between: [from, to] };
+  if (from !== undefined) return { gte: from };
+  if (to !== undefined) return { lte: to };
+  return undefined;
+}
+
 /** commander accumulator for a repeatable option. */
 export function collectValue(value: string, previous: string[] = []): string[] {
   return [...previous, value];

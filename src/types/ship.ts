@@ -206,6 +206,50 @@ export type ShipChannel = {
 };
 
 /**
+ * `GET /v1/ship/products/{id}/customers` (ship §H) — `{id, url, product, name, assignee,
+ * scale, description, …}`. A customer is **product-scoped** (ship §5), so `--customer` on
+ * `ticket list` resolves a name against this list. The ticket's `customer` ref is `{id, url, name}`.
+ */
+export type ShipCustomer = {
+  id: string;
+  url?: string | undefined;
+  name?: string | undefined;
+  product?: Ref | undefined;
+  assignee?: Ref | undefined;
+  scale?: number | undefined;
+  description?: string | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * `GET /v1/ship/ticket/solutions?product_id=` (ship §K3) — `{id, url, name}`. The ticket-scoped
+ * solution vocabulary `--solution` resolves against. Not the org-level
+ * `/v1/ship/ticket_solutions` (catalog L361) — that one carries no `?product_id=` and is the
+ * configuration view, a different resource ([S§]M).
+ */
+export type ShipSolution = {
+  id: string;
+  name?: string | undefined;
+  url?: string | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * `GET /v1/ship/ticket/tags?product_id=` (ship §K3) — `{id, url, product, name, color}`. The
+ * ticket-tag vocabulary `--tag` resolves against. The same rows are also reachable as product
+ * tags at `/v1/ship/products/{id}/tags` (catalog L332, scope R:cfg); the ticket-scoped view is
+ * the one the ticket `tags.id` search filter addresses, so it is the resolver's source.
+ */
+export type ShipTag = {
+  id: string;
+  name?: string | undefined;
+  url?: string | undefined;
+  product?: Ref | undefined;
+  color?: string | undefined;
+  [key: string]: unknown;
+};
+
+/**
  * 需求排期 — `GET /v1/ship/products/{product_id}/plans[/{plan_id}]`, the **full**
  * schedule record (ship §3.6).
  *

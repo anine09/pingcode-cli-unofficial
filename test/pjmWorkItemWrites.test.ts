@@ -405,12 +405,15 @@ describe('relation type vocabulary', () => {
     expect(spec.cacheOnly).toBeUndefined();
   });
 
-  it('has no metadata kind for work-item tags, on purpose', () => {
-    // The list ignores the `project_id` it requires while the write enforces it, so a
-    // resolver would return ids the write refuses (400 `100354`) — and tag names are
-    // not unique anyway. Full argument in `core/metadata/registry.ts`.
-    expect(META_KINDS).not.toContain('pjm-work-item-tag');
-    expect(META_KINDS.filter((kind) => kind.includes('tag'))).toEqual([]);
+  it('has a pjm-work-item-tag resolver for list filtering, despite the endpoint quirks', () => {
+    // The tag endpoint ignores `project_id` (returns the whole org list) and tag
+    // names are not unique, so a resolver here is a compromise: it works for
+    // filtering (the resolved id is valid server-side) but may hit ambiguity
+    // errors for common names. The full argument is in `core/metadata/registry.ts`.
+    expect(META_KINDS).toContain('pjm-work-item-tag');
+    const spec = specOf('pjm-work-item-tag');
+    expect(spec.parent).toBe('project');
+    expect(spec.path).toBe(ENDPOINTS.workItemTagVocabulary);
   });
 });
 

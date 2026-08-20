@@ -40,6 +40,10 @@ import {
   resolveWorkItem,
   resolveWorkItemPriority,
   resolveWorkItemType,
+  resolveBoard,
+  resolveEntry,
+  resolveSwimlane,
+  resolveWorkItemTag,
   type ResolveResult,
   type WorkItemLocator,
 } from '../../core/metadata';
@@ -60,6 +64,7 @@ import {
   addStateOptions,
   collectValue,
   contextFor,
+  dateRangeFilter,
   modeOf,
   parseDateBoundaryFlag,
   parseNumberFlag,
@@ -107,6 +112,28 @@ type ListFlags = PagingFlags &
     updatedAfter?: string | undefined;
     updatedBefore?: string | undefined;
     unassigned?: boolean | undefined;
+    // ---- REST + search 共有 ----
+    priority?: string | undefined;
+    board?: string | undefined;
+    entry?: string | undefined;
+    swimlane?: string | undefined;
+    phase?: string | undefined;
+    release?: string | undefined;
+    tag?: string | undefined;
+    createdBy?: string | undefined;
+    participant?: string | undefined;
+    // ---- search-only ----
+    descriptionContains?: string | undefined;
+    startAfter?: string | undefined;
+    startBefore?: string | undefined;
+    endAfter?: string | undefined;
+    endBefore?: string | undefined;
+    completedAfter?: string | undefined;
+    completedBefore?: string | undefined;
+    storyPoints?: string | undefined;
+    // ---- REST-only ----
+    identifier?: string | undefined;
+    bugType?: string | undefined;
   };
 
 type CreateFlags = StateFlags & {
@@ -194,8 +221,27 @@ export function registerWorkItemCommands(parent: Command): void {
           .option('--sprint <name|id>', 'sprint (scrum/hybrid projects only)')
           .option('--parent <ref>', 'only children of this work item: id, short_id, identifier or URL')
           .option('--keywords <text>', 'fuzzy search over title and description')
+          .option('--identifier <text>', 'work-item identifier such as SCR-5 (REST list only)')
+          .option('--priority <name|id>', 'priority')
+          .option('--board <name|id>', 'board')
+          .option('--entry <name|id>', 'board entry (column)')
+          .option('--swimlane <name|id>', 'swimlane')
+          .option('--phase <name|id>', 'phase')
+          .option('--release <name|id>', 'release / version')
+          .option('--tag <name|id>', 'tag')
+          .option('--bug-type <id>', 'bug type id (REST list only, pass-through)')
+          .option('--created-by <name|id>', 'creator: display name, username, email or id')
+          .option('--participant <name|id>', 'participant: display name, username, email or id')
           .option('--unassigned', `${SEARCH_FLAG_MARK}only work items with no assignee`)
           .option('--title-contains <text>', `${SEARCH_FLAG_MARK}substring of the title`)
+          .option('--description-contains <text>', `${SEARCH_FLAG_MARK}substring of the description`)
+          .option('--start-after <date>', `${SEARCH_FLAG_MARK}start on or after this DATE`)
+          .option('--start-before <date>', `${SEARCH_FLAG_MARK}start on or before this DATE`)
+          .option('--end-after <date>', `${SEARCH_FLAG_MARK}end on or after this DATE`)
+          .option('--end-before <date>', `${SEARCH_FLAG_MARK}end on or before this DATE`)
+          .option('--completed-after <date>', `${SEARCH_FLAG_MARK}completed on or after this DATE`)
+          .option('--completed-before <date>', `${SEARCH_FLAG_MARK}completed on or before this DATE`)
+          .option('--story-points <n>', `${SEARCH_FLAG_MARK}story points (exact match)`)
           .option('--created-after <date>', `${SEARCH_FLAG_MARK}created on or after this DATE (00:00 local)`)
           .option('--created-before <date>', `${SEARCH_FLAG_MARK}created on or before this DATE (23:59 local)`)
           .option('--updated-after <date>', `${SEARCH_FLAG_MARK}updated on or after this DATE`)
@@ -214,7 +260,11 @@ export function registerWorkItemCommands(parent: Command): void {
         'the switch is invisible except for which filters are available.\n' +
         'The two endpoints do filter on different things. Search cannot filter by\n' +
         'identifier, short_id or bug type at all; the simple list cannot filter by date,\n' +
-        'title text or "unassigned". Everything else works in both.\n',
+        'title/description text, "unassigned" or story points. Everything else works in both.\n' +
+        'Search-only flags: --title-contains, --description-contains, --unassigned,\n' +
+        '--start-after/before, --end-after/before, --completed-after/before, --story-points,\n' +
+        '--created-after/before, --updated-after/before.\n' +
+        'REST-only flags: --identifier, --bug-type.\n',
     )
     .action(async (flags: ListFlags, command: Command) => {
       await runList(flags, command);
@@ -765,6 +815,28 @@ async function runList(flags: ListFlags, command: Command): Promise<void> {
   const sprint =
     flags.sprint === undefined ? undefined : await resolveSprint(ctx, project.id, flags.sprint);
   const parent = flags.parent === undefined ? undefined : await resolveWorkItem(ctx, flags.parent);
+  const priority =
+    flags.priority === undefined
+      ? undefined
+      : await resolveWorkItemPriority(ctx, project.id, flags.priority);
+  const board =
+    flags.board === undefined ? undefined : await resolveBoard(ctx, project.id, flags.board);
+  const entry =
+    flags.entry === undefined ? undefined : await resolveEntry(ctx, project.id, flags.entry);
+  const swimlane =
+    flags.swimlane === undefined
+      ? undefined
+      : await resolveSwimlane(ctx, project.id, flags.swimlane);
+  const release =
+    flags.release === undefined
+      ? undefined
+      : await resolveProjectVersion(ctx, project.id, flags.release);
+  const tag =
+    flags.tag === undefined ? undefined : await resolveWorkItemTag(ctx, project.id, flags.tag);
+  const createdBy =
+    flags.createdBy === undefined ? undefined : await resolveUser(ctx, flags.createdBy);
+  const participant =
+    flags.participant === undefined ? undefined : await resolveUser(ctx, flags.participant);
 
   if (searchOnlyFlagsOf(flags).length > 0) {
     await runSearch(ctx, flags, paging, {
@@ -774,6 +846,15 @@ async function runList(flags: ListFlags, command: Command): Promise<void> {
       ...(assignee === undefined ? {} : { assigneeId: assignee.id }),
       ...(sprint === undefined ? {} : { sprintId: sprint.id }),
       ...(parent === undefined ? {} : { parentId: parent.id }),
+      ...(priority === undefined ? {} : { priorityId: priority.id }),
+      ...(board === undefined ? {} : { boardId: board.id }),
+      ...(entry === undefined ? {} : { entryId: entry.id }),
+      ...(swimlane === undefined ? {} : { swimlaneId: swimlane.id }),
+      ...(flags.phase === undefined ? {} : { phaseId: flags.phase }),
+      ...(release === undefined ? {} : { versionId: release.id }),
+      ...(tag === undefined ? {} : { tagId: tag.id }),
+      ...(createdBy === undefined ? {} : { createdById: createdBy.id }),
+      ...(participant === undefined ? {} : { participantId: participant.id }),
     });
     return;
   }
@@ -786,6 +867,17 @@ async function runList(flags: ListFlags, command: Command): Promise<void> {
     ...(sprint === undefined ? {} : { sprint_id: sprint.id }),
     ...(parent === undefined ? {} : { parent_id: parent.id }),
     ...(flags.keywords === undefined ? {} : { keywords: flags.keywords }),
+    ...(flags.identifier === undefined ? {} : { identifier: flags.identifier }),
+    ...(priority === undefined ? {} : { priority_id: priority.id }),
+    ...(board === undefined ? {} : { board_id: board.id }),
+    ...(entry === undefined ? {} : { entry_id: entry.id }),
+    ...(swimlane === undefined ? {} : { swimlane_id: swimlane.id }),
+    ...(flags.phase === undefined ? {} : { phase_id: flags.phase }),
+    ...(release === undefined ? {} : { version_id: release.id }),
+    ...(tag === undefined ? {} : { tag_id: tag.id }),
+    ...(flags.bugType === undefined ? {} : { bug_type_id: flags.bugType }),
+    ...(createdBy === undefined ? {} : { created_by: createdBy.id }),
+    ...(participant === undefined ? {} : { participant_id: participant.id }),
   };
 
   if (paging.all) {
@@ -808,6 +900,14 @@ function searchOnlyFlagsOf(flags: ListFlags): string[] {
   const given: string[] = [];
   if (flags.unassigned === true) given.push('--unassigned');
   if (flags.titleContains !== undefined) given.push('--title-contains');
+  if (flags.descriptionContains !== undefined) given.push('--description-contains');
+  if (flags.startAfter !== undefined) given.push('--start-after');
+  if (flags.startBefore !== undefined) given.push('--start-before');
+  if (flags.endAfter !== undefined) given.push('--end-after');
+  if (flags.endBefore !== undefined) given.push('--end-before');
+  if (flags.completedAfter !== undefined) given.push('--completed-after');
+  if (flags.completedBefore !== undefined) given.push('--completed-before');
+  if (flags.storyPoints !== undefined) given.push('--story-points');
   if (flags.createdAfter !== undefined) given.push('--created-after');
   if (flags.createdBefore !== undefined) given.push('--created-before');
   if (flags.updatedAfter !== undefined) given.push('--updated-after');
@@ -846,6 +946,15 @@ async function runSearch(
     assigneeId?: string | undefined;
     sprintId?: string | undefined;
     parentId?: string | undefined;
+    priorityId?: string | undefined;
+    boardId?: string | undefined;
+    entryId?: string | undefined;
+    swimlaneId?: string | undefined;
+    phaseId?: string | undefined;
+    versionId?: string | undefined;
+    tagId?: string | undefined;
+    createdById?: string | undefined;
+    participantId?: string | undefined;
   },
 ): Promise<void> {
 
@@ -869,6 +978,30 @@ async function runSearch(
     flags.updatedBefore === undefined
       ? undefined
       : parseDateBoundaryFlag(flags.updatedBefore, '--updated-before', 'end');
+  const startAfter =
+    flags.startAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.startAfter, '--start-after', 'start');
+  const startBefore =
+    flags.startBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.startBefore, '--start-before', 'end');
+  const endAfter =
+    flags.endAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.endAfter, '--end-after', 'start');
+  const endBefore =
+    flags.endBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.endBefore, '--end-before', 'end');
+  const completedAfter =
+    flags.completedAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.completedAfter, '--completed-after', 'start');
+  const completedBefore =
+    flags.completedBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.completedBefore, '--completed-before', 'end');
 
   const filter: Record<string, unknown> = { 'project.id': { in: [ids.projectId] } };
   // `type`, not `type.id`: the search vocabulary differs from the query string's, and
@@ -877,14 +1010,34 @@ async function runSearch(
   if (ids.stateId !== undefined) filter['state.id'] = { in: [ids.stateId] };
   if (ids.sprintId !== undefined) filter['sprint.id'] = { in: [ids.sprintId] };
   if (ids.parentId !== undefined) filter['parent.id'] = { in: [ids.parentId] };
+  if (ids.priorityId !== undefined) filter['priority.id'] = { in: [ids.priorityId] };
+  if (ids.boardId !== undefined) filter['board.id'] = { in: [ids.boardId] };
+  if (ids.entryId !== undefined) filter['entry.id'] = { in: [ids.entryId] };
+  if (ids.swimlaneId !== undefined) filter['swimlane.id'] = { in: [ids.swimlaneId] };
+  if (ids.phaseId !== undefined) filter['phase.id'] = { in: [ids.phaseId] };
+  if (ids.versionId !== undefined) filter['versions.id'] = { in: [ids.versionId] };
+  if (ids.tagId !== undefined) filter['tags.id'] = { in: [ids.tagId] };
+  if (ids.createdById !== undefined) filter['created_by.id'] = { in: [ids.createdById] };
+  if (ids.participantId !== undefined) filter['participants.id'] = { in: [ids.participantId] };
   if (flags.unassigned === true) filter['assignee.id'] = { exists: false };
   else if (ids.assigneeId !== undefined) filter['assignee.id'] = { in: [ids.assigneeId] };
   if (flags.titleContains !== undefined) filter.title = { contains: flags.titleContains };
+  if (flags.descriptionContains !== undefined) filter.description = { contains: flags.descriptionContains };
+  if (flags.storyPoints !== undefined) {
+    const sp = parseNumberFlag(flags.storyPoints, '--story-points');
+    if (sp !== undefined) filter.story_points = { eq: sp };
+  }
   // One operator per field, so a two-sided window has to be `between`, not two entries.
-  const created = rangeFilter(createdAfter, createdBefore);
+  const created = dateRangeFilter(createdAfter, createdBefore);
   if (created !== undefined) filter.created_at = created;
-  const updated = rangeFilter(updatedAfter, updatedBefore);
+  const updated = dateRangeFilter(updatedAfter, updatedBefore);
   if (updated !== undefined) filter.updated_at = updated;
+  const start = dateRangeFilter(startAfter, startBefore);
+  if (start !== undefined) filter.start_at = start;
+  const end = dateRangeFilter(endAfter, endBefore);
+  if (end !== undefined) filter.end_at = end;
+  const completed = dateRangeFilter(completedAfter, completedBefore);
+  if (completed !== undefined) filter.completed_at = completed;
 
   const payload: SearchPayload = {
     filter,
@@ -907,17 +1060,6 @@ async function runSearch(
     pageSize: paging.pageSize,
   });
   printPage(page, WORK_ITEM_COLUMNS, modeOf(ctx));
-}
-
-/** `between` when both ends are given, otherwise the one-sided comparison. */
-function rangeFilter(
-  from: number | undefined,
-  to: number | undefined,
-): Record<string, unknown> | undefined {
-  if (from !== undefined && to !== undefined) return { between: [from, to] };
-  if (from !== undefined) return { gte: from };
-  if (to !== undefined) return { lte: to };
-  return undefined;
 }
 
 async function runGet(target: string, command: Command): Promise<void> {

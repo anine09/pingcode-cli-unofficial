@@ -13,6 +13,7 @@
 import type {
   Ref,
   ShipChannel,
+  ShipCustomer,
   ShipDateRange,
   ShipIdea,
   ShipIdeaTransitionHistory,
@@ -23,8 +24,10 @@ import type {
   ShipProductMember,
   ShipProperty,
   ShipPropertyOption,
+  ShipSolution,
   ShipState,
   ShipSuite,
+  ShipTag,
   ShipTicket,
   ShipTicketType,
 } from '../../types/api';
@@ -218,6 +221,45 @@ export function parseShipChannel(raw: unknown): ShipChannel {
     id: asString(record.id) ?? '',
     name: asString(record.name),
     description: asString(record.description),
+  };
+}
+
+/** `GET /v1/ship/products/{id}/customers` (ship §H) — `{id, url, product, name, assignee, scale, description, …}`. */
+export function parseShipCustomer(raw: unknown): ShipCustomer {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    url: asString(record.url),
+    name: asString(record.name),
+    product: parseRef(record.product),
+    assignee: parseRef(record.assignee),
+    scale: asNumber(record.scale),
+    description: asString(record.description),
+  };
+}
+
+/** `GET /v1/ship/ticket/solutions?product_id=` (ship §K3) — `{id, url, name}`. */
+export function parseShipSolution(raw: unknown): ShipSolution {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+  };
+}
+
+/** `GET /v1/ship/ticket/tags?product_id=` (ship §K3) — `{id, url, product, name, color}`. */
+export function parseShipTag(raw: unknown): ShipTag {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+    product: parseRef(record.product),
+    color: asString(record.color),
   };
 }
 

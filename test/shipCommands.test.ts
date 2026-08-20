@@ -284,6 +284,93 @@ describe('idea list', () => {
     expect(run.exit).toBe(2);
     expect(run.calls).toHaveLength(0);
   });
+
+  it('resolves participant and folds text + number filters with their operators', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'idea',
+        'list',
+        '--product',
+        'SLC',
+        '--participant',
+        'zhangsan',
+        '--title-contains',
+        'single',
+        '--description-contains',
+        'sso',
+        '--score',
+        '5',
+        '--progress',
+        '0.5',
+        '--json',
+      ],
+      [productsPage, membersPage, ideasPage],
+    );
+    expect(run.exit).toBe(0);
+    const body = run.calls[2]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter).toEqual({
+      'product.id': { in: ['prod-1'] },
+      'participants.id': { in: ['u1'] },
+      title: { contains: 'single' },
+      description: { contains: 'sso' },
+      score: { eq: 5 },
+      progress: { eq: 0.5 },
+    });
+  });
+
+  it('builds a between window for a two-sided date range', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'idea',
+        'list',
+        '--product',
+        'SLC',
+        '--created-after',
+        '2026-01-01',
+        '--created-before',
+        '2026-01-31',
+        '--json',
+      ],
+      [productsPage, ideasPage],
+    );
+    expect(run.exit).toBe(0);
+    const body = run.calls[1]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['product.id']).toEqual({ in: ['prod-1'] });
+    const created = body.payload.filter.created_at as { between: number[] };
+    expect(Array.isArray(created.between)).toBe(true);
+    expect(created.between).toHaveLength(2);
+    // 2026-01-01 00:00:00 local → 2026-01-31 23:59:59 local = 30 days + 86399s.
+    // Timezone-independent: both endpoints shift by the same offset, so only the
+    // elapsed real time (a whole number of days) survives.
+    expect(created.between[1]! - created.between[0]!).toBe(30 * 86400 + 86399);
+    expect(created.between[0]!).toBeLessThan(created.between[1]!);
+  });
+
+  it('uses gte / lte for a one-sided date boundary', async () => {
+    const run = await runCli(
+      ['product', 'idea', 'list', '--product', 'SLC', '--updated-after', '2026-06-01', '--json'],
+      [productsPage, ideasPage],
+    );
+    expect(run.exit).toBe(0);
+    const body = run.calls[1]?.body as { payload: { filter: Record<string, unknown> } };
+    const updated = body.payload.filter.updated_at as { gte: number };
+    expect(Object.keys(updated)).toEqual(['gte']);
+    expect(updated.gte).toEqual(expect.any(Number));
+  });
+
+  it('runs the search under --dry-run too (a read wearing a POST verb)', async () => {
+    const run = await runCli(
+      ['product', 'idea', 'list', '--product', 'SLC', '--score', '5', '--dry-run', '--json'],
+      [productsPage, ideasPage],
+    );
+    expect(run.exit).toBe(0);
+    // the search still executes — dry-run only halts genuine writes
+    expect(new URL(run.calls[1]?.url ?? '').pathname).toBe('/v1/ship/ideas/search');
+    const body = run.calls[1]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter.score).toEqual({ eq: 5 });
+  });
 });
 
 describe('idea create', () => {
@@ -465,6 +552,41 @@ describe('ticket commands', () => {
       is_archived: 0,
     });
 
+  const usersPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 1,
+      values: [{ id: 'u-sub', name: 'wangxiao', display_name: '王晓', username: 'wangxiao' }],
+    });
+
+  const customersPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 1,
+      values: [{ id: 'cust-1', name: 'Acme', assignee: { id: 'u1' }, scale: 3 }],
+    });
+
+  const solutionsPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 1,
+      values: [{ id: 'sol-1', name: '重启服务' }],
+    });
+
+  const tagsPage = () =>
+    jsonResponse({
+      page_index: 0,
+      page_size: 100,
+      total: 1,
+      values: [{ id: 'tag-1', name: 'vip', color: '#f00' }],
+    });
+
+  const searchPage = () =>
+    jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] });
+
   it('list reads through POST …/search with a product+type filter', async () => {
     const run = await runCli(
       ['product', 'ticket', 'list', '--product', 'SLC', '--type', '故障', '--json'],
@@ -503,6 +625,116 @@ describe('ticket commands', () => {
     expect(run.exit).toBe(0);
     expect(run.stdout).toContain('internal');
     expect(run.stdout).toContain('邮件');
+  });
+
+  it('resolves the new reference filters with their documented keys', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'list',
+        '--product',
+        'SLC',
+        '--submitted-by',
+        'wangxiao',
+        '--customer',
+        'Acme',
+        '--solution',
+        '重启服务',
+        '--tag',
+        'vip',
+        '--participant',
+        'zhangsan',
+        '--json',
+      ],
+      [productsPage, usersPage, customersPage, solutionsPage, tagsPage, membersPage, searchPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(new URL(run.calls[6]?.url ?? '').pathname).toBe('/v1/ship/tickets/search');
+    const body = run.calls[6]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter).toEqual({
+      'product.id': { in: ['prod-1'] },
+      'submitted_by.id': { in: ['u-sub'] },
+      'customer.id': { in: ['cust-1'] },
+      'solution.id': { in: ['sol-1'] },
+      'tags.id': { in: ['tag-1'] },
+      'participants.id': { in: ['u1'] },
+    });
+  });
+
+  it('folds text filters with {contains}', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'list',
+        '--product',
+        'SLC',
+        '--title-contains',
+        'login',
+        '--description-contains',
+        'password',
+        '--json',
+      ],
+      [productsPage, searchPage],
+    );
+    expect(run.exit).toBe(0);
+    const body = run.calls[1]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter).toEqual({
+      'product.id': { in: ['prod-1'] },
+      title: { contains: 'login' },
+      description: { contains: 'password' },
+    });
+  });
+
+  it('builds a between window for a two-sided date range', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'list',
+        '--product',
+        'SLC',
+        '--submitted-after',
+        '2026-01-01',
+        '--submitted-before',
+        '2026-01-31',
+        '--json',
+      ],
+      [productsPage, searchPage],
+    );
+    expect(run.exit).toBe(0);
+    const body = run.calls[1]?.body as { payload: { filter: Record<string, unknown> } };
+    const submitted = body.payload.filter.submitted_at as { between: number[] };
+    expect(Array.isArray(submitted.between)).toBe(true);
+    // 2026-01-01 00:00:00 local → 2026-01-31 23:59:59 local = 30 days + 86399s.
+    // Timezone-independent: both endpoints shift by the same offset, so only the
+    // elapsed real time (a whole number of days) survives.
+    expect(submitted.between[1]! - submitted.between[0]!).toBe(30 * 86400 + 86399);
+    expect(submitted.between[0]!).toBeLessThan(submitted.between[1]!);
+  });
+
+  it('uses gte for a one-sided date boundary', async () => {
+    const run = await runCli(
+      ['product', 'ticket', 'list', '--product', 'SLC', '--updated-after', '2026-06-01', '--json'],
+      [productsPage, searchPage],
+    );
+    expect(run.exit).toBe(0);
+    const body = run.calls[1]?.body as { payload: { filter: Record<string, unknown> } };
+    const updated = body.payload.filter.updated_at as { gte: number };
+    expect(Object.keys(updated)).toEqual(['gte']);
+    expect(updated.gte).toEqual(expect.any(Number));
+  });
+
+  it('runs the search under --dry-run too (a read wearing a POST verb)', async () => {
+    const run = await runCli(
+      ['product', 'ticket', 'list', '--product', 'SLC', '--customer', 'Acme', '--dry-run', '--json'],
+      [productsPage, customersPage, searchPage],
+    );
+    expect(run.exit).toBe(0);
+    expect(new URL(run.calls[2]?.url ?? '').pathname).toBe('/v1/ship/tickets/search');
+    const body = run.calls[2]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['customer.id']).toEqual({ in: ['cust-1'] });
   });
 
   it('create requires --type and sends it (PRD D12)', async () => {
@@ -843,6 +1075,9 @@ describe('product meta lookups', () => {
     ['ticket-types', '/v1/ship/ticket/types'],
     ['ticket-channels', '/v1/ship/ticket/channels'],
     ['ticket-properties', '/v1/ship/ticket/properties'],
+    ['ticket-customers', '/v1/ship/products/prod-1/customers'],
+    ['ticket-solutions', '/v1/ship/ticket/solutions'],
+    ['ticket-tags', '/v1/ship/ticket/tags'],
   ];
 
   for (const [name, expectedPath] of cases) {
