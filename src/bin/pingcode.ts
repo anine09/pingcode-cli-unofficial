@@ -1,8 +1,33 @@
 #!/usr/bin/env node
 import { CommanderError, type Command } from 'commander';
-import { printDryRun, printError } from '../cli/output';
+import { printDryRun, printError, errLine, paint } from '../cli/output';
 import { buildProgram, type RawGlobalOptions } from '../cli/program';
 import { DryRunHalt, exitCodeFor } from '../core/errors';
+import { checkForUpdate, ENV_NO_UPDATE_CHECK } from '../core/update-check';
+
+/**
+ * Fire-and-forget version check. Prints a stderr hint if a newer GitHub
+ * Release exists. Never blocks or throws — the check is best-effort.
+ *
+ * Skipped when:
+ * - `--json` is active (stdout purity contract)
+ * - `PINGCODE_NO_UPDATE_CHECK=1` is set
+ */
+function notifyUpdateCheck(jsonMode: boolean): void {
+  if (jsonMode) return;
+  if (process.env[ENV_NO_UPDATE_CHECK] === '1') return;
+  // Fire-and-forget — don't await, don't block CLI startup.
+  void checkForUpdate().then((result) => {
+    if (result.status === 'update-available') {
+      errLine(
+        paint.yellow(
+          `Update available: ${result.current} → ${result.latest}`,
+        ),
+      );
+      errLine(paint.dim('Run: git pull && ./install.sh'));
+    }
+  });
+}
 
 function detectJsonMode(program: Command, argv: string[]): boolean {
   try {
@@ -15,6 +40,8 @@ function detectJsonMode(program: Command, argv: string[]): boolean {
 
 async function main(argv: string[]): Promise<number> {
   const program = buildProgram();
+  const jsonMode = argv.includes('--json');
+  notifyUpdateCheck(jsonMode);
   try {
     await program.parseAsync(argv);
     return 0;
