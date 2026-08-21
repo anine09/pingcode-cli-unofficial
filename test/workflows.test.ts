@@ -171,8 +171,8 @@ describe('workflows', () => {
 });
 
 describe('ci.yml', () => {
-  it('triggers on pushes to main and on every pull request', () => {
-    expect(ci).toMatch(/on:\s*\n\s+push:\s*\n\s+branches: \[main\]\s*\n\s+pull_request:/);
+  it('triggers on pushes to main, develop, feature branches, and on every pull request', () => {
+    expect(ci).toMatch(/on:\s*\n\s+push:\s*\n\s+branches: \[main, develop, 'feature\/\*\*'\]\s*\n\s+pull_request:/);
   });
 
   it('cancels superseded runs per ref', () => {
