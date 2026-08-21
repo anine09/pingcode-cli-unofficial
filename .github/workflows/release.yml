@@ -66,11 +66,13 @@ jobs:
           node dist/bin/pingcode.js --help
 
       # `files` in package.json decides the contents: dist, skills, README.
+      # `--ignore-scripts` suppresses the `prepare` hook (install-hooks) which
+      # would otherwise pollute stdout and break the tarball name capture.
       - name: pack the tarball
         id: pack
         run: |
           set -euo pipefail
-          tarball="$(npm pack --silent)"
+          tarball="$(npm pack --silent --ignore-scripts)"
           echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
           ls -l "${tarball}"
 
