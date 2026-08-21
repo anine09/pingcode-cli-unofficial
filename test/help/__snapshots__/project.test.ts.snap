@@ -520,6 +520,7 @@ Options:
   --priority <name|id>      new priority
   --parent <ref>            new parent work item
   --sprint <name|id>        move into this sprint (scrum/hybrid projects only)
+  --clear-sprint            remove the work item from its current sprint
   --release <name|id>       发布/release to put this item on, repeatable — replaces the whole list
                             (--version is the CLI's own flag)
   --start-at <when>         unix seconds or a date like 2026-01-31
