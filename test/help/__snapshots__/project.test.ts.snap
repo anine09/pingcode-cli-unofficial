@@ -436,7 +436,8 @@ Options:
   --page-size <n>                rows per page, 1-100 (default: "30")
   --all                          walk every page (best effort: the API guarantees no ordering)
   --limit <n>                    stop after this many rows with --all (default: "500")
-  --state <name>                 filter by state, resolved by name (requires --type)
+  --state <name>                 filter by state, resolved by name (resolves across all types if
+                                 --type is omitted)
   --state-id <id>                filter by state, given as an id (no lookup, no --type needed)
   -h, --help                     display help for command
 
