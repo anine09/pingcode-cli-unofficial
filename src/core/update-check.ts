@@ -59,8 +59,8 @@ export type CheckResult =
  * Accepts optional leading `v` and an optional pre-release suffix
  * (ignored for ordering — we only care about major.minor.patch).
  */
-/** Strict semver component: one or more digits, nothing else. */
-const SEMVER_COMPONENT = /^\d+$/;
+/** Strict semver component: `0` or a non-zero digit followed by digits (no leading zeros). */
+const SEMVER_COMPONENT = /^(0|[1-9]\d*)$/;
 
 function parseSemver(raw: string): [number, number, number] | undefined {
   const stripped = raw.replace(/^v/, '').split('-')[0] ?? '';
@@ -111,7 +111,8 @@ async function readCache(): Promise<CheckCache | undefined> {
     const obj = parsed as Record<string, unknown>;
     if (
       typeof obj.checkedAt === 'string' &&
-      typeof obj.latestVersion === 'string'
+      typeof obj.latestVersion === 'string' &&
+      parseSemver(obj.latestVersion) !== undefined
     ) {
       return { checkedAt: obj.checkedAt, latestVersion: obj.latestVersion };
     }
