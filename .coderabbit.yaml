@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit Configuration for pingcode-cli-unofficial
+# TypeScript strict ESM Node.js CLI · tsup build · vitest · GitHub Actions
+
+language: "en-US"
+
+tone_instructions: |
+  Be collaborative and focused on correctness. This is a TypeScript strict-mode
+  ESM Node.js CLI. Prioritize type safety, error handling, and ESM compatibility
+  over style preferences.
+
+reviews:
+  profile: "chill"
+
+  # Don't auto-generate PR summaries — let authors write their own
+  high_level_summary: false
+  high_level_summary_in_walkthrough: true
+
+  # Clean up PR comments
+  collapse_walkthrough: true
+  review_status: false
+  poem: false
+
+  # Auto-review settings
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "DNM"
+    base_branches:
+      - develop
+
+  # Focus reviews on source, exclude build artifacts and dependencies
+  path_filters:
+    # Include source files
+    - "src/**/*.ts"
+    - "scripts/**/*.ts"
+    - "scripts/**/*.mjs"
+    - "tests/**/*.ts"
+    - "**/*.md"
+    - "**/*.yml"
+    - "**/*.yaml"
+    - "**/*.json"
+
+    # Exclude build output, dependencies, and generated files
+    - "!dist/**"
+    - "!node_modules/**"
+    - "!pnpm-lock.yaml"
+    - "!package-lock.json"
+    - "!**/*.d.ts"
+    - "!coverage/**"
+
+  # Path-specific review instructions
+  path_instructions:
+    - path: "src/**/*.ts"
+      instructions: |
+        This is a TypeScript strict-mode ESM Node.js CLI project.
+        Review for:
+        - Type safety: no `any` types, prefer `unknown` with type narrowing
+        - ESM compatibility: use `.js` extensions in relative imports, no CJS patterns
+        - Error handling: typed errors, proper async/await patterns
+        - Node.js >=20 APIs and patterns
+        - CLI UX: clear error messages, proper exit codes
+
+    - path: "tests/**/*.ts"
+      instructions: |
+        Test files using Vitest. Review for:
+        - Proper test structure with describe/it blocks
+        - Edge case coverage (empty input, error paths)
+        - Mock patterns using vi.fn() and vi.spyOn()
+        - No flaky or time-dependent assertions
+        - Type safety in test code (avoid `any` in mocks)
+
+    - path: "scripts/**/*.{ts,mjs}"
+      instructions: |
+        Build and utility scripts. Review for:
+        - Node.js --experimental-strip-types compatibility where used
+        - Proper error handling and exit codes
+        - No hardcoded paths or secrets
+
+    - path: ".github/workflows/**"
+      instructions: |
+        GitHub Actions workflows. Review for:
+        - All actions pinned to specific version tags (not @main)
+        - Secrets accessed via ${{ secrets.* }} — no hardcoded values
+        - Node version consistent with engines field in package.json (>=20)
+        - Steps fail the build on error (continue-on-error: false)
+
+  # Tools — CodeRabbit auto-detects TypeScript and runs these
+  tools:
+    eslint:
+      enabled: true
+    oxc:
+      enabled: true
+    biome:
+      enabled: true
+    gitleaks:
+      enabled: true
+    markdownlint:
+      enabled: true
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    osvScanner:
+      enabled: true

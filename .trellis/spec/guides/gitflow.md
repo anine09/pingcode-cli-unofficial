@@ -38,12 +38,19 @@ git pull origin develop
 git checkout -b feature/<name>
 ```
 
-Work on `feature/<name>`. Commit often. When ready:
+Work on `feature/<name>`. Commit often (feature code + version bump).
+When ready, push and create a PR:
 
 ```bash
-git checkout develop
-git merge --no-ff feature/<name>
-git branch -d feature/<name>
+git push origin feature/<name>
+gh pr create --base develop --title "feat(<scope>): <subject>"
+```
+
+Wait for CI + CodeRabbit review. Address review comments, push fixes.
+When CI is green and CodeRabbit approves, merge the PR:
+
+```bash
+gh pr merge --no-ff --delete-branch
 ```
 
 `--no-ff` is preferred so the feature is visible in history.
@@ -52,28 +59,38 @@ git branch -d feature/<name>
 
 ```bash
 git checkout develop
+git pull origin develop
 git checkout -b release/<ver>
 # bump version, stabilize, typecheck+test+build green
-git checkout main
-git merge --no-ff release/<ver>
+git push origin release/<ver>
+gh pr create --base main --title "chore(release): <ver>"
+# Wait for CI green, then merge
+gh pr merge --no-ff
+git checkout main && git pull origin main
 git tag -a v<ver> -m "release <ver>"
+git push origin v<ver>   # triggers GitHub Release
 git checkout develop
-git merge --no-ff release/<ver>   # bring release fixes back
-git push origin main develop v<ver>
+git merge --no-ff main   # bring release fixes back
+git push origin develop
 ```
 
 ### Urgent production fix
 
 ```bash
 git checkout main
+git pull origin main
 git checkout -b hotfix/<name>
 # fix, bump PATCH, typecheck+test+build green
-git checkout main
-git merge --no-ff hotfix/<name>
+git push origin hotfix/<name>
+gh pr create --base main --title "fix(<scope>): <subject>"
+# Wait for CI green, then merge
+gh pr merge --no-ff
+git checkout main && git pull origin main
 git tag -a v<ver> -m "hotfix <ver>"
+git push origin v<ver>   # triggers GitHub Release
 git checkout develop
 git merge --no-ff hotfix/<name>
-git push origin main develop v<ver>
+git push origin develop
 ```
 
 ## 4. Rules
@@ -92,18 +109,22 @@ When you are asked to implement a feature or fix:
 1. **Check current branch.** If on `main`, STOP — create a `feature/*` branch off `develop` first. Never commit directly to `main`.
 2. **Create `feature/<short-name>` off `develop`.**
 3. **Do your work on that branch.** Commit feature code first, then version bump as a separate commit.
-4. **Push the feature branch.** CI will run automatically.
-5. **If CI passes, merge to `develop`.** Use `--no-ff` so the feature is visible.
-6. **Release (only when user explicitly asks):**
-   a. Merge `develop` → `main` (or via `release/<ver>` branch)
-   b. Tag on `main`: `git tag -a vX.Y.Z -m "release X.Y.Z"`
-   c. Push tag: `git push origin vX.Y.Z` → triggers GitHub Release
-   d. Merge `main` back to `develop`
-   7. **Never push directly to `main`** or create tags without explicit user instruction.
-   8. **Reply to the GitHub issue** before closing it: post a comment explaining what
-      changed and which release version fixed it. Include commit links and the release
-      URL. The comment is the audit trail that connects theissue to the release.
-      Never close an issue silently.
+4. **Push the feature branch and create a PR to `develop`.** Use `gh pr create --base develop`.
+5. **Wait for CI + CodeRabbit.** Both run automatically on the PR. Address CodeRabbit comments by pushing additional commits to the same branch.
+6. **If CI is green and CodeRabbit approves, merge the PR.** Use `gh pr merge --no-ff --delete-branch`.
+7. **Release (only when user explicitly asks):**
+   a. Create a `release/<ver>` branch from `develop`
+   b. Bump version, verify checklist
+   c. Push and create a PR to `main`
+   d. Wait for CI green, merge
+   e. Tag on `main`: `git tag -a vX.Y.Z -m "release X.Y.Z"`
+   f. Push tag: `git push origin vX.Y.Z` → triggers GitHub Release
+   g. Merge `main` back to `develop`
+8. **Never push directly to `main`** or create tags without explicit user instruction.
+9. **Reply to the GitHub issue** before closing it: post a comment explaining what
+   changed and which release version fixed it. Include commit links and the release
+   URL. The comment is the audit trail that connects the issue to the release.
+   Never close an issue silently.
 
 **Version bump is mandatory** for every feature/fix commit batch:
 - New command/flag → MINOR bump
