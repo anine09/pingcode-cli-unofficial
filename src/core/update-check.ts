@@ -59,16 +59,19 @@ export type CheckResult =
  * Accepts optional leading `v` and an optional pre-release suffix
  * (ignored for ordering — we only care about major.minor.patch).
  */
+/** Strict semver component: one or more digits, nothing else. */
+const SEMVER_COMPONENT = /^\d+$/;
+
 function parseSemver(raw: string): [number, number, number] | undefined {
   const stripped = raw.replace(/^v/, '').split('-')[0] ?? '';
   const parts = stripped.split('.');
   if (parts.length !== 3) return undefined;
+  if (!SEMVER_COMPONENT.test(parts[0]!) || !SEMVER_COMPONENT.test(parts[1]!) || !SEMVER_COMPONENT.test(parts[2]!)) {
+    return undefined;
+  }
   const major = Number(parts[0]);
   const minor = Number(parts[1]);
   const patch = Number(parts[2]);
-  if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) {
-    return undefined;
-  }
   return [major, minor, patch];
 }
 
@@ -97,12 +100,20 @@ function cacheFilePath(): string {
 async function readCache(): Promise<CheckCache | undefined> {
   try {
     const raw = await readFile(cacheFilePath(), 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(raw);
     if (
-      typeof parsed.checkedAt === 'string' &&
-      typeof parsed.latestVersion === 'string'
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
     ) {
-      return { checkedAt: parsed.checkedAt, latestVersion: parsed.latestVersion };
+      return undefined;
+    }
+    const obj = parsed as Record<string, unknown>;
+    if (
+      typeof obj.checkedAt === 'string' &&
+      typeof obj.latestVersion === 'string'
+    ) {
+      return { checkedAt: obj.checkedAt, latestVersion: obj.latestVersion };
     }
   } catch {
     // No cache or corrupt — ignore.
@@ -123,8 +134,10 @@ async function writeCache(version: string): Promise<void> {
 }
 
 function isCacheFresh(cache: CheckCache): boolean {
-  const age = Date.now() - new Date(cache.checkedAt).getTime();
-  return age < CACHE_TTL_MS;
+  const checkedAt = Date.parse(cache.checkedAt);
+  if (!Number.isFinite(checkedAt)) return false;
+  const age = Date.now() - checkedAt;
+  return age >= 0 && age < CACHE_TTL_MS;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,11 +155,16 @@ async function fetchLatestVersion(): Promise<string | undefined> {
       signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
     });
     if (!response.ok) return undefined;
-    const body = (await response.json()) as { tag_name?: unknown };
-    const tag = body.tag_name;
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return undefined;
+    }
+    const tag = (body as Record<string, unknown>).tag_name;
     if (typeof tag !== 'string') return undefined;
     // Strip leading 'v' (tags are like "v1.4.1")
-    return tag.replace(/^v/, '');
+    const normalized = tag.replace(/^v/, '');
+    // Reject malformed tags (e.g. "latest") — never cache them.
+    return parseSemver(normalized) === undefined ? undefined : normalized;
   } catch {
     return undefined;
   }
