@@ -406,6 +406,47 @@ export type VersionStage = {
 };
 
 /**
+ * 看板 — `/v1/pjm/projects/{project_id}/boards`.
+ *
+ * Read-only: GET only, no create/update/delete endpoints exist (catalog
+ * `pjm.projects.boards.list`). Board names are unique per project. The
+ * `project` ref is the project segment echoed back.
+ */
+export type Board = {
+  id: string;
+  name?: string | undefined;
+  url?: string | undefined;
+  project?: Ref | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * 看板栏 (board entries / columns) — `/v1/pjm/projects/{project_id}/boards/{board_id}/entries`.
+ *
+ * Board-scoped: both ids ride in the path. Read-only, like `Board`.
+ */
+export type BoardEntry = {
+  id: string;
+  name?: string | undefined;
+  url?: string | undefined;
+  board?: Ref | undefined;
+  [key: string]: unknown;
+};
+
+/**
+ * 泳道 (swimlanes) — `/v1/pjm/projects/{project_id}/boards/{board_id}/swimlanes`.
+ *
+ * Same shape as `BoardEntry`: board-scoped, read-only.
+ */
+export type Swimlane = {
+  id: string;
+  name?: string | undefined;
+  url?: string | undefined;
+  board?: Ref | undefined;
+  [key: string]: unknown;
+};
+
+/**
  * One entry of a `POST …/bulk` response, for both 迭代 and 发布.
  *
  * The two bulk endpoints answer with a **bare top-level array** rather than the

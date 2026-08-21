@@ -60,6 +60,9 @@ describe('project command surface', () => {
       'project version update',
       'project version delete',
       'project version bulk-create',
+      'project board list',
+      'project board entries',
+      'project board swimlanes',
       'project member list',
       'project member get',
       'project member add',
@@ -77,6 +80,7 @@ describe('project command surface', () => {
       'project work-item',
       'project sprint',
       'project version',
+      'project board',
       'project member',
       'project meta',
     ]);

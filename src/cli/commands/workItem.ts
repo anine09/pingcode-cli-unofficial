@@ -145,6 +145,10 @@ type CreateFlags = StateFlags & {
   priority?: string | undefined;
   parent?: string | undefined;
   sprint?: string | undefined;
+  /** Board / entry / swimlane — resolved by name against the project's boards. */
+  board?: string | undefined;
+  entry?: string | undefined;
+  swimlane?: string | undefined;
   startAt?: string | undefined;
   endAt?: string | undefined;
 };
@@ -158,6 +162,10 @@ type UpdateFlags = StateFlags & {
   priority?: string | undefined;
   parent?: string | undefined;
   sprint?: string | undefined;
+  /** Board / entry / swimlane — resolved by name against the project's boards. */
+  board?: string | undefined;
+  entry?: string | undefined;
+  swimlane?: string | undefined;
   /**
    * Repeatable, and the collected list **replaces** `version_ids` wholesale. Named
    * `--release`, not `--version`, for a hard reason — see the note on the option.
@@ -294,7 +302,10 @@ export function registerWorkItemCommands(parent: Command): void {
         .option('--parent <ref>', 'parent work item: id, short_id, identifier or URL')
         .option('--sprint <name|id>', 'sprint (scrum/hybrid projects only)')
         .option('--start-at <when>', 'unix seconds or a date like 2026-01-31')
-        .option('--end-at <when>', 'unix seconds or a date like 2026-01-31'),
+        .option('--end-at <when>', 'unix seconds or a date like 2026-01-31')
+        .option('--board <name|id>', '看板 board — list with `project board list`')
+        .option('--entry <name|id>', '看板栏 board entry — list with `project board entries list`')
+        .option('--swimlane <name|id>', '泳道 swimlane — list with `project board swimlanes list`'),
       'initial state',
       'requires --type, which create already requires',
     ),
@@ -331,7 +342,10 @@ export function registerWorkItemCommands(parent: Command): void {
         .option('--end-at <when>', 'unix seconds or a date like 2026-01-31')
         .option('--story-points <n>', 'story points')
         .option('--estimated-workload <n>', 'estimated workload in hours')
-        .option('--remaining-workload <n>', 'remaining workload in hours'),
+        .option('--remaining-workload <n>', 'remaining workload in hours')
+        .option('--board <name|id>', '看板 board — list with `project board list`')
+        .option('--entry <name|id>', '看板栏 board entry — list with `project board entries list`')
+        .option('--swimlane <name|id>', '泳道 swimlane — list with `project board swimlanes list`'),
       'new state',
     ),
     { hidden: true },
@@ -1123,6 +1137,17 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
         : await resolveSprint(attemptCtx, project.id, flags.sprint);
     const parent =
       flags.parent === undefined ? undefined : await resolveWorkItem(attemptCtx, flags.parent);
+    // Board/entry/swimlane: project-scoped, resolved by name against the
+    // project's boards. Entry and swimlane use the boardChildren loader so
+    // they work without an explicit --board.
+    const board =
+      flags.board === undefined ? undefined : await resolveBoard(attemptCtx, project.id, flags.board);
+    const entry =
+      flags.entry === undefined ? undefined : await resolveEntry(attemptCtx, project.id, flags.entry);
+    const swimlane =
+      flags.swimlane === undefined
+        ? undefined
+        : await resolveSwimlane(attemptCtx, project.id, flags.swimlane);
 
     const input: CreateWorkItemInput = {
       project_id: project.id,
@@ -1134,12 +1159,15 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
       ...(assignee === undefined ? {} : { assignee_id: assignee.id }),
       ...(sprint === undefined ? {} : { sprint_id: sprint.id }),
       ...(parent === undefined ? {} : { parent_id: parent.id }),
+      ...(board === undefined ? {} : { board_id: board.id }),
+      ...(entry === undefined ? {} : { entry_id: entry.id }),
+      ...(swimlane === undefined ? {} : { swimlane_id: swimlane.id }),
       ...(startAt === undefined ? {} : { start_at: startAt }),
       ...(endAt === undefined ? {} : { end_at: endAt }),
     };
 
     return {
-      resolutions: present([project, type, state, priority, assignee, sprint]),
+      resolutions: present([project, type, state, priority, assignee, sprint, board, entry, swimlane]),
       value: input,
     };
   };
@@ -1182,12 +1210,15 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
     flags.priority !== undefined ||
     flags.parent !== undefined ||
     flags.sprint !== undefined ||
+    flags.board !== undefined ||
+    flags.entry !== undefined ||
+    flags.swimlane !== undefined ||
     (flags.release !== undefined && flags.release.length > 0);
 
   // An empty PATCH is a usage error (exit 2), never a no-op round-trip (design §7.2).
   if (Object.keys(scalarPatch).length === 0 && !wantsReference) {
     throw new UsageError('nothing to update: no updatable field was given', {
-      hint: 'pass at least one of --title / --description / --state / --state-id / --assignee / --priority / --parent / --sprint / --release / --start-at / --end-at / --story-points / --estimated-workload / --remaining-workload',
+      hint: 'pass at least one of --title / --description / --state / --state-id / --assignee / --priority / --parent / --sprint / --board / --entry / --swimlane / --release / --start-at / --end-at / --story-points / --estimated-workload / --remaining-workload',
     });
   }
 
@@ -1264,6 +1295,22 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
         releases.push(await resolveProjectVersion(attemptCtx, projectId, input));
       }
     }
+    // Board/entry/swimlane: all project-scoped, resolved by name against the
+    // project's boards. Entry and swimlane resolution uses the boardChildren
+    // loader (lists all boards, then their children) so --entry/--swimlane
+    // work without an explicit --board.
+    const board =
+      flags.board === undefined || projectId === undefined
+        ? undefined
+        : await resolveBoard(attemptCtx, projectId, flags.board);
+    const entry =
+      flags.entry === undefined || projectId === undefined
+        ? undefined
+        : await resolveEntry(attemptCtx, projectId, flags.entry);
+    const swimlane =
+      flags.swimlane === undefined || projectId === undefined
+        ? undefined
+        : await resolveSwimlane(attemptCtx, projectId, flags.swimlane);
 
     const patch: UpdateWorkItemInput = {
       ...scalarPatch,
@@ -1272,11 +1319,14 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
       ...(assignee === undefined ? {} : { assignee_id: assignee.id }),
       ...(parent === undefined ? {} : { parent_id: parent.id }),
       ...(sprint === undefined ? {} : { sprint_id: sprint.id }),
+      ...(board === undefined ? {} : { board_id: board.id }),
+      ...(entry === undefined ? {} : { entry_id: entry.id }),
+      ...(swimlane === undefined ? {} : { swimlane_id: swimlane.id }),
       ...(releases.length === 0 ? {} : { version_ids: releases.map((release) => release.id) }),
     };
 
     return {
-      resolutions: present([type, state, priority, assignee, sprint, ...releases]),
+      resolutions: present([type, state, priority, assignee, sprint, board, entry, swimlane, ...releases]),
       value: patch,
     };
   };

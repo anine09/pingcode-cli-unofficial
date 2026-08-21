@@ -19,6 +19,9 @@ Commands:
                                 pcp:write:pjm:sprint)
   version                       发布 releases of a project (scopes pcp:read:pjm:release /
                                 pcp:write:pjm:release)
+  board                         看板 boards: list boards, entries and swimlanes (scopes
+                                pcp:read:pjm:board / pcp:read:pjm:boardentry /
+                                pcp:read:pjm:boardswimlane)
   member                        项目成员 members of a project (scopes pcp:read:pjm:project /
                                 pcp:write:pjm:project)
   meta                          ids you need before writing: every pjm lookup is scoped to one
@@ -523,6 +526,9 @@ Options:
   --story-points <n>        story points
   --estimated-workload <n>  estimated workload in hours
   --remaining-workload <n>  remaining workload in hours
+  --board <name|id>         看板 board — list with \`project board list\`
+  --entry <name|id>         看板栏 board entry — list with \`project board entries list\`
+  --swimlane <name|id>      泳道 swimlane — list with \`project board swimlanes list\`
   --state <name>            new state, resolved by name (requires --type)
   --state-id <id>           new state, given as an id (no lookup, no --type needed)
   -h, --help                display help for command
