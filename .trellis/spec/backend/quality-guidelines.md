@@ -147,3 +147,4 @@ Unit tests prove our logic; they cannot prove the API's. So:
 - [ ] No new runtime dependency, or a reason stated.
 - [ ] A new or edited workflow was actually triggered on GitHub once, not merely pushed.
 - [ ] API-behaviour claims trace back to `research/`, not to guesswork.
+- [ ] **Version bumped** if this change adds/changes user-visible capability — new command or flag is MINOR, bug fix is PATCH, breaking change is MAJOR. `package.json` and `src/version.ts` must agree.

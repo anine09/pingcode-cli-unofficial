@@ -69,6 +69,7 @@ These guides help you **ask the right questions before coding**.
 - [ ] Message is `type(scope): subject` per Conventional Commits
 - [ ] One logical change, and the tree is green (`npm run typecheck && npm test`)
 - [ ] No secrets or tenant-identifiable values in the diff **or** the message
+- [ ] **Version bumped** if this commit adds/changes user-visible capability — see [Versioning](./versioning.md) and [Commit Conventions](./commit-conventions.md)
 
 → Read [Commit Conventions](./commit-conventions.md)
 
