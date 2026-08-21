@@ -374,10 +374,11 @@ export function registerWorkItemCommands(parent: Command): void {
         '    releases you pass become the complete list. Pass every release the item\n' +
         '    should end up on, in one invocation — `work-item get` prints the current\n' +
         '    ones. Omitting --release leaves the list alone.\n' +
-        'NEITHER field can be EMPTIED, here or anywhere: `version_ids: []` is refused\n' +
+        'NEITHER field can be EMPTIED by omitting it: `version_ids: []` is refused\n' +
         '(400 100006 "数组不能为空"), `null` answers 200 and changes nothing, and sprint_id\n' +
         'behaves the same (live 2026-08-05). You can move an item to a DIFFERENT sprint or\n' +
         'release; you cannot take it off all of them.\n' +
+        'Use --clear-sprint to remove the work item from its sprint (sends sprint_id: "").\n' +
         'The flag is --release and NOT --version because `--version` belongs to the CLI\n' +
         'itself: it would print 0.1.0 and exit 0 without sending anything. This is the\n' +
         'same 发布/release these ids come from — `project version list` prints them.\n' +
@@ -1278,13 +1279,14 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   const wantsState =
     (flags.state !== undefined && flags.state.trim() !== '') ||
     (flags.stateId !== undefined && flags.stateId.trim() !== '');
+  // `--clear-sprint` sends sprint_id: '' without needing project resolution,
+  // so it is NOT included in wantsReference.
   const wantsReference =
     wantsState ||
     flags.assignee !== undefined ||
     flags.priority !== undefined ||
     flags.parent !== undefined ||
     flags.sprint !== undefined ||
-    flags.clearSprint === true ||
     flags.board !== undefined ||
     flags.entry !== undefined ||
     flags.swimlane !== undefined ||
@@ -1318,7 +1320,10 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   }
 
   // An empty PATCH is a usage error (exit 2), never a no-op round-trip (design §7.2).
-  if (Object.keys(scalarPatch).length === 0 && !wantsReference) {
+  // --clear-sprint doesn't go through wantsReference (no project needed), so it's
+  // checked separately here.
+  const hasClearSprint = flags.clearSprint === true;
+  if (Object.keys(scalarPatch).length === 0 && !wantsReference && !hasClearSprint) {
     throw new UsageError('nothing to update: no updatable field was given', {
       hint: 'pass at least one of --title / --description / --state / --state-id / --assignee / --priority / --parent / --sprint / --clear-sprint / --board / --entry / --swimlane / --release / --start-at / --end-at / --story-points / --estimated-workload / --remaining-workload',
     });
