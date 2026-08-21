@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { listWorkItemStates } from '../../api/meta';
+import { listWorkItemStates, listWorkItemTypes } from '../../api/meta';
 import {
   addWorkItemTag,
   bulkUpdateWorkItems,
@@ -263,7 +263,7 @@ export function registerWorkItemCommands(parent: Command): void {
           .option('--updated-before <date>', `${SEARCH_FLAG_MARK}updated on or before this DATE`),
       ),
       'filter by state',
-      'requires --type',
+      'resolves across all types if --type is omitted',
     ),
     { hidden: true },
   )
@@ -822,6 +822,43 @@ function registerHistoryCommands(parent: Command): void {
 // list / get
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve a state name across ALL types in a project (for `list --state <name>`
+ * without `--type`). Queries every type's states and returns every match.
+ *
+ * Returns `{ id, name, typeName }[]` — the state id, its display name, and the
+ * type it belongs to. A single match means the state name is unambiguous; multiple
+ * matches means the same name exists in several types (the CLI keeps all of them).
+ */
+async function resolveStateAcrossTypes(
+  ctx: Ctx,
+  projectId: string,
+  stateName: string,
+): Promise<{ id: string; name: string; typeName: string }[]> {
+  const types = await listWorkItemTypes(ctx, projectId);
+  const matches: { id: string; name: string; typeName: string }[] = [];
+  const needle = stateName.toLowerCase();
+
+  for (const type of types) {
+    const states = await listWorkItemStates(ctx, projectId, type.id);
+    for (const st of states) {
+      const name = st.name ?? '';
+      if (name === stateName || name.toLowerCase() === needle) {
+        matches.push({ id: st.id, name, typeName: type.name ?? type.id });
+      }
+    }
+  }
+
+  if (matches.length === 0) {
+    const allTypes = types.map((t) => t.name ?? t.id).join(', ');
+    throw new UsageError(`no state named "${stateName}" in any work-item type`, {
+      hint: `available types: ${allTypes}. List states with \`pingcode project meta states --project <p> --type <t>\``,
+    });
+  }
+
+  return matches;
+}
+
 async function runList(flags: ListFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
   const paging = readPaging(flags);
@@ -829,10 +866,29 @@ async function runList(flags: ListFlags, command: Command): Promise<void> {
   const project = await resolveProject(ctx, flags.project);
   const type =
     flags.type === undefined ? undefined : await resolveWorkItemType(ctx, project.id, flags.type);
-  const state = await resolveStateFlags(ctx, flags, {
-    projectId: project.id,
-    ...(type === undefined ? {} : { typeId: type.id }),
-  });
+
+  // Resolve state: --state-id is always a pass-through (no type needed).
+  // --state <name> with --type uses the scoped resolver.
+  // --state <name> without --type resolves across ALL types in the project.
+  const hasStateName = flags.state !== undefined && flags.state.trim() !== '';
+  const hasStateId = flags.stateId !== undefined && flags.stateId.trim() !== '';
+  let stateIds: string[] | undefined;
+
+  if (hasStateName && type !== undefined) {
+    const state = await resolveStateFlags(ctx, flags, {
+      projectId: project.id,
+      typeId: type.id,
+    });
+    if (state !== undefined) stateIds = [state.id];
+  } else if (hasStateName && type === undefined) {
+    // No --type: resolve the state name across every type in the project.
+    const resolved = await resolveStateAcrossTypes(ctx, project.id, flags.state!.trim());
+    stateIds = resolved.map((r) => r.id);
+  } else if (hasStateId) {
+    const state = await resolveStateFlags(ctx, flags, { projectId: project.id });
+    if (state !== undefined) stateIds = [state.id];
+  }
+
   const assignee = flags.assignee === undefined ? undefined : await resolveUser(ctx, flags.assignee);
   const sprint =
     flags.sprint === undefined ? undefined : await resolveSprint(ctx, project.id, flags.sprint);
@@ -860,11 +916,15 @@ async function runList(flags: ListFlags, command: Command): Promise<void> {
   const participant =
     flags.participant === undefined ? undefined : await resolveUser(ctx, flags.participant);
 
-  if (searchOnlyFlagsOf(flags).length > 0) {
+  // Multiple state IDs require the search endpoint (REST list takes one state_id).
+  const forceSearchForMultiState =
+    stateIds !== undefined && stateIds.length > 1;
+
+  if (searchOnlyFlagsOf(flags).length > 0 || forceSearchForMultiState) {
     await runSearch(ctx, flags, paging, {
       projectId: project.id,
       ...(type === undefined ? {} : { typeId: type.id }),
-      ...(state === undefined ? {} : { stateId: state.id }),
+      ...(stateIds === undefined || stateIds.length === 0 ? {} : { stateIds }),
       ...(assignee === undefined ? {} : { assigneeId: assignee.id }),
       ...(sprint === undefined ? {} : { sprintId: sprint.id }),
       ...(parent === undefined ? {} : { parentId: parent.id }),
@@ -884,7 +944,7 @@ async function runList(flags: ListFlags, command: Command): Promise<void> {
   const query: WorkItemListQuery = {
     project_id: project.id,
     ...(type === undefined ? {} : { type_id: type.id }),
-    ...(state === undefined ? {} : { state_id: state.id }),
+    ...(stateIds === undefined || stateIds.length === 0 ? {} : { state_id: stateIds[0] }),
     ...(assignee === undefined ? {} : { assignee_id: assignee.id }),
     ...(sprint === undefined ? {} : { sprint_id: sprint.id }),
     ...(parent === undefined ? {} : { parent_id: parent.id }),
@@ -964,7 +1024,7 @@ async function runSearch(
   ids: {
     projectId: string;
     typeId?: string | undefined;
-    stateId?: string | undefined;
+    stateIds?: string[] | undefined;
     assigneeId?: string | undefined;
     sprintId?: string | undefined;
     parentId?: string | undefined;
@@ -1029,7 +1089,7 @@ async function runSearch(
   // `type`, not `type.id`: the search vocabulary differs from the query string's, and
   // `type.id` / `type_id` are both refused with 400 `100043` (see `core/endpoints.ts`).
   if (ids.typeId !== undefined) filter.type = { in: [ids.typeId] };
-  if (ids.stateId !== undefined) filter['state.id'] = { in: [ids.stateId] };
+  if (ids.stateIds !== undefined && ids.stateIds.length > 0) filter['state.id'] = { in: ids.stateIds };
   if (ids.sprintId !== undefined) filter['sprint.id'] = { in: [ids.sprintId] };
   if (ids.parentId !== undefined) filter['parent.id'] = { in: [ids.parentId] };
   if (ids.priorityId !== undefined) filter['priority.id'] = { in: [ids.priorityId] };
