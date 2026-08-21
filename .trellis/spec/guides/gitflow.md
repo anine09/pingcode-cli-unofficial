@@ -132,7 +132,7 @@ When you are asked to implement a feature or fix:
    e. Tag on `main`: `git tag -a vX.Y.Z -m "release X.Y.Z"`
    f. Push tag: `git push origin vX.Y.Z` → triggers GitHub Release
    g. Back-merge `main` to `develop` via PR (see release workflow above)
- 8. **Never push directly to `main`** or create tags without explicit user instruction.
+8. **Never push directly to `main`** or create tags without explicit user instruction.
 9. **Reply to the GitHub issue** before closing it: post a comment explaining what
    changed and which release version fixed it. Include commit links and the release
    URL. The comment is the audit trail that connects the issue to the release.

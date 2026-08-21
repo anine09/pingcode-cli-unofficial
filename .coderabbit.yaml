@@ -32,6 +32,7 @@ reviews:
       - "DNM"
     base_branches:
       - develop
+      - main
 
   # Focus reviews on source, exclude build artifacts and dependencies
   path_filters:
