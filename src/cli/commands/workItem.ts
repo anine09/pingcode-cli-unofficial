@@ -102,7 +102,8 @@ type ListFlags = PagingFlags &
     project: string;
     type?: string | undefined;
     assignee?: string | undefined;
-    sprint?: string | undefined;
+  sprint?: string | undefined;
+   
     parent?: string | undefined;
     keywords?: string | undefined;
     /** The five below switch the transport to `POST …/search` — see `runList`. */
@@ -163,6 +164,8 @@ type UpdateFlags = StateFlags & {
   priority?: string | undefined;
   parent?: string | undefined;
   sprint?: string | undefined;
+  /** Remove the work item from its current sprint. */
+  clearSprint?: boolean | undefined;
   /** Board / entry / swimlane — resolved by name against the project's boards. */
   board?: string | undefined;
   entry?: string | undefined;
@@ -335,6 +338,7 @@ export function registerWorkItemCommands(parent: Command): void {
         .option('--priority <name|id>', 'new priority')
         .option('--parent <ref>', 'new parent work item')
         .option('--sprint <name|id>', 'move into this sprint (scrum/hybrid projects only)')
+        .option('--clear-sprint', 'remove the work item from its current sprint')
         // NOT `--version`: the root program owns that flag, and commander's root parses
         // options across the whole argv, so `work-item update X --version 1.4.0` prints
         // the CLI version and exits 0 without sending anything (verified 2026-08-05 on
@@ -370,10 +374,11 @@ export function registerWorkItemCommands(parent: Command): void {
         '    releases you pass become the complete list. Pass every release the item\n' +
         '    should end up on, in one invocation — `work-item get` prints the current\n' +
         '    ones. Omitting --release leaves the list alone.\n' +
-        'NEITHER field can be EMPTIED, here or anywhere: `version_ids: []` is refused\n' +
+        'NEITHER field can be EMPTIED by omitting it: `version_ids: []` is refused\n' +
         '(400 100006 "数组不能为空"), `null` answers 200 and changes nothing, and sprint_id\n' +
         'behaves the same (live 2026-08-05). You can move an item to a DIFFERENT sprint or\n' +
         'release; you cannot take it off all of them.\n' +
+        'Use --clear-sprint to remove the work item from its sprint (sends sprint_id: "").\n' +
         'The flag is --release and NOT --version because `--version` belongs to the CLI\n' +
         'itself: it would print 0.1.0 and exit 0 without sending anything. This is the\n' +
         'same 发布/release these ids come from — `project version list` prints them.\n' +
@@ -1274,6 +1279,8 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   const wantsState =
     (flags.state !== undefined && flags.state.trim() !== '') ||
     (flags.stateId !== undefined && flags.stateId.trim() !== '');
+  // `--clear-sprint` sends sprint_id: '' without needing project resolution,
+  // so it is NOT included in wantsReference.
   const wantsReference =
     wantsState ||
     flags.assignee !== undefined ||
@@ -1285,16 +1292,25 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
     flags.swimlane !== undefined ||
     (flags.release !== undefined && flags.release.length > 0);
 
+  // --sprint and --clear-sprint are mutually exclusive.
+  if (flags.sprint !== undefined && flags.clearSprint === true) {
+    throw new UsageError('--sprint and --clear-sprint are mutually exclusive', {
+      hint: 'use --sprint <name> to move into a sprint, or --clear-sprint to remove the sprint',
+    });
+  }
+
   // `--type` alone is a common mistake: the user thinks it changes the work
   // item type, but the API has no `type_id` in the PATCH body (catalog
   // `pjm.work_items.update` lists every accepted field and `type_id` is not
   // among them). Catch it before the generic "nothing to update" so the error
   // explains *why* and points at the Web UI.
   const hasType = flags.type !== undefined && flags.type.trim() !== '';
+  const hasClearSprint = flags.clearSprint === true;
   const hasOtherField =
     Object.keys(scalarPatch).length > 0 ||
     wantsReference ||
-    wantsState;
+    wantsState ||
+    hasClearSprint;
   if (hasType && !hasOtherField) {
     throw new UsageError('--type does not modify the work item type', {
       hint:
@@ -1306,9 +1322,9 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   }
 
   // An empty PATCH is a usage error (exit 2), never a no-op round-trip (design §7.2).
-  if (Object.keys(scalarPatch).length === 0 && !wantsReference) {
+  if (Object.keys(scalarPatch).length === 0 && !wantsReference && !hasClearSprint) {
     throw new UsageError('nothing to update: no updatable field was given', {
-      hint: 'pass at least one of --title / --description / --state / --state-id / --assignee / --priority / --parent / --sprint / --board / --entry / --swimlane / --release / --start-at / --end-at / --story-points / --estimated-workload / --remaining-workload',
+      hint: 'pass at least one of --title / --description / --state / --state-id / --assignee / --priority / --parent / --sprint / --clear-sprint / --board / --entry / --swimlane / --release / --start-at / --end-at / --story-points / --estimated-workload / --remaining-workload',
     });
   }
 
@@ -1408,7 +1424,7 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
       ...(priority === undefined ? {} : { priority_id: priority.id }),
       ...(assignee === undefined ? {} : { assignee_id: assignee.id }),
       ...(parent === undefined ? {} : { parent_id: parent.id }),
-      ...(sprint === undefined ? {} : { sprint_id: sprint.id }),
+      ...(flags.clearSprint === true ? { sprint_id: '' } : sprint === undefined ? {} : { sprint_id: sprint.id }),
       ...(board === undefined ? {} : { board_id: board.id }),
       ...(entry === undefined ? {} : { entry_id: entry.id }),
       ...(swimlane === undefined ? {} : { swimlane_id: swimlane.id }),
