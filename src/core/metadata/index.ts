@@ -66,6 +66,23 @@ export const resolveProject: RootResolver = root('project');
 export const resolveWorkItemType: ScopedResolver = scoped('work_item_type');
 export const resolveWorkItemPriority: ScopedResolver = scoped('work_item_priority');
 export const resolveSprint: ScopedResolver = scoped('sprint');
+/** 看板 — `GET /v1/pjm/projects/{project_id}/boards`. */
+export const resolveBoard: ScopedResolver = scoped('pjm-board');
+/**
+ * 看板栏 (board entries / columns). Project-scoped; the loader lists every
+ * board of the project, then the entries of each.
+ */
+export const resolveEntry: ScopedResolver = scoped('pjm-board-entry');
+/**
+ * 泳道 (swimlanes). Same two-level shape as entries.
+ */
+export const resolveSwimlane: ScopedResolver = scoped('pjm-board-swimlane');
+/**
+ * 工作项标签 — `GET /v1/pjm/work_item/tags?project_id=`. The endpoint ignores
+ * `project_id` (returns the whole org list) and names repeat, so a name may be
+ * ambiguous; pass the id in that case.
+ */
+export const resolveWorkItemTag: ScopedResolver = scoped('pjm-work-item-tag');
 /** 发布 — the project-scoped release plan, not a wiki revision or a config scheme. */
 export const resolveProjectVersion: ScopedResolver = scoped('pjm-version');
 /**
@@ -89,6 +106,12 @@ export const resolveTicketPriority: ScopedResolver = scoped('ship-ticket-priorit
 export const resolveTicketType: ScopedResolver = scoped('ship-ticket-type');
 export const resolveTicketChannel: ScopedResolver = scoped('ship-ticket-channel');
 export const resolveTicketProperty: ScopedResolver = scoped('ship-ticket-property');
+/** Customer (客户) — product-scoped via the path; `--customer` on `ticket list` (ship §H). */
+export const resolveTicketCustomer: ScopedResolver = scoped('ship-ticket-customer');
+/** Solution — the ticket-scoped vocabulary; `--solution` on `ticket list` (ship §K3). */
+export const resolveTicketSolution: ScopedResolver = scoped('ship-ticket-solution');
+/** Ticket tag — the ticket-tag vocabulary; `--tag` on `ticket list` (ship §K3). */
+export const resolveTicketTag: ScopedResolver = scoped('ship-ticket-tag');
 
 // testhub (测试管理) — the parent is a library
 export const resolveTestLibrary: RootResolver = root('testhub-library');

@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/08-19-clear-assignee/prd.md", "reason": "acceptance criteria to verify: exit 2 + clear message + no request on --assignee \"\"; no regression on real assignee; help/docs note"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify UsageError keeps exit 2 / kind=usage, hint present, no API message-text matching, no mutating body sent"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify testing policy: new test pins the guard and asserts no fetch; layering unchanged (cli only)"}
+{"file": ".trellis/spec/backend/live-verification.md", "reason": "fact is research-backed, not assumed; confirm rationale cites research not docs"}

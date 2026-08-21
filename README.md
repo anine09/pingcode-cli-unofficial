@@ -559,6 +559,10 @@ follows is only what applies everywhere.
 - **There is no `sprint list` or `work-item tag list` leaf.** The sprint list is `project meta
   sprints` (it doubles as the `--sprint` lookup); a work item's tags are the `tags[]` field of
   `work-item get`, because upstream publishes no collection GET for them.
+- **A work item's assignee cannot be cleared via the API.** `PATCH`'s `assignee_id` is a plain
+  string with no `nullable`: `null` is a silent HTTP 200 no-op and `""` is an HTTP 400. So
+  `work-item update <id> --assignee ""` fails fast (exit 2) rather than sending a request that would
+  look like success. To unassign, use the PingCode web UI.
 
 ### Ship-specific caveats
 

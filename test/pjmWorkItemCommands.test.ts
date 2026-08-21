@@ -39,6 +39,11 @@ const USER = 'f5712155d0e54d0b94ffacb1384217f0';
 const STATE = '68389e7f33ee52bc5c2584d0';
 const RELATION_TYPE = '68389e7f33ee52bc5c258607';
 
+const PRIORITY = '68389e7f33ee52bc5c2584a1';
+const BOARD = '6a1c41781c7734aaad9ec23d';
+const BOARD_ENTRY = '6a1c41781c7734aaad9ec23e';
+const SWIMLANE = '6a1c41781c7734aaad9ec23f';
+
 const projectsPage = () =>
   jsonResponse({
     page_index: 0,
@@ -106,6 +111,44 @@ const tagVocabulary = () =>
       { id: FOREIGN_TAG, name: '后端' },
       { id: '6a28fbe209dbd0bc097457ee', name: '后端' },
     ],
+  });
+
+const prioritiesPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 2,
+    values: [
+      { id: PRIORITY, name: '高', color: '#ff0000' },
+      { id: '68389e7f33ee52bc5c2584a2', name: '中', color: '#ffff00' },
+    ],
+  });
+
+const boardsPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 1,
+    values: [{ id: BOARD, name: '看板1' }],
+  });
+
+const boardEntriesPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 2,
+    values: [
+      { id: BOARD_ENTRY, name: '待处理' },
+      { id: '6a1c41781c7734aaad9ec23g', name: '进行中' },
+    ],
+  });
+
+const swimlanesPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 1,
+    values: [{ id: SWIMLANE, name: '默认泳道' }],
   });
 
 // ---------------------------------------------------------------------------
@@ -287,6 +330,376 @@ describe('project work-item list — transport switch', () => {
 });
 
 // ---------------------------------------------------------------------------
+// list: new REST + search filters (P1: server-side filtering)
+// ---------------------------------------------------------------------------
+
+describe('project work-item list — new filters', () => {
+  it('sends priority_id on the simple list when --priority is given', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--priority', '高'],
+      [
+        projectsPage,
+        prioritiesPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[2];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain(`priority_id=${PRIORITY}`);
+  });
+
+  it('passes --identifier through as a raw string on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--identifier', 'MOB-219'],
+      [projectsPage, () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] })],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[1];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain('identifier=MOB-219');
+  });
+
+  it('resolves --board name to id on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--board', '看板1'],
+      [
+        projectsPage,
+        boardsPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[2];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain(`board_id=${BOARD}`);
+  });
+
+  it('resolves --entry name across all boards on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--entry', '待处理'],
+      [
+        projectsPage,
+        boardsPage,
+        boardEntriesPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[3];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain(`entry_id=${BOARD_ENTRY}`);
+  });
+
+  it('resolves --swimlane name across all boards on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--swimlane', '默认泳道'],
+      [
+        projectsPage,
+        boardsPage,
+        swimlanesPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[3];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain(`swimlane_id=${SWIMLANE}`);
+  });
+
+  it('resolves --tag name to id on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--tag', '前端'],
+      [
+        projectsPage,
+        tagVocabulary,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[2];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain(`tag_id=${TAG}`);
+  });
+
+  it('passes --bug-type through as a raw id on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--bug-type', '693a1b2c3d4e5f6a7b8c9d0e'],
+      [projectsPage, () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] })],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[1];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain('bug_type_id=693a1b2c3d4e5f6a7b8c9d0e');
+  });
+
+  it('passes --phase through as a raw id on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--phase', '693a1b2c3d4e5f6a7b8c9d0e'],
+      [projectsPage, () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] })],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[1];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain('phase_id=693a1b2c3d4e5f6a7b8c9d0e');
+  });
+
+  it('resolves --created-by name to id on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--created-by', 'wangxiao'],
+      [
+        projectsPage,
+        usersPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[2];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain(`created_by=${USER}`);
+  });
+
+  it('resolves --participant name to id on the simple list', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--participant', 'wangxiao'],
+      [
+        projectsPage,
+        usersPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const read = run.calls[2];
+    expect(read?.method).toBe('GET');
+    expect(read?.url).toContain(`participant_id=${USER}`);
+  });
+});
+
+describe('project work-item list — new search filters', () => {
+  it('builds priority.id in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--priority', '高', '--title-contains', 'x'],
+      [
+        projectsPage,
+        prioritiesPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[2]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['priority.id']).toEqual({ in: [PRIORITY] });
+  });
+
+  it('builds board.id in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--board', '看板1', '--title-contains', 'x'],
+      [
+        projectsPage,
+        boardsPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[2]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['board.id']).toEqual({ in: [BOARD] });
+  });
+
+  it('builds entry.id in the search filter (resolved across all boards)', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--entry', '待处理', '--title-contains', 'x'],
+      [
+        projectsPage,
+        boardsPage,
+        boardEntriesPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[3]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['entry.id']).toEqual({ in: [BOARD_ENTRY] });
+  });
+
+  it('builds swimlane.id in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--swimlane', '默认泳道', '--title-contains', 'x'],
+      [
+        projectsPage,
+        boardsPage,
+        swimlanesPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[3]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['swimlane.id']).toEqual({ in: [SWIMLANE] });
+  });
+
+  it('builds versions.id (plural) in the search filter from --release', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--release', '1.0', '--title-contains', 'x'],
+      [
+        projectsPage,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 100,
+            total: 1,
+            values: [{ id: VERSION, name: '1.0' }],
+          }),
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[2]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['versions.id']).toEqual({ in: [VERSION] });
+  });
+
+  it('builds tags.id (plural) in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--tag', '前端', '--title-contains', 'x'],
+      [
+        projectsPage,
+        tagVocabulary,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[2]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['tags.id']).toEqual({ in: [TAG] });
+  });
+
+  it('builds created_by.id in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--created-by', 'wangxiao', '--title-contains', 'x'],
+      [
+        projectsPage,
+        usersPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[2]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['created_by.id']).toEqual({ in: [USER] });
+  });
+
+  it('builds participants.id (plural) in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--participant', 'wangxiao', '--title-contains', 'x'],
+      [
+        projectsPage,
+        usersPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[2]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter['participants.id']).toEqual({ in: [USER] });
+  });
+
+  it('builds description: {contains} in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--description-contains', 'login'],
+      [projectsPage, () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] })],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[1]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter.description).toEqual({ contains: 'login' });
+  });
+
+  it('builds start_at date filter in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--start-after', '2026-08-01', '--start-before', '2026-08-31'],
+      [projectsPage, () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] })],
+    );
+
+    expect(run.exit).toBe(0);
+    const filter = (run.calls[1]?.body as { payload: { filter: Record<string, unknown> } }).payload
+      .filter;
+    const start = filter.start_at as { between: [number, number] };
+    expect(Object.keys(start)).toEqual(['between']);
+    expect(new Date(start.between[0] * 1000).getHours()).toBe(0);
+    expect(new Date(start.between[1] * 1000).getHours()).toBe(23);
+  });
+
+  it('builds end_at date filter in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--end-after', '2026-08-01'],
+      [projectsPage, () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] })],
+    );
+
+    expect(run.exit).toBe(0);
+    const filter = (run.calls[1]?.body as { payload: { filter: Record<string, unknown> } }).payload
+      .filter;
+    const end = filter.end_at as { gte: number };
+    expect(Object.keys(end)).toEqual(['gte']);
+  });
+
+  it('builds completed_at date filter in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--completed-before', '2026-08-31'],
+      [projectsPage, () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] })],
+    );
+
+    expect(run.exit).toBe(0);
+    const filter = (run.calls[1]?.body as { payload: { filter: Record<string, unknown> } }).payload
+      .filter;
+    const completed = filter.completed_at as { lte: number };
+    expect(Object.keys(completed)).toEqual(['lte']);
+  });
+
+  it('builds story_points: {eq} in the search filter', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--story-points', '5'],
+      [projectsPage, () => jsonResponse({ page_index: 0, page_size: 30, total: 0, values: [] })],
+    );
+
+    expect(run.exit).toBe(0);
+    const body = run.calls[1]?.body as { payload: { filter: Record<string, unknown> } };
+    expect(body.payload.filter.story_points).toEqual({ eq: 5 });
+  });
+
+  it('resolves --priority and --board names even on the simple list (GET read)', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'list', '--project', 'Mobile App', '--priority', '高', '--board', '看板1', '--json'],
+      [
+        projectsPage,
+        prioritiesPage,
+        boardsPage,
+        () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [itemBody()] }),
+      ],
+    );
+
+    expect(run.exit).toBe(0);
+    // Names were resolved: priorities and boards were fetched.
+    expect(run.calls.some((c) => c.url.includes('/v1/pjm/work_item/priorities'))).toBe(true);
+    expect(run.calls.some((c) => c.url.includes('/boards'))).toBe(true);
+    // The resolved ids land in the query string.
+    const read = run.calls[3];
+    expect(read?.url).toContain(`priority_id=${PRIORITY}`);
+    expect(read?.url).toContain(`board_id=${BOARD}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // update: --sprint (a scalar) and --version (an array that replaces)
 // ---------------------------------------------------------------------------
 
@@ -412,6 +825,34 @@ describe('project work-item update — --sprint and --release', () => {
     expect(run.stderr).toContain('--release');
     // The guard runs before the reference is even resolved.
     expect(run.calls).toHaveLength(0);
+  });
+
+  it('refuses to clear the assignee — the Open API cannot, and sends no PATCH', async () => {
+    // `--assignee ""` is how a user tries to unassign. The guard fires inside the
+    // resolve closure, after the item is read but before any write — so the only
+    // round-trip is the item read, and no PATCH ever goes out (no false 200 no-op).
+    const run = await runCli(
+      ['project', 'work-item', 'update', ITEM, '--assignee', ''],
+      [itemResponse],
+    );
+
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('cannot clear');
+    expect(run.stderr).toContain('web UI');
+    expect(run.calls).toHaveLength(1);
+    expect(run.calls[0]?.method).toBe('GET');
+    expect(run.writes).toHaveLength(0);
+  });
+
+  it('still assigns a real user by name and sends only assignee_id', async () => {
+    // Regression guard: the clear-intent branch must not shadow a normal assign.
+    const run = await runCli(
+      ['project', 'work-item', 'update', ITEM, '--assignee', 'wangxiao'],
+      [itemResponse, usersPage, itemResponse],
+    );
+
+    expect(run.exit).toBe(0);
+    expect(run.writes[0]?.body).toEqual({ assignee_id: USER });
   });
 
   it('resolves both names under --dry-run and still sends nothing', async () => {

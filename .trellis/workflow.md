@@ -590,6 +590,19 @@ Update the docs under `.trellis/spec/` accordingly. Even if the conclusion is "n
 
 **Spec-sync preamble**: before drafting commits, ask: did this task fix a bug or surface non-obvious knowledge that should land in `.trellis/spec/` so future-you (or future-AI) doesn't repeat the mistake? If yes, return to Phase 3.3 first — spec writes belong in the same task's commit batch, not as a forgotten follow-up.
 
+**Version bump preamble**: before drafting commits, classify every user-visible change against [Versioning](./spec/guides/versioning.md) and bump `package.json` + `src/version.ts` in the SAME commit batch — a new command/flag is MINOR, a bug fix is PATCH, a breaking change is MAJOR. Missing a version bump is a process failure; the diff must never leave the tree with new capability and a stale version. The version bump is its own commit (`chore: bump version to X.Y.Z (reason)`) following the work commits.
+
+**GitFlow preamble**: this project follows GitFlow (see [GitFlow Guide](./spec/guides/gitflow.md)). Never commit directly to `main`. All feature work happens on `feature/*` branches off `develop`. After committing feature work + version bump, follow the release flow:
+
+1. Merge feature branch → `develop` (via PR or local merge)
+2. Push `develop` → CI runs
+3. If CI green, release: merge `develop` → `main` (or via `release/<ver>` branch)
+4. Tag on `main`: `git tag -a vX.Y.Z -m "release X.Y.Z"`
+5. Push tag: `git push origin vX.Y.Z` → triggers release workflow (GitHub Release with tarball)
+6. Merge `main` back to `develop` (via release branch merge) so fixes aren't lost
+
+The AI MUST NOT push to `main` directly or create tags without explicit user instruction.
+
 The AI drives a batched commit of this task's code changes so `/finish-work` can run cleanly afterwards. Goal: produce work commits FIRST, then bookkeeping (archive + journal) commits land after — never interleaved.
 
 **Step-by-step**:

@@ -143,3 +143,19 @@ When a rewrite is unavoidable pre-publish:
 - [ ] Body explains *why* if the diff does not
 - [ ] `!` / `BREAKING CHANGE:` present if a contract changed
 - [ ] No secrets, tokens or tenant-identifiable values in the diff or the message
+- [ ] **Version bumped** if this commit adds/changes user-visible capability — see [Versioning](./versioning.md)
+
+## Version bumping in commits
+
+Every commit that adds or changes user-visible capability MUST include a version bump in the same commit batch. The version bump is a **separate commit** (`chore: bump version to X.Y.Z (reason)`) that follows the work commit(s).
+
+| Change type | Bump | Example |
+|---|---|---|
+| New command / new flag / new auth mode | **MINOR** | `feat(cli): add board commands` → 1.1.0 → 1.2.0 |
+| Bug fix / behavior correction | **PATCH** | `fix(cli): align state resolution` → 1.2.0 → 1.2.1 |
+| Removed/renamed command, changed flag, changed exit code | **MAJOR** | `feat(cli)!: rename --state-id` → 1.2.1 → 2.0.0 |
+| Docs / tests / refactor only | **No bump** | `docs: update README` |
+
+Files to bump: `package.json` (`version` field, no leading `v`) + `src/version.ts` (`VERSION` constant).
+
+**Common mistake**: completing a feature, committing the code, and forgetting to bump the version. The next person (or AI) sees new capability at the old version number and cannot tell what changed. Always ask "does this diff add or change user-visible behavior?" before committing.

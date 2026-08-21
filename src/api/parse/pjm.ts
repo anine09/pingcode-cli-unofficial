@@ -11,6 +11,8 @@
  */
 
 import type {
+  Board,
+  BoardEntry,
   BulkCreateResult,
   Project,
   ProjectMember,
@@ -18,6 +20,7 @@ import type {
   ProjectVersion,
   Ref,
   Sprint,
+  Swimlane,
   User,
   VersionStage,
   WorkItem,
@@ -373,5 +376,51 @@ export function parseWorkItemBulkUpdateResult(raw: unknown): WorkItemBulkUpdateR
     inserts: asNumber(record.inserts),
     updates: asNumber(record.updates),
     deletes: asNumber(record.deletes),
+  };
+}
+
+/**
+ * 看板 — `GET /v1/pjm/projects/{project_id}/boards`.
+ * Read-only list resource. Only `id` and `name` are reachable on the wire so far;
+ * unknown fields survive in the index signature.
+ */
+export function parseBoard(raw: unknown): Board {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+    project: parseRef(record.project),
+  };
+}
+
+/**
+ * 看板栏 — `GET /v1/pjm/projects/{project_id}/boards/{board_id}/entries`.
+ * Same shape as `Board`: read-only, board-scoped.
+ */
+export function parseBoardEntry(raw: unknown): BoardEntry {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+    board: parseRef(record.board),
+  };
+}
+
+/**
+ * 泳道 — `GET /v1/pjm/projects/{project_id}/boards/{board_id}/swimlanes`.
+ * Same shape as `BoardEntry`: read-only, board-scoped.
+ */
+export function parseSwimlane(raw: unknown): Swimlane {
+  const record = asRecord(raw);
+  return {
+    ...record,
+    id: asString(record.id) ?? '',
+    name: asString(record.name),
+    url: asString(record.url),
+    board: parseRef(record.board),
   };
 }

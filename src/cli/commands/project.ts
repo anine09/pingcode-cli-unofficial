@@ -58,6 +58,7 @@ import {
   type PagingFlags,
   type ResolvedWrite,
 } from './common';
+import { registerBoardCommands } from './projectBoard';
 import { registerMemberCommands } from './projectMember';
 import { registerSprintCommands } from './projectSprint';
 import { registerVersionCommands } from './projectVersion';
@@ -294,6 +295,7 @@ export function registerProjectCommands(program: Command): void {
   registerWorkItemCommands(project);
   registerSprintCommands(project);
   registerVersionCommands(project);
+  registerBoardCommands(project);
   registerMemberCommands(project);
   registerProjectMetaCommands(project);
 }

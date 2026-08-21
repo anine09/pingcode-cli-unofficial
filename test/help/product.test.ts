@@ -83,6 +83,9 @@ describe('product command surface', () => {
       'product meta ticket-types',
       'product meta ticket-channels',
       'product meta ticket-properties',
+      'product meta ticket-customers',
+      'product meta ticket-solutions',
+      'product meta ticket-tags',
     ]);
   });
 
@@ -123,6 +126,10 @@ describe('product --help', () => {
 
   it('product ticket create (--type is required by the API)', () => {
     expect(helpFor(['product', 'ticket', 'create'])).toMatchSnapshot();
+  });
+
+  it('product ticket list (the POST /search filter surface)', () => {
+    expect(helpFor(['product', 'ticket', 'list'])).toMatchSnapshot();
   });
 
   it('product ticket transition (advisory: the server decides)', () => {

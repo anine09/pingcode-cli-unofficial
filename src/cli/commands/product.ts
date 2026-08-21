@@ -13,9 +13,12 @@ import {
   listProductPlans,
   listProducts,
   listTicketChannels,
+  listTicketCustomers,
   listTicketPriorities,
   listTicketProperties,
+  listTicketSolutions,
   listTicketStates,
+  listTicketTags,
   listTicketTypes,
   type ProductListQuery,
 } from '../../api/ship';
@@ -24,14 +27,17 @@ import { resolveProduct } from '../../core/metadata';
 import { collect } from '../../core/paginate';
 import type {
   ShipChannel,
+  ShipCustomer,
   ShipPlan,
   ShipPlanSummary,
   ShipPriority,
   ShipProduct,
   ShipProductMember,
   ShipProperty,
+  ShipSolution,
   ShipState,
   ShipSuite,
+  ShipTag,
   ShipTicketType,
 } from '../../types/api';
 import { addGlobalOptions } from '../globals';
@@ -142,6 +148,27 @@ const SHIP_CHANNEL_COLUMNS: Column<ShipChannel>[] = [
   { header: 'ID', value: (c) => c.id },
   { header: 'NAME', value: (c) => c.name ?? '', flex: true },
   { header: 'DESCRIPTION', value: (c) => c.description ?? '', flex: true },
+];
+
+/** `GET /v1/ship/products/{id}/customers` (ship §H) — `{id, name, assignee, scale}`. */
+const SHIP_CUSTOMER_COLUMNS: Column<ShipCustomer>[] = [
+  { header: 'ID', value: (c) => c.id },
+  { header: 'NAME', value: (c) => c.name ?? '', flex: true },
+  { header: 'ASSIGNEE', value: (c) => refName(c.assignee) },
+  { header: 'SCALE', value: (c) => (c.scale === undefined ? '' : String(c.scale)) },
+];
+
+/** `GET /v1/ship/ticket/solutions?product_id=` (ship §K3) — `{id, name}`. */
+const SHIP_SOLUTION_COLUMNS: Column<ShipSolution>[] = [
+  { header: 'ID', value: (s) => s.id },
+  { header: 'NAME', value: (s) => s.name ?? '', flex: true },
+];
+
+/** `GET /v1/ship/ticket/tags?product_id=` (ship §K3) — `{id, name, color}`. */
+const SHIP_TAG_COLUMNS: Column<ShipTag>[] = [
+  { header: 'ID', value: (t) => t.id },
+  { header: 'NAME', value: (t) => t.name ?? '', flex: true },
+  { header: 'COLOR', value: (t) => t.color ?? '' },
 ];
 
 const SHIP_PLAN_SUMMARY_COLUMNS: Column<ShipPlanSummary>[] = [
@@ -414,6 +441,24 @@ function registerProductMetaCommands(parent: Command): void {
     'writable ticket property keys and their option ids — the only source for --set values',
     listTicketProperties,
     SHIP_PROPERTY_COLUMNS,
+  );
+  productScoped(
+    'ticket-customers',
+    'customers 客户 of a product — values for ticket list --customer',
+    listTicketCustomers,
+    SHIP_CUSTOMER_COLUMNS,
+  );
+  productScoped(
+    'ticket-solutions',
+    'ticket solutions 解决方案 of a product — values for ticket list --solution',
+    listTicketSolutions,
+    SHIP_SOLUTION_COLUMNS,
+  );
+  productScoped(
+    'ticket-tags',
+    'ticket tags 标签 of a product — values for ticket list --tag',
+    listTicketTags,
+    SHIP_TAG_COLUMNS,
   );
 }
 

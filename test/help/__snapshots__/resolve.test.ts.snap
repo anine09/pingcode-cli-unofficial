@@ -17,6 +17,14 @@ Commands:
   work_item_state|work-item-state [options] <name>        state → id (/v1/pjm/work_item/states)
   work_item_priority|work-item-priority [options] <name>  priority → id
                                                           (/v1/pjm/work_item/priorities)
+  pjm-board [options] <name>                              board → id
+                                                          (/v1/pjm/projects/{parent}/boards)
+  pjm-board-entry [options] <name>                        board entry → id
+                                                          (/v1/pjm/projects/{parent}/boards)
+  pjm-board-swimlane [options] <name>                     swimlane → id
+                                                          (/v1/pjm/projects/{parent}/boards)
+  pjm-work-item-tag [options] <name>                      work item tag → id
+                                                          (/v1/pjm/work_item/tags)
   pjm-relation-type [options] <name>                      relation type → id
                                                           (/v1/pjm/work_item/relation_types)
   sprint [options] <name>                                 sprint → id
@@ -42,6 +50,11 @@ Commands:
                                                           (/v1/ship/ticket/channels)
   ship-ticket-property [options] <name>                   ticket property → id
                                                           (/v1/ship/ticket/properties)
+  ship-ticket-customer [options] <name>                   ticket customer → id
+                                                          (/v1/ship/products/{parent}/customers)
+  ship-ticket-solution [options] <name>                   ticket solution → id
+                                                          (/v1/ship/ticket/solutions)
+  ship-ticket-tag [options] <name>                        ticket tag → id (/v1/ship/ticket/tags)
   testhub-library [options] <name>                        test library → id (/v1/testhub/libraries)
   testhub-suite [options] <name>                          suite → id
                                                           (/v1/testhub/libraries/{parent}/suites)

@@ -9,6 +9,7 @@ import type {
 } from '../core/paginate';
 import type {
   ShipChannel,
+  ShipCustomer,
   ShipIdea,
   ShipIdeaTransitionHistory,
   ShipPlan,
@@ -17,8 +18,10 @@ import type {
   ShipProduct,
   ShipProductMember,
   ShipProperty,
+  ShipSolution,
   ShipState,
   ShipSuite,
+  ShipTag,
   ShipTicket,
   ShipTicketType,
 } from '../types/api';
@@ -30,6 +33,7 @@ import {
   iterateSearchOf,
   listAllOf,
   parseShipChannel,
+  parseShipCustomer,
   parseShipIdea,
   parseShipIdeaTransitionHistory,
   parseShipPlan,
@@ -38,8 +42,10 @@ import {
   parseShipProduct,
   parseShipProductMember,
   parseShipProperty,
+  parseShipSolution,
   parseShipState,
   parseShipSuite,
+  parseShipTag,
   parseShipTicket,
   parseShipTicketType,
 } from './parse';
@@ -490,6 +496,26 @@ export async function listTicketProperties(ctx: Ctx, productId: string): Promise
     { product_id: productId },
     parseShipProperty,
   );
+}
+
+/** Customer (客户) — `GET /v1/ship/products/{id}/customers` (ship §H). The product rides in the path, so the query is empty. */
+export async function listTicketCustomers(ctx: Ctx, productId: string): Promise<ShipCustomer[]> {
+  return await listAllOf(ctx, ENDPOINTS.shipProductCustomers(productId), {}, parseShipCustomer);
+}
+
+/** Solution — `GET /v1/ship/ticket/solutions?product_id=` (ship §K3). */
+export async function listTicketSolutions(ctx: Ctx, productId: string): Promise<ShipSolution[]> {
+  return await listAllOf(
+    ctx,
+    ENDPOINTS.shipTicketSolutions,
+    { product_id: productId },
+    parseShipSolution,
+  );
+}
+
+/** Ticket tag — `GET /v1/ship/ticket/tags?product_id=` (ship §K3). */
+export async function listTicketTags(ctx: Ctx, productId: string): Promise<ShipTag[]> {
+  return await listAllOf(ctx, ENDPOINTS.shipTicketTags, { product_id: productId }, parseShipTag);
 }
 
 // ---------------------------------------------------------------------------

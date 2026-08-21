@@ -2,12 +2,24 @@ import type { Ctx } from '../core/context';
 import { ENDPOINTS } from '../core/endpoints';
 import type { Page, PageRequest, PaginateOptions } from '../core/paginate';
 import { request } from '../core/http';
-import type { Sprint, User, WorkItemPriority, WorkItemState, WorkItemType } from '../types/api';
+import type {
+  Board,
+  BoardEntry,
+  Sprint,
+  Swimlane,
+  User,
+  WorkItemPriority,
+  WorkItemState,
+  WorkItemType,
+} from '../types/api';
 import {
   fetchPageOf,
   iterateOf,
   listAllOf,
+  parseBoard,
+  parseBoardEntry,
   parseSprint,
+  parseSwimlane,
   parseUser,
   parseWorkItemPriority,
   parseWorkItemState,
@@ -113,4 +125,46 @@ export function iterateUsers(
   options: PaginateOptions = {},
 ): AsyncGenerator<User, void, undefined> {
   return iterateOf(ctx, ENDPOINTS.users, { ...query }, options, parseUser);
+}
+
+// ---------------------------------------------------------------------------
+// 看板 (boards) — GET-only, project-scoped, read-only.
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /v1/pjm/projects/{project_id}/boards` — the boards of one project
+ * (catalog `pjm.projects.boards.list`). No query parameters.
+ */
+export async function listBoards(ctx: Ctx, projectId: string): Promise<Board[]> {
+  return await listAllOf(ctx, ENDPOINTS.projectBoards(projectId), {}, parseBoard);
+}
+
+/**
+ * `GET /v1/pjm/projects/{project_id}/boards/{board_id}/entries` — the columns
+ * of one board (catalog `pjm.projects.boards.entries.list`). No query parameters.
+ */
+export async function listBoardEntries(
+  ctx: Ctx,
+  projectId: string,
+  boardId: string,
+): Promise<BoardEntry[]> {
+  return await listAllOf(ctx, ENDPOINTS.projectBoardEntries(projectId, boardId), {}, parseBoardEntry);
+}
+
+/**
+ * `GET /v1/pjm/projects/{project_id}/boards/{board_id}/swimlanes` — the
+ * swimlanes of one board (catalog `pjm.projects.boards.swimlanes.list`).
+ * No query parameters.
+ */
+export async function listBoardSwimlanes(
+  ctx: Ctx,
+  projectId: string,
+  boardId: string,
+): Promise<Swimlane[]> {
+  return await listAllOf(
+    ctx,
+    ENDPOINTS.projectBoardSwimlanes(projectId, boardId),
+    {},
+    parseSwimlane,
+  );
 }

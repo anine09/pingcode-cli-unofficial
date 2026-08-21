@@ -139,6 +139,7 @@ type CaseListFlags = PagingFlags &
     keywords?: string | undefined;
     includeArchived?: boolean | undefined;
     includeDeleted?: boolean | undefined;
+    includeImageToken?: string | undefined;
   };
 
 type CaseCreateFlags = LibraryFlags &
@@ -191,7 +192,8 @@ export function registerCaseCommands(parent: Command): void {
       .description('search cases in a library (POST /v1/testhub/cases/search)')
       .option('--keywords <text>', 'fuzzy search over case number and title')
       .option('--include-archived', 'include archived cases')
-      .option('--include-deleted', 'include deleted cases'),
+      .option('--include-deleted', 'include deleted cases')
+      .option('--include-image-token <fields>', 'CSV of rich-text field names, max 32 (e.g. "description,steps")'),
   );
   addPairOptions(list, 'library', LIBRARY_HELP);
   addPairOptions(list, 'suite', 'case module 模块; a tree, so pass "Parent / Child" to disambiguate');
@@ -383,6 +385,7 @@ async function runCaseList(flags: CaseListFlags, command: Command): Promise<void
     ...(flags.keywords === undefined ? {} : { keywords: flags.keywords }),
     ...(flags.includeArchived === true ? { include_archived: true } : {}),
     ...(flags.includeDeleted === true ? { include_deleted: true } : {}),
+    ...(flags.includeImageToken === undefined ? {} : { include_public_image_token: flags.includeImageToken }),
   };
 
   if (paging.all) {

@@ -9,7 +9,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop, 'feature/**']
   pull_request:
 
 # A newer push to the same ref makes the older run pointless.

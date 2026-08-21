@@ -142,6 +142,11 @@ On `update` and `transition`, `--type` is **only** a lookup aid: it resolves `--
 the CLI list the candidate states if the server rejects the change. It is never written to the work
 item — there is no patchable type field.
 
+**The assignee cannot be cleared via the API.** `PATCH`'s `assignee_id` is a plain string with no
+`nullable`, and the server treats `null` as "field absent" (HTTP 200, no-op) and `""` as invalid
+(HTTP 400). So `work-item update <id> --assignee ""` does **not** send a request — it fails fast with
+exit 2 and a message naming the limitation. To unassign, use the PingCode web UI.
+
 #### Filtering: two transports, one command
 
 ```bash

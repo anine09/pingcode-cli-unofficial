@@ -23,10 +23,14 @@ import {
   resolveProductMember,
   resolveShipRef,
   resolveTicketChannel,
+  resolveTicketCustomer,
   resolveTicketPriority,
   resolveTicketProperty,
+  resolveTicketSolution,
   resolveTicketState,
+  resolveTicketTag,
   resolveTicketType,
+  resolveUser,
   type ShipLocator,
 } from '../../core/metadata';
 import { collect, type SearchPayload } from '../../core/paginate';
@@ -40,8 +44,10 @@ import {
   addShipStateOptions,
   collectValue,
   contextFor,
+  dateRangeFilter,
   mergeFilters,
   modeOf,
+  parseDateBoundaryFlag,
   parseSetFlags,
   printCollection,
   printPage,
@@ -85,6 +91,22 @@ type ListFlags = PagingFlags &
     assignee?: string | undefined;
     channel?: string | undefined;
     keywords?: string | undefined;
+    // POST /search-only filters (the single ticket read path). Resolved inside runList.
+    submittedBy?: string | undefined;
+    customer?: string | undefined;
+    solution?: string | undefined;
+    tag?: string | undefined;
+    participant?: string | undefined;
+    titleContains?: string | undefined;
+    descriptionContains?: string | undefined;
+    submittedAfter?: string | undefined;
+    submittedBefore?: string | undefined;
+    createdAfter?: string | undefined;
+    createdBefore?: string | undefined;
+    updatedAfter?: string | undefined;
+    updatedBefore?: string | undefined;
+    completedAfter?: string | undefined;
+    completedBefore?: string | undefined;
   };
 
 type CreateFlags = {
@@ -145,7 +167,22 @@ export function registerTicketCommands(parent: Command): void {
           .option('--priority <name|id>', 'priority')
           .option('--assignee <name|id>', 'assignee — must be a member of this product')
           .option('--channel <name|id>', 'submission channel 工单渠道')
-          .option('--keywords <text>', 'fuzzy search over identifier and title'),
+          .option('--keywords <text>', 'fuzzy search over identifier and title')
+          .option('--submitted-by <name|id>', 'submitter 提交人 — resolved as an org user')
+          .option('--customer <name|id>', 'customer 客户 — scoped to this product')
+          .option('--solution <name|id>', 'solution 解决方案 — scoped to this product')
+          .option('--tag <name|id>', 'ticket tag 标签 — scoped to this product')
+          .option('--participant <name|id>', 'participant 关注人 — must be a member of this product')
+          .option('--title-contains <text>', 'title contains this text')
+          .option('--description-contains <text>', 'description contains this text')
+          .option('--submitted-after <date>', 'submitted at or after (YYYY-MM-DD or 10-digit unix seconds)')
+          .option('--submitted-before <date>', 'submitted at or before')
+          .option('--created-after <date>', 'created at or after (YYYY-MM-DD or 10-digit unix seconds)')
+          .option('--created-before <date>', 'created at or before')
+          .option('--updated-after <date>', 'updated at or after (YYYY-MM-DD or 10-digit unix seconds)')
+          .option('--updated-before <date>', 'updated at or before')
+          .option('--completed-after <date>', 'completed at or after (YYYY-MM-DD or 10-digit unix seconds)')
+          .option('--completed-before <date>', 'completed at or before'),
       ),
       'filter by state',
     ),
@@ -255,16 +292,90 @@ async function runList(flags: ListFlags, command: Command): Promise<void> {
     flags.channel === undefined
       ? undefined
       : await resolveTicketChannel(ctx, product.id, flags.channel);
+  const submittedBy =
+    flags.submittedBy === undefined
+      ? undefined
+      : await resolveUser(ctx, flags.submittedBy);
+  const customer =
+    flags.customer === undefined
+      ? undefined
+      : await resolveTicketCustomer(ctx, product.id, flags.customer);
+  const solution =
+    flags.solution === undefined
+      ? undefined
+      : await resolveTicketSolution(ctx, product.id, flags.solution);
+  const tag =
+    flags.tag === undefined ? undefined : await resolveTicketTag(ctx, product.id, flags.tag);
+  const participant =
+    flags.participant === undefined
+      ? undefined
+      : await resolveProductMember(ctx, product.id, flags.participant);
+
+  // Date boundaries (unix seconds). parseDateBoundaryFlag throws on a malformed value,
+  // so each is guarded; a two-sided window becomes `between`, one-sided becomes gte/lte.
+  const submittedAfter =
+    flags.submittedAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.submittedAfter, '--submitted-after', 'start');
+  const submittedBefore =
+    flags.submittedBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.submittedBefore, '--submitted-before', 'end');
+  const createdAfter =
+    flags.createdAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.createdAfter, '--created-after', 'start');
+  const createdBefore =
+    flags.createdBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.createdBefore, '--created-before', 'end');
+  const updatedAfter =
+    flags.updatedAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.updatedAfter, '--updated-after', 'start');
+  const updatedBefore =
+    flags.updatedBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.updatedBefore, '--updated-before', 'end');
+  const completedAfter =
+    flags.completedAfter === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.completedAfter, '--completed-after', 'start');
+  const completedBefore =
+    flags.completedBefore === undefined
+      ? undefined
+      : parseDateBoundaryFlag(flags.completedBefore, '--completed-before', 'end');
+
+  // Reference fields ride `refFilter` + `mergeFilters`; the operator-bearing fields
+  // (contains / date range) bypass it, one operator per field (ship §4, [S§]4).
+  const filter: Record<string, unknown> = mergeFilters([
+    refFilter('product', product.id),
+    refFilter('type', type?.id),
+    refFilter('state', state?.id),
+    refFilter('priority', priority?.id),
+    refFilter('assignee', assignee?.id),
+    refFilter('channel', channel?.id),
+  ]);
+  if (submittedBy !== undefined) filter['submitted_by.id'] = { in: [submittedBy.id] };
+  if (customer !== undefined) filter['customer.id'] = { in: [customer.id] };
+  if (solution !== undefined) filter['solution.id'] = { in: [solution.id] };
+  if (tag !== undefined) filter['tags.id'] = { in: [tag.id] };
+  if (participant !== undefined) filter['participants.id'] = { in: [participant.id] };
+  if (flags.titleContains !== undefined) filter.title = { contains: flags.titleContains };
+  if (flags.descriptionContains !== undefined) {
+    filter.description = { contains: flags.descriptionContains };
+  }
+  const submitted = dateRangeFilter(submittedAfter, submittedBefore);
+  if (submitted !== undefined) filter.submitted_at = submitted;
+  const created = dateRangeFilter(createdAfter, createdBefore);
+  if (created !== undefined) filter.created_at = created;
+  const updated = dateRangeFilter(updatedAfter, updatedBefore);
+  if (updated !== undefined) filter.updated_at = updated;
+  const completed = dateRangeFilter(completedAfter, completedBefore);
+  if (completed !== undefined) filter.completed_at = completed;
 
   const payload: SearchPayload = {
-    filter: mergeFilters([
-      refFilter('product', product.id),
-      refFilter('type', type?.id),
-      refFilter('state', state?.id),
-      refFilter('priority', priority?.id),
-      refFilter('assignee', assignee?.id),
-      refFilter('channel', channel?.id),
-    ]),
+    filter,
     ...(flags.keywords === undefined ? {} : { keywords: flags.keywords }),
   };
 

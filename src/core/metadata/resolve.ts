@@ -514,6 +514,42 @@ export async function resolveKind(
   });
 }
 
+/**
+ * Board children (entries or swimlanes): a two-level fetch. The API has no
+ * project-level list for these — `GET …/boards/{board_id}/entries` is
+ * board-scoped — so the loader lists every board of the project, then lists the
+ * children of each. The project id rides in `parentQuery` (`project_id`),
+ * which `resolveKind` puts in the query.
+ *
+ * `path_` is the boards list path (the spec's `path`), and `spec.boardChildPath`
+ * builds the per-board child-list path from `(projectId, boardId)`.
+ */
+async function loadBoardChildren(
+  ctx: Ctx,
+  spec: ResolverSpec,
+  path_: string,
+  query: Record<string, unknown>,
+): Promise<Candidate[]> {
+  const projectId = typeof query['project_id'] === 'string' ? query['project_id'] : undefined;
+  if (projectId === undefined || spec.boardChildPath === undefined) return [];
+
+  const boards = await loadRows(ctx, path_, {});
+  const boardIds: string[] = [];
+  for (const board of boards) {
+    const record = refRecord(board);
+    const id = str(record?.id);
+    if (id !== undefined) boardIds.push(id);
+  }
+
+  const candidates: Candidate[] = [];
+  for (const boardId of boardIds) {
+    const childPath = spec.boardChildPath(projectId, boardId);
+    const childCandidates = await loadList(ctx, childPath, {}, spec.aliases ?? []);
+    candidates.push(...childCandidates);
+  }
+  return candidates;
+}
+
 function loadCandidates(
   ctx: Ctx,
   spec: ResolverSpec,
@@ -522,6 +558,7 @@ function loadCandidates(
 ): Promise<Candidate[]> {
   if (spec.load === 'suiteTree') return loadSuiteTree(ctx, path_, query);
   if (spec.load === 'productMembers') return loadProductMembers(ctx, path_, query);
+  if (spec.load === 'boardChildren') return loadBoardChildren(ctx, spec, path_, query);
   return loadList(ctx, path_, query, spec.aliases ?? []);
 }
 

@@ -1,0 +1,12 @@
+{"type": "check", "topic": "work-item-filter-exposure", "description": "验证 work-item list 新 flags 是否正确映射到 API 参数。检查 ListFlags 新增字段、runList query 构建、runSearch filter 构建、searchOnlyFlagsOf 判定。"}
+{"type": "check", "topic": "work-item-name-resolution", "description": "验证 work-item 新 flags 的 name→id 解析：priority/board/entry/swimlane/phase/release/tag/createdBy/participant/bugType 都能正确解析并传入 query/filter。"}
+{"type": "check", "topic": "work-item-search-only-flags", "description": "验证 search-only flags（descriptionContains/startAt/endAt/completedAt/storyPoints/identifier/bugType）是否正确触发 POST /search 切换或 REST-only 报错。"}
+{"type": "check", "topic": "idea-filter-exposure", "description": "验证 idea list 新 flags 是否正确映射到 search filter。检查 participant/titleContains/descriptionContains/date ranges/score/progress。"}
+{"type": "check", "topic": "idea-filter-construction", "description": "验证 idea filter 构造是否正确使用 contains/gte/lte/between/eq 算子（不能只用 refFilter 的 in 模式）。"}
+{"type": "check", "topic": "ticket-new-resolvers", "description": "验证 ticket 新增的 3 个 resolver（customer/solution/tags）是否正确实现：endpoint 常量、registry spec、resolver 函数、list API、meta 命令。"}
+{"type": "check", "topic": "ticket-filter-exposure", "description": "验证 ticket list 新 flags 是否正确映射到 search filter。检查 submittedBy/customer/solution/tag/participant/titleContains/descriptionContains/date ranges。"}
+{"type": "check", "topic": "testhub-cases-image-token", "description": "验证 cases list 的 include_image_token flag 是否正确传递到 SearchPayload。"}
+{"type": "check", "topic": "cross-command-consistency", "description": "跨命令一致性：相同语义 flag 命名一致（如 --priority）、--help 格式统一、search-only 标记一致。"}
+{"type": "check", "topic": "dry-run-all-commands", "description": "验证所有 4 个命令的新 flags 在 --dry-run 下正确打印请求而不执行。"}
+{"type": "check", "topic": "typescript-compile", "description": "npx tsc --noEmit 通过，无类型错误。"}
+{"type": "check", "topic": "existing-tests-pass", "description": "npm test 全量通过，无回归。"}
