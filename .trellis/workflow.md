@@ -603,6 +603,8 @@ Update the docs under `.trellis/spec/` accordingly. Even if the conclusion is "n
 
 The AI MUST NOT push to `main` directly or create tags without explicit user instruction.
 
+**Issue reply rule**: before closing a GitHub issue, post a comment explaining the fix (what changed, which release version fixed it, commit links). Never close an issue silently — the comment is the audit trail that connects the issue to the release.
+
 The AI drives a batched commit of this task's code changes so `/finish-work` can run cleanly afterwards. Goal: produce work commits FIRST, then bookkeeping (archive + journal) commits land after — never interleaved.
 
 **Step-by-step**:
