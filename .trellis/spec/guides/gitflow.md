@@ -71,6 +71,7 @@ git tag -a v<ver> -m "release <ver>"
 git push origin v<ver>   # triggers GitHub Release
 # Back-merge release fixes to develop via PR
 git checkout develop
+git pull origin develop
 git checkout -b chore/sync-main-to-develop
 git merge --no-ff main   # bring release fixes back
 git push origin chore/sync-main-to-develop
@@ -95,6 +96,7 @@ git tag -a v<ver> -m "hotfix <ver>"
 git push origin v<ver>   # triggers GitHub Release
 # Back-merge hotfix to develop via PR
 git checkout develop
+git pull origin develop
 git checkout -b chore/sync-hotfix-to-develop
 git merge --no-ff hotfix/<name>
 git push origin chore/sync-hotfix-to-develop
@@ -121,16 +123,16 @@ When you are asked to implement a feature or fix:
 3. **Do your work on that branch.** Commit feature code first, then version bump as a separate commit.
 4. **Push the feature branch and create a PR to `develop`.** Use `gh pr create --base develop`.
 5. **Wait for CI + CodeRabbit.** Both run automatically on the PR. Address CodeRabbit comments by pushing additional commits to the same branch.
-  6. **If CI is green and CodeRabbit approves, merge the PR.** Use `gh pr merge --merge --delete-branch`.
-  7. **Release (only when user explicitly asks):**
-     a. Create a `release/<ver>` branch from `develop`
-     b. Bump version, verify checklist
-     c. Push and create a PR to `main`
-     d. Wait for CI green + CodeRabbit approved, then merge
-     e. Tag on `main`: `git tag -a vX.Y.Z -m "release X.Y.Z"`
-     f. Push tag: `git push origin vX.Y.Z` → triggers GitHub Release
-     g. Back-merge `main` to `develop` via PR (see release workflow above)
-8. **Never push directly to `main`** or create tags without explicit user instruction.
+6. **If CI is green and CodeRabbit approves, merge the PR.** Use `gh pr merge --merge --delete-branch`.
+7. **Release (only when user explicitly asks):**
+   a. Create a `release/<ver>` branch from `develop`
+   b. Bump version, verify checklist
+   c. Push and create a PR to `main`
+   d. Wait for CI green + CodeRabbit approved, then merge
+   e. Tag on `main`: `git tag -a vX.Y.Z -m "release X.Y.Z"`
+   f. Push tag: `git push origin vX.Y.Z` → triggers GitHub Release
+   g. Back-merge `main` to `develop` via PR (see release workflow above)
+ 8. **Never push directly to `main`** or create tags without explicit user instruction.
 9. **Reply to the GitHub issue** before closing it: post a comment explaining what
    changed and which release version fixed it. Include commit links and the release
    URL. The comment is the audit trail that connects the issue to the release.
