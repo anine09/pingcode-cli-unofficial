@@ -1305,10 +1305,12 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   // among them). Catch it before the generic "nothing to update" so the error
   // explains *why* and points at the Web UI.
   const hasType = flags.type !== undefined && flags.type.trim() !== '';
+  const hasClearSprint = flags.clearSprint === true;
   const hasOtherField =
     Object.keys(scalarPatch).length > 0 ||
     wantsReference ||
-    wantsState;
+    wantsState ||
+    hasClearSprint;
   if (hasType && !hasOtherField) {
     throw new UsageError('--type does not modify the work item type', {
       hint:
@@ -1320,9 +1322,6 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
   }
 
   // An empty PATCH is a usage error (exit 2), never a no-op round-trip (design §7.2).
-  // --clear-sprint doesn't go through wantsReference (no project needed), so it's
-  // checked separately here.
-  const hasClearSprint = flags.clearSprint === true;
   if (Object.keys(scalarPatch).length === 0 && !wantsReference && !hasClearSprint) {
     throw new UsageError('nothing to update: no updatable field was given', {
       hint: 'pass at least one of --title / --description / --state / --state-id / --assignee / --priority / --parent / --sprint / --clear-sprint / --board / --entry / --swimlane / --release / --start-at / --end-at / --story-points / --estimated-workload / --remaining-workload',
