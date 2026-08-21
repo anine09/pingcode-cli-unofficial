@@ -265,13 +265,13 @@ describe('--type on update / transition (S8b, F1)', () => {
     return found;
   }
 
-  it('exists on update and transition, and says it is only a lookup aid', () => {
+  it('exists on update and transition, and says it does not modify the type', () => {
     for (const name of ['update', 'transition']) {
       const option = leaf(name).options.find((candidate) => candidate.long === '--type');
       expect(option, name).toBeDefined();
       expect(option?.description).toContain('--state <name>');
       expect(option?.description).toContain('candidate states');
-      expect(option?.description).toContain('never sent');
+      expect(option?.description).toContain('does NOT modify the type');
     }
   });
 
