@@ -13,7 +13,7 @@
  *
  * Design: see `.trellis/tasks/08-21-startup-version-check/prd.md`.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { configDir } from './config';
 import { VERSION } from '../version';
@@ -62,7 +62,7 @@ export type CheckResult =
 function parseSemver(raw: string): [number, number, number] | undefined {
   const stripped = raw.replace(/^v/, '').split('-')[0] ?? '';
   const parts = stripped.split('.');
-  if (parts.length < 3) return undefined;
+  if (parts.length !== 3) return undefined;
   const major = Number(parts[0]);
   const minor = Number(parts[1]);
   const patch = Number(parts[2]);
@@ -94,9 +94,9 @@ function cacheFilePath(): string {
   return path.join(configDir(), CACHE_FILENAME);
 }
 
-function readCache(): CheckCache | undefined {
+async function readCache(): Promise<CheckCache | undefined> {
   try {
-    const raw = readFileSync(cacheFilePath(), 'utf8');
+    const raw = await readFile(cacheFilePath(), 'utf8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (
       typeof parsed.checkedAt === 'string' &&
@@ -110,13 +110,13 @@ function readCache(): CheckCache | undefined {
   return undefined;
 }
 
-function writeCache(version: string): void {
+async function writeCache(version: string): Promise<void> {
   const file = cacheFilePath();
   const data: CheckCache = { checkedAt: new Date().toISOString(), latestVersion: version };
   try {
     const dir = path.dirname(file);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
+    await mkdir(dir, { recursive: true });
+    await writeFile(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
   } catch {
     // Cache write failure is non-fatal.
   }
@@ -175,7 +175,7 @@ export async function checkForUpdate(
   }
 
   // Try cache first.
-  const cache = readCache();
+  const cache = await readCache();
   if (cache && isCacheFresh(cache)) {
     return compareVersions(cache.latestVersion);
   }
@@ -183,7 +183,7 @@ export async function checkForUpdate(
   // Cache miss or stale — fetch from network.
   const remote = await fetchLatestVersion();
   if (remote !== undefined) {
-    writeCache(remote);
+    await writeCache(remote);
     return compareVersions(remote);
   }
 
