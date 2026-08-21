@@ -45,6 +45,7 @@ reviews:
     - "**/*.yml"
     - "**/*.yaml"
     - "**/*.json"
+    - ".github/workflows/**"
 
     # Exclude build output, dependencies, and generated files
     - "!dist/**"
@@ -85,7 +86,7 @@ reviews:
     - path: ".github/workflows/**"
       instructions: |
         GitHub Actions workflows. Review for:
-        - All actions pinned to specific version tags (not @main)
+        - All actions pinned to full-length commit SHAs (not mutable tags like @v4)
         - Secrets accessed via ${{ secrets.* }} — no hardcoded values
         - Node version consistent with engines field in package.json (>=20)
         - Steps fail the build on error (continue-on-error: false)
