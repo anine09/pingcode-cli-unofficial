@@ -149,6 +149,7 @@ type CreateFlags = StateFlags & {
   board?: string | undefined;
   entry?: string | undefined;
   swimlane?: string | undefined;
+  storyPoints?: string | undefined;
   startAt?: string | undefined;
   endAt?: string | undefined;
 };
@@ -305,7 +306,8 @@ export function registerWorkItemCommands(parent: Command): void {
         .option('--end-at <when>', 'unix seconds or a date like 2026-01-31')
         .option('--board <name|id>', '看板 board — list with `project board list`')
         .option('--entry <name|id>', '看板栏 board entry — list with `project board entries list`')
-        .option('--swimlane <name|id>', '泳道 swimlane — list with `project board swimlanes list`'),
+        .option('--swimlane <name|id>', '泳道 swimlane — list with `project board swimlanes list`')
+        .option('--story-points <n>', 'story points'),
       'initial state',
       'requires --type, which create already requires',
     ),
@@ -1117,6 +1119,7 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
   const title = requireFlag(flags.title, '--title');
   const startAt = parseTimestampFlag(flags.startAt, '--start-at');
   const endAt = parseTimestampFlag(flags.endAt, '--end-at');
+  const storyPoints = parseNumberFlag(flags.storyPoints, '--story-points');
 
   const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<CreateWorkItemInput>> => {
     const project = await resolveProject(attemptCtx, flags.project);
@@ -1162,6 +1165,7 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
       ...(board === undefined ? {} : { board_id: board.id }),
       ...(entry === undefined ? {} : { entry_id: entry.id }),
       ...(swimlane === undefined ? {} : { swimlane_id: swimlane.id }),
+      ...(storyPoints === undefined ? {} : { story_points: storyPoints }),
       ...(startAt === undefined ? {} : { start_at: startAt }),
       ...(endAt === undefined ? {} : { end_at: endAt }),
     };
