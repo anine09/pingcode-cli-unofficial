@@ -98,8 +98,30 @@ Before tagging a release, ALL of:
 - [ ] `rtk npm test` — green (the suite gates behavior, and a MINOR/MAJOR must not regress).
 - [ ] `rtk npm run build` — succeeds; `dist/bin/pingcode.js --version` prints the new version.
 - [ ] `package.json` `version` equals the intended release number (no leading `v`).
+- [ ] `src/version.ts` `VERSION` constant matches `package.json`.
 - [ ] The tagged commit is on `main` and `origin/main` is in sync before tagging.
 - [ ] Tag pushed: `git push origin vX.Y.Z`.
+- [ ] GitHub Release created (automatically by tag push via `.github/workflows/release.yml`).
+
+## 7. Release Flow (GitFlow)
+
+Every feature follows this flow end-to-end:
+
+```
+feature/<name> (off develop)
+    ↓ commit feature + version bump
+    ↓ push → CI runs
+    ↓ CI green → merge to develop
+    ↓
+release/<ver> (off develop, when ready to release)
+    ↓ verify checklist above
+    ↓ merge to main
+    ↓ tag v<ver> on main
+    ↓ push origin main v<ver> → triggers GitHub Release
+    ↓ merge back to develop
+```
+
+**AI agents**: never push to `main` directly. Never create tags without explicit user instruction. Always use `feature/*` branches off `develop`.
 
 ## 7. Wrong vs Correct
 

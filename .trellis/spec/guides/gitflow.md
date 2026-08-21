@@ -89,11 +89,25 @@ git push origin main develop v<ver>
 
 When you are asked to implement a feature or fix:
 
-1. Check current branch. If on `main`, ask before creating a `feature/*` branch.
-2. Create `feature/<short-name>` off `develop`.
-3. Do your work on that branch.
-4. When done, merge back to `develop` (or leave the branch open and report — do not merge without explicit instruction).
-5. Never push directly to `main`.
+1. **Check current branch.** If on `main`, STOP — create a `feature/*` branch off `develop` first. Never commit directly to `main`.
+2. **Create `feature/<short-name>` off `develop`.**
+3. **Do your work on that branch.** Commit feature code first, then version bump as a separate commit.
+4. **Push the feature branch.** CI will run automatically.
+5. **If CI passes, merge to `develop`.** Use `--no-ff` so the feature is visible.
+6. **Release (only when user explicitly asks):**
+   a. Merge `develop` → `main` (or via `release/<ver>` branch)
+   b. Tag on `main`: `git tag -a vX.Y.Z -m "release X.Y.Z"`
+   c. Push tag: `git push origin vX.Y.Z` → triggers GitHub Release
+   d. Merge `main` back to `develop`
+7. **Never push directly to `main`** or create tags without explicit user instruction.
+
+**Version bump is mandatory** for every feature/fix commit batch:
+- New command/flag → MINOR bump
+- Bug fix → PATCH bump
+- Breaking change → MAJOR bump
+- Bump `package.json` + `src/version.ts` in a separate `chore:` commit
+
+**Common mistake**: committing feature work directly on `main` without a feature branch. This bypasses CI and breaks the GitFlow model. Always use `feature/*` branches off `develop`.
 
 When you are asked to release:
 
