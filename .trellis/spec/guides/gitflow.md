@@ -101,8 +101,9 @@ When you are asked to implement a feature or fix:
    d. Merge `main` back to `develop`
    7. **Never push directly to `main`** or create tags without explicit user instruction.
    8. **Reply to the GitHub issue** before closing it: post a comment explaining what
-      changed and which release version fixed it. The comment is the audit trail that
-      connects the issue to the release. Never close an issue silently.
+      changed and which release version fixed it. Include commit links and the release
+      URL. The comment is the audit trail that connects theissue to the release.
+      Never close an issue silently.
 
 **Version bump is mandatory** for every feature/fix commit batch:
 - New command/flag → MINOR bump
