@@ -183,10 +183,16 @@ type UpdateFlags = StateFlags & {
  * `--type` used to be mandatory for a state *name* because the CLI believed the API
  * never reported a work item's type. It does — as a bare slug string, live-verified
  * 2026-08-04 — so the flag is now an override, needed only when the item cannot be
- * read first (it never sends a `type_id`: `PATCH` has no such field).
+ * read first.
+ *
+ * **It does NOT modify the work item type.** The PATCH body has no `type_id` field
+ * (catalog `pjm.work_items.update` lists every accepted field and `type_id` is not
+ * among them). `--type` only resolves `--state <name>` and lists candidate states
+ * on rejection. To change a work item's type, use the PingCode web UI.
  */
 const TYPE_FLAG_HELP =
-  'work-item type — overrides the type read off the item when resolving --state <name>, and lists candidate states on rejection; never sent';
+  'work-item type — resolves --state <name> and lists candidate states on rejection; ' +
+  'does NOT modify the type (the API has no type_id in PATCH)';
 
 /**
  * A work item's `type` is a **slug string** on the wire (`"task"`), not the reference
@@ -1218,6 +1224,26 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
     flags.entry !== undefined ||
     flags.swimlane !== undefined ||
     (flags.release !== undefined && flags.release.length > 0);
+
+  // `--type` alone is a common mistake: the user thinks it changes the work
+  // item type, but the API has no `type_id` in the PATCH body (catalog
+  // `pjm.work_items.update` lists every accepted field and `type_id` is not
+  // among them). Catch it before the generic "nothing to update" so the error
+  // explains *why* and points at the Web UI.
+  const hasType = flags.type !== undefined && flags.type.trim() !== '';
+  const hasOtherField =
+    Object.keys(scalarPatch).length > 0 ||
+    wantsReference ||
+    wantsState;
+  if (hasType && !hasOtherField) {
+    throw new UsageError('--type does not modify the work item type', {
+      hint:
+        'the PingCode Open API has no type_id in the PATCH body — --type only resolves ' +
+        '--state <name> and lists candidate states on rejection. To change a work item\'s ' +
+        'type, use the PingCode web UI (the API cannot do it). ' +
+        'Pass --type together with --state <name> to set the initial state of the new type.',
+    });
+  }
 
   // An empty PATCH is a usage error (exit 2), never a no-op round-trip (design §7.2).
   if (Object.keys(scalarPatch).length === 0 && !wantsReference) {
