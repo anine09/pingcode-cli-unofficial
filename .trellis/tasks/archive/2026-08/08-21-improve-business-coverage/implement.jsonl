@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试规范、禁止/允许模式、API-fact 纪律——补测试必须遵守"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "分层与目录布局，新增测试文件放置与 layering 约束"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "错误层级与退出码契约，鉴权/错误分支测试需符合"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "stdout/stderr 契约，断言测试须区分通道"}
+{"file": ".trellis/spec/backend/index.md", "reason": "后端规约总览与单测不联网、fetch 注入约束"}

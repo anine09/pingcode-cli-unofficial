@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "校验新测试是否遵守测试规范、未误引入联网"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "校验分层不变、新增测试不破坏 layering"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "校验鉴权/错误分支断言与退出码契约一致"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "校验 stdout/stderr 通道断言符合契约"}
