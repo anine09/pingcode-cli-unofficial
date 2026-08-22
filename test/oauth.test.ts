@@ -1,6 +1,15 @@
 import { createServer, type Server } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
-import { captureCodeFromLoopback, buildAuthorizeUrl, parseLoopback } from '../src/cli/commands/oauth';
+import * as childProcess from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { captureOutput } from '../src/cli/output';
+import {
+  buildAuthorizeUrl,
+  captureCodeFromLoopback,
+  oauthRootOf,
+  openBrowser,
+  parseLoopback,
+  printAuthorizeUrl,
+} from '../src/cli/commands/oauth';
 import { createTestContext } from './helpers/fake';
 
 /**
@@ -121,5 +130,122 @@ describe('captureCodeFromLoopback (design D13, AC7)', () => {
       name: 'UsageError',
       message: expect.stringContaining('already in use'),
     });
+  });
+});
+
+describe('oauthRootOf', () => {
+  it('appends /oauth2 to a clean host origin', () => {
+    expect(oauthRootOf('https://open.pingcode.com')).toBe('https://open.pingcode.com/oauth2');
+  });
+
+  it('strips trailing slashes before appending /oauth2', () => {
+    expect(oauthRootOf('https://open.pingcode.com/')).toBe('https://open.pingcode.com/oauth2');
+    expect(oauthRootOf('https://open.pingcode.com///')).toBe('https://open.pingcode.com/oauth2');
+  });
+
+  it('falls back to a slash-stripped origin (never throws) for a malformed host', () => {
+    // `new URL` throws on a host with no scheme, so the catch yields the raw,
+    // de-slashed host plus /oauth2 rather than aborting the URL build.
+    expect(oauthRootOf('not a url')).toBe('not a url/oauth2');
+  });
+});
+
+describe('printAuthorizeUrl', () => {
+  it('prints the redacted authorize URL and instructions to stderr, never stdout', () => {
+    let stdout = '';
+    let stderr = '';
+    const restore = captureOutput((chunk) => (stdout += chunk), (chunk) => (stderr += chunk));
+    try {
+      printAuthorizeUrl(
+        'https://open.pingcode.com/oauth2/authorize?response_type=code&client_id=client-123',
+      );
+    } finally {
+      restore();
+    }
+    // stdout stays JSON-only: nothing a command result would not own.
+    expect(stdout).toBe('');
+    expect(stderr).toContain('authorize URL: https://open.pingcode.com/oauth2/authorize');
+    expect(stderr).toContain('open it in a browser');
+  });
+});
+
+vi.mock('node:child_process', () => ({
+  spawn: vi.fn(() => ({ unref: vi.fn() })),
+}));
+
+describe('openBrowser', () => {
+  const spawnMock = vi.mocked(childProcess.spawn);
+
+  beforeEach(() => {
+    spawnMock.mockClear();
+    spawnMock.mockReturnValue({ unref: vi.fn() } as never);
+  });
+
+  /** Temporarily override process.platform (configurable in Node) for a branch. */
+  function withPlatform<T>(platform: string, fn: () => T): T {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    try {
+      return fn();
+    } finally {
+      if (original) Object.defineProperty(process, 'platform', original);
+      else Reflect.deleteProperty(process, 'platform');
+    }
+  }
+
+  it('spawns xdg-open on linux, unrefs, and never throws', async () => {
+    const url = 'https://open.pingcode.com/oauth2/authorize?x=1';
+    await expect(openBrowser(url)).resolves.toBeUndefined();
+    expect(spawnMock).toHaveBeenCalledWith('xdg-open', [url], { stdio: 'ignore', detached: true });
+    const child = spawnMock.mock.results[0]?.value as { unref: ReturnType<typeof vi.fn> };
+    expect(child.unref).toHaveBeenCalledTimes(1);
+  });
+
+  it('spawns `open` on darwin', async () => {
+    await withPlatform('darwin', () => openBrowser('https://example.com/auth'));
+    expect(spawnMock).toHaveBeenCalledWith('open', ['https://example.com/auth'], {
+      stdio: 'ignore',
+      detached: true,
+    });
+  });
+
+  it('spawns `cmd /c start` on win32', async () => {
+    const url = 'https://example.com/auth';
+    await withPlatform('win32', () => openBrowser(url));
+    expect(spawnMock).toHaveBeenCalledWith('cmd', ['/c', 'start', '', url], {
+      stdio: 'ignore',
+      detached: true,
+    });
+  });
+
+  it('swallows a spawn failure and still resolves (printed URL is the fallback)', async () => {
+    spawnMock.mockImplementation(() => {
+      throw new Error('spawn ENOENT');
+    });
+    await expect(openBrowser('https://example.com/auth')).resolves.toBeUndefined();
+  });
+});
+
+describe('parseLoopback (boundary branches)', () => {
+  it('defaults on an empty string as well as undefined', () => {
+    expect(parseLoopback('')).toEqual({ host: '127.0.0.1', port: 8732 });
+  });
+
+  it('defaults when the redirect uri is not a parseable URL', () => {
+    expect(parseLoopback('not a url')).toEqual({ host: '127.0.0.1', port: 8732 });
+  });
+
+  it('falls back to the default host when the hostname is empty', () => {
+    expect(parseLoopback('http://:8732/callback')).toEqual({ host: '127.0.0.1', port: 8732 });
+  });
+
+  it('falls back to the default port when the port is empty, non-numeric, or not positive', () => {
+    expect(parseLoopback('http://127.0.0.1/callback')).toEqual({ host: '127.0.0.1', port: 8732 });
+    expect(parseLoopback('http://127.0.0.1:abc/callback')).toEqual({ host: '127.0.0.1', port: 8732 });
+    expect(parseLoopback('http://127.0.0.1:0/callback')).toEqual({ host: '127.0.0.1', port: 8732 });
+  });
+
+  it('parses a named host', () => {
+    expect(parseLoopback('http://localhost:9000/callback')).toEqual({ host: 'localhost', port: 9000 });
   });
 });

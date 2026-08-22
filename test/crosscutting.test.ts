@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CommanderError, type Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PRINCIPAL_TYPES, RELATION_TARGETS } from '../src/api/common';
 import {
+  addCrosscutting,
   CROSSCUTTING_FAMILIES,
   RELATION_TARGET_HELP_PREFIX,
   type CrosscuttingFamily,
@@ -892,5 +893,326 @@ describe('the principal type comes from the mount, never from the user', () => {
     );
     expect(run.exit).toBe(0);
     expect(urlOf(run, 1).searchParams.get('principal_type')).toBe('test_run');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// table rendering — the fifteen column .value arrows (design D5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every list column's `.value` arrow is only invoked when a row is actually
+ * drawn into a table. The list tests above used `--json` (`printPage` returns
+ * before `printTable`) or an empty page (no rows), so the fifteen arrows inside
+ * `relationColumns` / `attachmentColumns` / `activityColumns` stayed at count 0
+ * — the entire function-coverage gap. One real row per family, in human mode,
+ * is the only way to exercise them. The comment columns were already covered by
+ * the non-json soft-delete test, so only the other three families appear here.
+ */
+describe('the table renders one real row per family (human mode)', () => {
+  it('relation list renders the target kind, identifier and title', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'relation', 'list', WORK_ITEM_ID, '--target-type', 'test_case'],
+      [
+        workItem,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 30,
+            total: 1,
+            values: [
+            {
+              id: 'r1',
+              target_type: 'test_case',
+              target: { id: 'case-1', identifier: 'CASE-1', title: 'a case', url: 'https://x/c/1' },
+            },
+            ],
+          }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stdout).toContain('r1');
+    expect(run.stdout).toContain('CASE-1');
+    expect(run.stdout).toContain('a case');
+  });
+
+  it('attachment list renders kind, title, format and size', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'attachment', 'list', WORK_ITEM_ID],
+      [
+        workItem,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 30,
+            total: 1,
+            values: [{ id: 'a1', type: 'snippet', title: 'main.go', format: 'go', size: 42, created_at: 1790784000 }],
+          }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stdout).toContain('a1');
+    expect(run.stdout).toContain('snippet');
+    expect(run.stdout).toContain('main.go');
+    expect(run.stdout).toContain('go');
+  });
+
+  it('activity list renders the event, actor and a one-line summary', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'activity', 'list', WORK_ITEM_ID],
+      [
+        workItem,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 30,
+            total: 1,
+            values: [
+              {
+                id: 'ac1',
+                created_at: 1790784000,
+                template: 'update',
+                created_by: { id: 'u1', name: 'Alice' },
+                summary: '更新了\n  多个   字段',
+              },
+            ],
+          }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stdout).toContain('ac1');
+    expect(run.stdout).toContain('update');
+    expect(run.stdout).toContain('Alice');
+    // oneLine collapses whitespace and newlines into single spaces.
+    expect(run.stdout).toContain('更新了 多个 字段');
+  });
+
+  it('a live comment renders STATE=live, balancing the deleted case above', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'comment', 'list', WORK_ITEM_ID],
+      [workItem, page([{ id: 'c1', content: 'hi', is_deleted: 0 }])],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stdout).toContain('live');
+    expect(run.stdout).not.toContain('deleted');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --all pagination for the families that only had a single page before
+// ---------------------------------------------------------------------------
+
+describe('--all walks every page of each listable family', () => {
+  it('relation list --all collects across pages', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'relation', 'list', WORK_ITEM_ID, '--target-type', 'test_case', '--all', '--page-size', '1', '--json'],
+      [
+        workItem,
+        () => jsonResponse({ page_index: 0, page_size: 1, total: 2, values: [{ id: 'r1', target_type: 'test_case' }] }),
+        () => jsonResponse({ page_index: 1, page_size: 1, total: 2, values: [{ id: 'r2', target_type: 'test_case' }] }),
+        page([]),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ count: 2, all: true });
+  });
+
+  it('attachment list --all collects across pages', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'attachment', 'list', WORK_ITEM_ID, '--all', '--page-size', '1', '--json'],
+      [
+        workItem,
+        () => jsonResponse({ page_index: 0, page_size: 1, total: 2, values: [{ id: 'a1', type: 'snippet' }] }),
+        () => jsonResponse({ page_index: 1, page_size: 1, total: 2, values: [{ id: 'a2', type: 'snippet' }] }),
+        page([]),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ count: 2, all: true });
+  });
+
+  it('activity list --all collects across pages', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'activity', 'list', WORK_ITEM_ID, '--all', '--page-size', '1', '--json'],
+      [
+        workItem,
+        () => jsonResponse({ page_index: 0, page_size: 1, total: 2, values: [{ id: 'ac1', template: 'update' }] }),
+        () => jsonResponse({ page_index: 1, page_size: 1, total: 2, values: [{ id: 'ac2', template: 'update' }] }),
+        page([]),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ count: 2, all: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// the remaining single-object reads, deletes, refusals and the mount itself
+// ---------------------------------------------------------------------------
+
+const WRITE_METHODS = ['POST', 'PATCH', 'PUT', 'DELETE'];
+
+describe('the remaining single-object reads, deletes and refusals', () => {
+  it('attachment get reads one attachment, scoped to a comment only when asked', async () => {
+    const bare = await runCli(
+      ['project', 'work-item', 'attachment', 'get', WORK_ITEM_ID, 'a1', '--json'],
+      [workItem, object({ id: 'a1', type: 'snippet', title: 'main.go' })],
+    );
+    expect(bare.exit).toBe(0);
+    expect(urlOf(bare, 1).pathname).toBe('/v1/attachments/a1');
+    expect(urlOf(bare, 1).searchParams.get('comment_id')).toBeNull();
+
+    const scoped = await runCli(
+      ['project', 'work-item', 'attachment', 'get', WORK_ITEM_ID, 'a1', '--comment-id', 'c1', '--json'],
+      [workItem, object({ id: 'a1', type: 'snippet' })],
+    );
+    expect(scoped.exit).toBe(0);
+    expect(urlOf(scoped, 1).searchParams.get('comment_id')).toBe('c1');
+  });
+
+  it('relation delete sends the DELETE once --yes is given, with no principal sent', async () => {
+    // principal_type/target absent on purpose: printRelation's `?? ''` fallbacks
+    // and idOf's nullish branch are otherwise never taken.
+    const run = await runCli(
+      ['project', 'work-item', 'relation', 'delete', WORK_ITEM_ID, 'r1', '--yes'],
+      [object({ id: 'r1' })],
+    );
+    expect(run.exit).toBe(0);
+    // The reference is symmetry-only (design D5.3): no request is spent resolving it.
+    expect(run.calls).toHaveLength(1);
+    expect(run.calls[0]?.method).toBe('DELETE');
+    expect(urlOf(run, 0).pathname).toBe('/v1/relations/r1');
+    expect(urlOf(run, 0).search).toBe('');
+  });
+
+  it('attachment delete sends the DELETE once --yes is given', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'attachment', 'delete', WORK_ITEM_ID, 'a1', '--yes', '--json'],
+      [workItem, object({ id: 'a1', type: 'snippet' })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[1]?.method).toBe('DELETE');
+    expect(urlOf(run, 1).pathname).toBe('/v1/attachments/a1');
+  });
+
+  it('activity get renders an empty event when the template is absent', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'activity', 'get', WORK_ITEM_ID, 'ac1'],
+      [workItem, object({ id: 'ac1', type: 'field_change', created_at: 1 })],
+    );
+    expect(run.exit).toBe(0);
+  });
+
+  it('comment add sends reply_comment_id only when --reply-to is given', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'comment', 'add', WORK_ITEM_ID, '--text', 'reply', '--reply-to', 'c0', '--json'],
+      [workItem, object({ id: 'c10', content: 'reply', is_deleted: 0 })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.calls[1]?.body).toMatchObject({ reply_comment_id: 'c0' });
+  });
+
+  it('refuses a reference that resolves to an empty id, naming the entity', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'comment', 'list', WORK_ITEM_ID, '--json'],
+      [() => jsonResponse({})], // a work-item row with no id → locatorOf returns ''
+    );
+    expect(run.exit).toBe(2);
+    // The read happened, then the empty id was refused locally before any list call.
+    expect(run.calls).toHaveLength(1);
+    expect(run.stderr).toContain('could not resolve');
+    expect(run.stderr).toContain('work item');
+  });
+});
+
+describe('the dry-run gate stays closed for every write family', () => {
+  it('relation add under --dry-run sends no write, the resolve read still runs', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'relation', 'add', WORK_ITEM_ID, '--target-type', 'test_case', '--target-id', 'case-1', '--dry-run', '--json'],
+      [workItem],
+    );
+    expect(run.exit).toBe(0);
+    const writes = run.calls.filter((call) => WRITE_METHODS.includes(call.method));
+    expect(writes).toHaveLength(0);
+    expect(run.calls).toHaveLength(1); // only the principal resolve read
+  });
+});
+
+describe('addCrosscutting — the inject-once mount, exercised directly', () => {
+  it('defaults to all four families when the caller restricts none', () => {
+    const parent = new Command();
+    addCrosscutting(parent, 'work_item', { resolveId: async () => 'id1' });
+    expect(parent.commands.map((command) => command.name())).toEqual([...CROSSCUTTING_FAMILIES]);
+  });
+
+  it('mounts only the families the caller declares, skipping the rest', () => {
+    const parent = new Command();
+    addCrosscutting(parent, 'work_item', { resolveId: async () => 'id1', families: ['relation'] });
+    expect(parent.commands.map((command) => command.name())).toEqual(['relation']);
+  });
+});
+
+describe('the optional-field fallbacks in the rendered blocks', () => {
+  it('activity EVENT falls back to type, then to empty, when the template is absent', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'activity', 'list', WORK_ITEM_ID],
+      [
+        workItem,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 30,
+            total: 2,
+            values: [
+              { id: 'ac1', created_at: 1, type: 'field_change', created_by: { id: 'u1', name: 'Alice' } },
+              { id: 'ac2', created_at: 2, created_by: { id: 'u2', name: 'Bob' } },
+            ],
+          }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    // Row 1 has no template, so EVENT fell back to `type`; row 2 has neither → ''.
+    expect(run.stdout).toContain('field_change');
+  });
+
+  it('attachment get renders the empty fallbacks for absent optional fields', async () => {
+    // Non-json so printFields evaluates the `?? ''` fallbacks (type, title, line,
+    // size, …); --json returns before the field block is built. A bare id exercises
+    // every fallback at once.
+    const run = await runCli(
+      ['project', 'work-item', 'attachment', 'get', WORK_ITEM_ID, 'a1'],
+      [workItem, object({ id: 'a1' })],
+    );
+    expect(run.exit).toBe(0);
+  });
+
+  it('relation list falls back to the target id and empty title when absent', async () => {
+    // The --target-type flag filters; the row's own target_type field is separate
+    // and may be absent, so TARGET TYPE/TITLE exercise their `?? ''` fallbacks.
+    const run = await runCli(
+      ['project', 'work-item', 'relation', 'list', WORK_ITEM_ID, '--target-type', 'test_case'],
+      [
+        workItem,
+        () =>
+          jsonResponse({
+            page_index: 0,
+            page_size: 30,
+            total: 1,
+            values: [{ id: 'r1', target: { id: 'case-1' } }],
+          }),
+      ],
+    );
+    expect(run.exit).toBe(0);
+    // TARGET fell back to refName(target)=target.id; TARGET TYPE/TITLE fell back to ''.
+    expect(run.stdout).toContain('case-1');
+  });
+
+  it('attachment list renders empty cells when every optional field is absent', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'attachment', 'list', WORK_ITEM_ID],
+      [workItem, () => jsonResponse({ page_index: 0, page_size: 30, total: 1, values: [{ id: 'a1' }] })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stdout).toContain('a1');
   });
 });
