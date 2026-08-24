@@ -83,15 +83,17 @@ export function registerMemberCommands(parent: Command): void {
       'it — pingcode api DELETE /v1/pjm/projects/<project>/members/<user> --yes\n' +
       'It is not a refined leaf because a membership is trivially recreatable with\n' +
       '`member add`, and this command group is capped at the endpoints it was scoped for.\n' +
-      "Note the project's 负责人 (assignee) is unrelated to membership: it can be someone\n" +
-      'who is not a member, and setting it does not add them.\n',
+      "Note the project's 负责人 (owner) is unrelated to membership: it can be someone\n" +
+      'who is not a member, and setting it does not add them.\n' +
+      'Work-item assignees are different: they MUST be project members — the CLI blocks\n' +
+      'assignment of non-members, because a non-member cannot see the card.\n',
   );
 
   addGlobalOptions(
     addPagingOptions(
       group
         .command('list')
-        .description('list the members of a project (also the --assignee candidate set)')
+        .description('list the members of a project (the only valid --assignee candidates)')
         .requiredOption('--project <name|id>', PROJECT_HELP),
     ),
     { hidden: true },

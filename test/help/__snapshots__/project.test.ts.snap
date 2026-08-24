@@ -75,7 +75,7 @@ Options:
   -h, --help            display help for command
 
 Commands:
-  list [options]        list the members of a project (also the --assignee candidate set)
+  list [options]        list the members of a project (the only valid --assignee candidates)
   get [options] <user>  show one membership, addressed by the user it belongs to
   add [options]         add a user or a team to a project
   help [command]        display help for command
@@ -87,8 +87,10 @@ There is no \`member remove\` leaf: the endpoint exists, and the generic layer r
 it — pingcode api DELETE /v1/pjm/projects/<project>/members/<user> --yes
 It is not a refined leaf because a membership is trivially recreatable with
 \`member add\`, and this command group is capped at the endpoints it was scoped for.
-Note the project's 负责人 (assignee) is unrelated to membership: it can be someone
+Note the project's 负责人 (owner) is unrelated to membership: it can be someone
 who is not a member, and setting it does not add them.
+Work-item assignees are different: they MUST be project members — the CLI blocks
+assignment of non-members, because a non-member cannot see the card.
 
 "
 `;
@@ -292,8 +294,9 @@ Options:
   --id <ref>            work item to change, repeatable: id, short_id, identifier or URL
   --project <name|id>   scope for resolving --state / --priority by NAME
   --type <name|id>      work-item type, needed with --state <name>
-  --assignee <name|id>  new assignee
-  --assignee-id <id>    new assignee, given as an id
+  --assignee <name|id>  new assignee — must be a project member (requires --project)
+  --assignee-id <id>    new assignee, given as an id — must be a project member (requires
+                        --project)
   --priority <name>     new priority (needs --project)
   --priority-id <id>    new priority, given as an id
   --title <text>        new title — the same title for every work item
@@ -403,7 +406,8 @@ list work items of a project (some filters switch to the search endpoint)
 Options:
   --project <name|id>            project name or id
   --type <name|id>               work-item type
-  --assignee <name|id>           assignee: display name, username, email or id
+  --assignee <name|id>           assignee: display name, username, email or id — must be a project
+                                 member
   --sprint <name|id>             sprint (scrum/hybrid projects only)
   --parent <ref>                 only children of this work item: id, short_id, identifier or URL
   --keywords <text>              fuzzy search over title and description
@@ -515,8 +519,8 @@ Options:
   --description <text>      new description (replaces the old one)
   --type <name|id>          work-item type — resolves --state <name> and lists candidate states on
                             rejection; does NOT modify the type (the API has no type_id in PATCH)
-  --assignee <name|id>      new assignee (the Open API cannot clear it — use the Web UI to
-                            unassign)
+  --assignee <name|id>      new assignee — must be a project member (the Open API cannot clear it —
+                            use the Web UI to unassign)
   --priority <name|id>      new priority
   --parent <ref>            new parent work item
   --sprint <name|id>        move into this sprint (scrum/hybrid projects only)

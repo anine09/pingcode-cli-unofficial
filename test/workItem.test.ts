@@ -217,6 +217,15 @@ const statesPage = () => page([stateBody()]);
 const bugStatesPage = () => page([stateBody({ id: STATE2, name: '进行中' })]);
 const prioritiesPage = () => page([priorityBody()]);
 const usersPage = () => page([userBody()]);
+const memberBody = (over: Record<string, unknown> = {}) => ({
+  id: USER,
+  type: 'user',
+  user: { id: USER, name: 'wangxiao', display_name: '王小' },
+  role: { id: 'r', name: '普通成员' },
+  ...over,
+});
+const memberPage = () => jsonResponse(memberBody());
+const notFound = () => jsonResponse({ code: '100404', message: 'not found' }, { status: 404 });
 const sprintsPage = () => page([sprintBody()]);
 const versionsPage = () => page([versionBody()]);
 const boardsPage = () => page([boardBody()]);
@@ -654,7 +663,7 @@ describe('project work-item create', () => {
         '--end-at',
         '2026-09-30',
       ],
-      [projectsPage, typesPage, statesPage, prioritiesPage, usersPage, sprintsPage, boardsPage, workItemPage],
+      [projectsPage, typesPage, statesPage, prioritiesPage, usersPage, memberPage, sprintsPage, boardsPage, workItemPage],
     );
     expect(run.exit).toBe(0);
     const body = run.writes[0]?.body as Record<string, unknown>;
@@ -801,6 +810,7 @@ describe('project work-item update', () => {
         workItemPage,
         prioritiesPage,
         usersPage,
+        memberPage,
         workItem2Page,
         boardsPage,
         boardsPage,
@@ -947,18 +957,17 @@ describe('project work-item bulk-update', () => {
 
   it('resolves --assignee by name', async () => {
     const run = await runCli(
-      ['project', 'work-item', 'bulk-update', '--id', WI, '--assignee', 'wangxiao'],
-      [workItemPage, usersPage, bulkResultPage],
+      ['project', 'work-item', 'bulk-update', '--id', WI, '--assignee', 'wangxiao', '--project', 'Mobile App'],
+      [workItemPage, projectsPage, usersPage, memberPage, bulkResultPage],
     );
     expect(run.writes[0]?.body).toMatchObject({ property_name: 'assignee_id', property_value: USER });
   });
 
   it('passes --assignee-id through with no lookup', async () => {
     const run = await runCli(
-      ['project', 'work-item', 'bulk-update', '--id', WI, '--assignee-id', USER],
-      [workItemPage, bulkResultPage],
+      ['project', 'work-item', 'bulk-update', '--id', WI, '--assignee-id', USER, '--project', 'Mobile App'],
+      [workItemPage, projectsPage, memberPage, bulkResultPage],
     );
-    expect(run.calls).toHaveLength(2);
     expect(run.writes[0]?.body).toMatchObject({ property_name: 'assignee_id', property_value: USER });
   });
 
@@ -1128,6 +1137,59 @@ describe('project work-item bulk-update', () => {
     const plan = JSON.parse(run.stdout) as { dry_run: boolean; request: { method: string } };
     expect(plan.dry_run).toBe(true);
     expect(plan.request.method).toBe('PATCH');
+  });
+
+  // ─── non-member assignee blocked ──────────────────────────────────────────
+
+  it('blocks --assignee on create when the user is not a project member', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'create', '--project', 'Mobile App', '--type', 'task', '--title', 'T', '--assignee', 'wangxiao'],
+      [projectsPage, typesPage, usersPage, notFound],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toHaveLength(0);
+    expect(run.stderr).toContain('not a member');
+    expect(run.stderr).toContain('cannot see the card');
+  });
+
+  it('blocks --assignee on update when the user is not a project member', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'update', WI, '--assignee', 'wangxiao'],
+      [workItemPage, usersPage, notFound],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toHaveLength(0);
+    expect(run.stderr).toContain('not a member');
+  });
+
+  it('blocks --assignee on bulk-update when the user is not a project member', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'bulk-update', '--id', WI, '--assignee', 'wangxiao', '--project', 'Mobile App'],
+      [workItemPage, projectsPage, usersPage, notFound],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toHaveLength(0);
+    expect(run.stderr).toContain('not a member');
+  });
+
+  it('blocks --assignee-id on bulk-update when the user is not a project member', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'bulk-update', '--id', WI, '--assignee-id', USER, '--project', 'Mobile App'],
+      [workItemPage, projectsPage, notFound],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toHaveLength(0);
+    expect(run.stderr).toContain('not a member');
+  });
+
+  it('requires --project for --assignee on bulk-update to verify membership', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'bulk-update', '--id', WI, '--assignee', 'wangxiao'],
+      [workItemPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toHaveLength(0);
+    expect(run.stderr).toContain('requires --project');
   });
 });
 
