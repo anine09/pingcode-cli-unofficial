@@ -1625,8 +1625,8 @@ async function runBulkUpdate(flags: BulkUpdateFlags, command: Command): Promise<
               {
                 hint:
                   'bulk-update --assignee verifies membership in --project, so items from other ' +
-                  'projects cannot be included. Split into per-project calls, or drop --project and ' +
-                  'use --assignee-id to skip name resolution',
+                  'projects cannot be included. Split into per-project calls, each with the ' +
+                  'matching --project value',
               },
             );
           }
