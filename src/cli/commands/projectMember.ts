@@ -93,7 +93,7 @@ export function registerMemberCommands(parent: Command): void {
     addPagingOptions(
       group
         .command('list')
-        .description('list the members of a project (the only valid --assignee candidates)')
+        .description('list the members of a project (user memberships are the only valid --assignee candidates)')
         .requiredOption('--project <name|id>', PROJECT_HELP),
     ),
     { hidden: true },

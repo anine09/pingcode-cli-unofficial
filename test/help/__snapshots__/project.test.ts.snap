@@ -75,7 +75,8 @@ Options:
   -h, --help            display help for command
 
 Commands:
-  list [options]        list the members of a project (the only valid --assignee candidates)
+  list [options]        list the members of a project (user memberships are the only valid
+                        --assignee candidates)
   get [options] <user>  show one membership, addressed by the user it belongs to
   add [options]         add a user or a team to a project
   help [command]        display help for command

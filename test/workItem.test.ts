@@ -1191,6 +1191,17 @@ describe('project work-item bulk-update', () => {
     expect(run.writes).toHaveLength(0);
     expect(run.stderr).toContain('requires --project');
   });
+
+  it('rejects items from other projects when --assignee and --project are set', async () => {
+    const otherProjectItem = () => jsonResponse(workItemBody({ project: { id: '6a9999999999999999999999', name: 'Other' } }));
+    const run = await runCli(
+      ['project', 'work-item', 'bulk-update', '--id', WI, '--assignee', 'wangxiao', '--project', 'Mobile App'],
+      [otherProjectItem, projectsPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.writes).toHaveLength(0);
+    expect(run.stderr).toContain('must belong to the --project');
+  });
 });
 
 // ---------------------------------------------------------------------------

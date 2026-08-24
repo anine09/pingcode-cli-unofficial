@@ -29,7 +29,7 @@ gh pr merge --merge --delete-branch
 
 Every commit message follows [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
 
-```
+```text
 <type>(<scope>): <subject>
 
 <body>

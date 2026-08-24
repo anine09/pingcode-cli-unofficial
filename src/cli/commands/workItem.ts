@@ -1604,13 +1604,34 @@ async function runBulkUpdate(flags: BulkUpdateFlags, command: Command): Promise<
       // One read per --id: the endpoint takes real ids only ('ids.0'格式不正确 for
       // anything else), and this is what lets an identifier or a pasted URL work.
       const ids: string[] = [];
+      const itemProjects = new Set<string>();
       for (const ref of refs) {
-        ids.push((await resolveWorkItem(attemptCtx, ref)).id);
+        const locator = await resolveWorkItem(attemptCtx, ref);
+        ids.push(locator.id);
+        if (locator.projectId !== undefined) itemProjects.add(locator.projectId);
       }
 
       const project =
         flags.project === undefined ? undefined : await resolveProject(attemptCtx, flags.project);
       if (project !== undefined) resolutions.push(project);
+
+      // When assigning, all items must belong to the specified project — a
+      // non-member check against the wrong project would be meaningless.
+      if (chosen === 'assignee' && project !== undefined) {
+        for (const projId of itemProjects) {
+          if (projId !== project.id) {
+            throw new UsageError(
+              'all work items must belong to the --project when --assignee is set',
+              {
+                hint:
+                  'bulk-update --assignee verifies membership in --project, so items from other ' +
+                  'projects cannot be included. Split into per-project calls, or drop --project and ' +
+                  'use --assignee-id to skip name resolution',
+              },
+            );
+          }
+        }
+      }
 
       const pair = await resolvePropertyValue(attemptCtx, flags, chosen, project?.id, resolutions);
       return {
