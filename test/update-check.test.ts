@@ -143,14 +143,14 @@ describe('checkForUpdate — network failures', () => {
     });
   });
 
-  it('returns up-to-date when no cache and network fails', async () => {
+  it('returns unknown when no cache and network fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
 
     const result = await checkForUpdate({});
-    expect(result).toEqual({ status: 'up-to-date' });
+    expect(result).toEqual({ status: 'unknown' });
   });
 
-  it('returns up-to-date when GitHub returns non-ok status', async () => {
+  it('returns unknown when GitHub returns non-ok status', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -160,7 +160,7 @@ describe('checkForUpdate — network failures', () => {
     );
 
     const result = await checkForUpdate({});
-    expect(result).toEqual({ status: 'up-to-date' });
+    expect(result).toEqual({ status: 'unknown' });
   });
 });
 
@@ -221,7 +221,7 @@ describe('checkForUpdate — version comparison', () => {
     expect(result.status).toBe('update-available');
   });
 
-  it('returns up-to-date when tag_name is missing from response', async () => {
+  it('returns unknown when tag_name is missing from response', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -231,10 +231,10 @@ describe('checkForUpdate — version comparison', () => {
     );
 
     const result = await checkForUpdate({});
-    expect(result).toEqual({ status: 'up-to-date' });
+    expect(result).toEqual({ status: 'unknown' });
   });
 
-  it('returns up-to-date when response JSON is malformed', async () => {
+  it('returns unknown when response JSON is malformed', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -244,7 +244,82 @@ describe('checkForUpdate — version comparison', () => {
     );
 
     const result = await checkForUpdate({});
-    expect(result).toEqual({ status: 'up-to-date' });
+    expect(result).toEqual({ status: 'unknown' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// skipCache option
+// ---------------------------------------------------------------------------
+
+describe('checkForUpdate — skipCache', () => {
+  it('bypasses fresh cache when skipCache is true', async () => {
+    // Write a fresh cache saying version 99.99.99.
+    const freshCache = {
+      checkedAt: new Date().toISOString(),
+      latestVersion: '99.99.99',
+    };
+    writeFileSync(CACHE_FILE, JSON.stringify(freshCache, null, 2));
+
+    // The network says a different newer version exists.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ tag_name: 'v88.88.88' }),
+      }),
+    );
+
+    // Without skipCache: uses cache → 99.99.99
+    const fromCache = await checkForUpdate({});
+    expect(fromCache).toEqual({
+      status: 'update-available',
+      current: VERSION,
+      latest: '99.99.99',
+    });
+
+    // With skipCache: ignores cache, fetches → 88.88.88
+    const fresh = await checkForUpdate({}, { skipCache: true });
+    expect(fresh).toEqual({
+      status: 'update-available',
+      current: VERSION,
+      latest: '88.88.88',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rate limit retry
+// ---------------------------------------------------------------------------
+
+describe('checkForUpdate — rate limit retry', () => {
+  it('retries once on 403 and succeeds on second attempt', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 403, ok: false })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ tag_name: 'v99.99.99' }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await checkForUpdate({});
+    expect(result).toEqual({
+      status: 'update-available',
+      current: VERSION,
+      latest: '99.99.99',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns unknown when both attempts get 403', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ status: 403, ok: false }),
+    );
+
+    const result = await checkForUpdate({});
+    expect(result).toEqual({ status: 'unknown' });
   });
 });
 
