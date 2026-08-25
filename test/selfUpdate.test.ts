@@ -355,6 +355,7 @@ describe('syncSkills', () => {
       { name: 'claude', label: 'Claude', dir: tempDir('target-claude') },
       { name: 'opencode', label: 'OpenCode', dir: tempDir('target-opencode') },
     ];
+    for (const t of targets) ensureDir(t.dir);
 
     const written = await syncSkills(source, targets);
 
@@ -383,17 +384,40 @@ describe('syncSkills', () => {
     expect(readFileSync(path.join(targetDir, 'SKILL.md'), 'utf8')).toBe('# PingCode Skill\n');
   });
 
-  it('creates target directories if they do not exist', async () => {
-    const source = tempDir('source-create');
+  it('skips targets whose skill directory does not exist', async () => {
+    const source = tempDir('source-skip');
     setupSource(source);
 
-    const targetDir = path.join(tempDir('deep-nested-target'), 'nested', 'target');
+    // target dir does NOT exist on disk
+    const targetDir = path.join(tempDir('nonexistent-target'), 'skills', 'pingcode');
     const target: SkillTarget = { name: 'claude', label: 'Claude', dir: targetDir };
 
-    await syncSkills(source, [target]);
+    const written = await syncSkills(source, [target]);
 
-    expect(existsSync(path.join(targetDir, 'SKILL.md'))).toBe(true);
-    expect(existsSync(path.join(targetDir, 'modules', 'api.md'))).toBe(true);
+    // Nothing written, nothing created
+    expect(written).toHaveLength(0);
+    expect(existsSync(targetDir)).toBe(false);
+  });
+
+  it('only syncs to targets that already exist, skipping the rest', async () => {
+    const source = tempDir('source-mixed');
+    setupSource(source);
+
+    const existingDir = tempDir('target-exists');
+    ensureDir(existingDir);
+    const missingDir = path.join(tempDir('target-missing'), 'nested', 'skills');
+
+    const targets: SkillTarget[] = [
+      { name: 'claude', label: 'Claude', dir: existingDir },
+      { name: 'opencode', label: 'OpenCode', dir: missingDir },
+    ];
+
+    const written = await syncSkills(source, targets);
+
+    // Only wrote to the existing target
+    expect(written).toContain(path.join(existingDir, 'SKILL.md'));
+    expect(written).not.toContain(path.join(missingDir, 'SKILL.md'));
+    expect(existsSync(missingDir)).toBe(false);
   });
 
   it('ignores non-md files in modules dir', async () => {
@@ -406,7 +430,9 @@ describe('syncSkills', () => {
     writeFileSync(path.join(modulesDir, 'image.png'), 'not-markdown');
     writeFileSync(path.join(modulesDir, 'data.json'), '{}');
 
-    const target: SkillTarget = { name: 'claude', label: 'Claude', dir: tempDir('filter-target') };
+    const targetDir = tempDir('filter-target');
+    ensureDir(targetDir);
+    const target: SkillTarget = { name: 'claude', label: 'Claude', dir: targetDir };
     const written = await syncSkills(source, [target]);
 
     const basenames = written.map((p) => path.basename(p));

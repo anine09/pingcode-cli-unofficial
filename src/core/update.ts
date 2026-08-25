@@ -348,9 +348,13 @@ const MODULES_DIR = 'modules';
 /**
  * Copy skill files from `sourceDir` to each target directory.
  *
- * Copies `SKILL.md` first, then every `.md` file in `modules/` (sorted by
- * name) — reusing the logic from `scripts/install-skill.ts:collectPayload()`.
- * Always force-overwrites existing files.
+ * Only syncs to a target if its skill directory **already exists** — the user
+ * must have explicitly installed the skill for that agent first (via
+ * `skill:install` or a previous self-update). This prevents self-update from
+ * creating skill directories for agents the user does not have installed.
+ *
+ * Within an existing target, always force-overwrites (the whole point of
+ * sync is to update).
  *
  * @returns Absolute paths of every file written.
  */
@@ -378,6 +382,10 @@ export async function syncSkills(
   }
 
   for (const target of targets) {
+    // Skip targets whose skill directory was never created — we do not
+    // auto-create directories for agents the user has not opted into.
+    if (!existsSync(target.dir)) continue;
+
     for (const file of payload) {
       const dest = path.join(target.dir, file.relative);
       mkdirSync(path.dirname(dest), { recursive: true });
