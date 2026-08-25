@@ -344,9 +344,9 @@ async function installFromRelease() {
     extractZip(zipBuffer, extractTmp);
 
     // Validate the extracted payload before touching the install dir.
-    const entryPoint = path.join(extractTmp, 'dist', 'bin', 'pingcode.js');
-    if (!existsSync(entryPoint)) {
-      throw new Error(`extraction completed but entry point not found: ${entryPoint}`);
+    const stagedEntry = path.join(extractTmp, 'dist', 'bin', 'pingcode.js');
+    if (!existsSync(stagedEntry)) {
+      throw new Error(`extraction completed but entry point not found: ${stagedEntry}`);
     }
 
     // Atomic replace: backup old → move new in → clean up backup.
@@ -368,6 +368,9 @@ async function installFromRelease() {
     try { rmSync(extractTmp, { recursive: true, force: true }); } catch {}
     die(`extraction failed: ${String(err)}`);
   }
+
+  // Entry point now lives under the final install dir (extractTmp was renamed).
+  const entryPoint = path.join(dir, 'dist', 'bin', 'pingcode.js');
 
   // 6. Create bin shim.
   process.stdout.write(`\n→ creating bin shim at ${binShimPath()}…\n`);

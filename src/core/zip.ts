@@ -18,6 +18,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
+import { TransportError } from './errors';
 
 // ---------------------------------------------------------------------------
 // ZIP signatures
@@ -218,7 +219,7 @@ export async function extractZip(zipPath: string, destDir: string): Promise<stri
 
     // Path traversal guard: reject entries that escape the destination directory.
     if (!dest.startsWith(resolvedDest + path.sep) && dest !== resolvedDest) {
-      throw new Error(`path traversal detected: "${entry.name}" escapes destination directory`);
+      throw new TransportError(`path traversal detected: "${entry.name}" escapes destination directory`);
     }
 
     // Create any intermediate directories (e.g. "dist/bin/").
