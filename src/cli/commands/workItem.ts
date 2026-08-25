@@ -1607,6 +1607,14 @@ async function runBulkUpdate(flags: BulkUpdateFlags, command: Command): Promise<
       const itemProjects = new Set<string>();
       for (const ref of refs) {
         const locator = await resolveWorkItem(attemptCtx, ref);
+        // When assigning, every item must report a project — otherwise we
+        // cannot verify the assignee is a member of the right project.
+        if (chosen === 'assignee' && locator.projectId === undefined) {
+          throw new UsageError(
+            `work item ${locator.identifier ?? locator.id} did not report a project, so --assignee cannot verify membership`,
+            { hint: 'the work item must report a project ID — check that the item exists and is not archived' },
+          );
+        }
         ids.push(locator.id);
         if (locator.projectId !== undefined) itemProjects.add(locator.projectId);
       }
