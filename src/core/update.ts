@@ -218,10 +218,12 @@ function pipeWebStreamToFile(webStream: ReadableStream<Uint8Array>, dest: Writab
 /**
  * Atomically replace the current install directory with the staging directory.
  *
- * 1. Rename `current` → `current.backup` (if `current` exists)
- * 2. Rename `staging` → `current`
- * 3. If step 2 fails, restore the backup
- * 4. Clean up the backup on success
+ * 1. If staging is nested under current, move it aside first (so renaming
+ *    current → backup doesn't carry staging along).
+ * 2. Rename `current` → `current.backup` (if `current` exists)
+ * 3. Rename `incoming` → `current`
+ * 4. If step 3 fails, restore the backup
+ * 5. Clean up the backup on success
  *
  * @throws TransportError if the replace fails (backup is restored).
  */
@@ -236,11 +238,37 @@ export async function atomicReplace(
     rmSync(backup, { recursive: true, force: true });
   }
 
+  // If staging is nested under current (e.g. `current/.staging`), move it
+  // to a sibling path first. Otherwise renaming `current` → `backup` would
+  // carry the staging directory along, and the subsequent rename would fail.
+  const isNested = staging.startsWith(`${current}${path.sep}`);
+  const incoming = isNested ? `${current}.incoming` : staging;
+
+  if (isNested) {
+    if (existsSync(incoming)) rmSync(incoming, { recursive: true, force: true });
+    try {
+      renameSync(staging, incoming);
+    } catch (error) {
+      throw new TransportError(
+        `failed to move staging aside: ${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  }
+
   // Step 1: rename current → backup.
   if (existsSync(current)) {
     try {
       renameSync(current, backup);
     } catch (error) {
+      // Restore incoming back to staging if we moved it.
+      if (isNested && existsSync(incoming)) {
+        try {
+          renameSync(incoming, staging);
+        } catch {
+          // Best-effort restore; the original error is more important.
+        }
+      }
       throw new TransportError(
         `failed to back up current install: ${errorMessage(error)}`,
         { cause: error },
@@ -248,9 +276,9 @@ export async function atomicReplace(
     }
   }
 
-  // Step 2: rename staging → current.
+  // Step 2: rename incoming → current.
   try {
-    renameSync(staging, current);
+    renameSync(incoming, current);
   } catch (error) {
     // Attempt to restore backup.
     try {

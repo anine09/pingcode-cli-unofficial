@@ -258,6 +258,26 @@ describe('atomicReplace', () => {
 
     expect(existsSync(`${install}.backup`)).toBe(false);
   });
+
+  it('handles staging nested under install dir', async () => {
+    // When staging is `install/.staging`, the old code would rename
+    // `install` → `install.backup` (carrying `.staging` along), then fail
+    // to find the staging directory. The fix moves staging aside first.
+    const install = tempDir('nested-install');
+    const staging = path.join(install, '.staging');
+    ensureDir(install);
+    ensureDir(staging);
+    writeFileSync(path.join(install, 'old.txt'), 'old');
+    writeFileSync(path.join(staging, 'new.txt'), 'new');
+
+    await atomicReplace(install, staging);
+
+    expect(existsSync(path.join(install, 'new.txt'))).toBe(true);
+    expect(existsSync(path.join(install, 'old.txt'))).toBe(false);
+    expect(existsSync(staging)).toBe(false);
+    expect(existsSync(`${install}.backup`)).toBe(false);
+    expect(existsSync(`${install}.incoming`)).toBe(false);
+  });
 });
 
 // ===========================================================================

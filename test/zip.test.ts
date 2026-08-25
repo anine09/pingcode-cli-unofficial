@@ -270,6 +270,44 @@ describe('extractZip', () => {
     await expect(extractZip(zipPath, dest)).rejects.toThrow(/End of Central Directory/);
   });
 
+  it('throws for buffers shorter than the EOCD record', async () => {
+    const zipPath = path.join(tmpDir, 'tiny.zip');
+    writeFileSync(zipPath, Buffer.from('PK\x05\x06')); // 6 bytes, well under 22
+
+    const dest = path.join(tmpDir, 'out');
+    await expect(extractZip(zipPath, dest)).rejects.toThrow(/End of Central Directory/);
+  });
+
+  it('rejects path traversal entries (zip slip)', async () => {
+    const zipPath = writeZip([
+      { name: '../../etc/passwd', data: Buffer.from('evil') },
+    ]);
+
+    const dest = path.join(tmpDir, 'out');
+    await expect(extractZip(zipPath, dest)).rejects.toThrow(/path traversal/);
+  });
+
+  it('rejects path traversal with nested prefix', async () => {
+    const zipPath = writeZip([
+      { name: '../../../tmp/evil.sh', data: Buffer.from('evil') },
+      { name: 'safe.txt', data: Buffer.from('safe') },
+    ]);
+
+    const dest = path.join(tmpDir, 'out');
+    await expect(extractZip(zipPath, dest)).rejects.toThrow(/path traversal/);
+  });
+
+  it('allows legitimate nested paths', async () => {
+    const zipPath = writeZip([
+      { name: 'dist/bin/pingcode.js', data: Buffer.from('#!/usr/bin/env node') },
+      { name: 'skills/pingcode/SKILL.md', data: Buffer.from('# Skill') },
+    ]);
+
+    const dest = path.join(tmpDir, 'out');
+    const result = await extractZip(zipPath, dest);
+    expect(result).toEqual(['dist/bin/pingcode.js', 'skills/pingcode/SKILL.md']);
+  });
+
   it('extracts binary data correctly (deflate)', async () => {
     const binary = Buffer.alloc(256);
     for (let i = 0; i < 256; i++) binary[i] = i;

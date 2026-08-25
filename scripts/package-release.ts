@@ -140,7 +140,7 @@ function createZip(root: string, outputDir: string, version: string, platform: P
   if (existsSync(output)) rmSync(output);
   execFileSync(
     'zip',
-    ['-rq', output, BIN_ENTRY, 'skills/'],
+    ['-rq', output, BIN_ENTRY, 'skills/pingcode/'],
     { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' },
   );
   return output;
@@ -181,4 +181,10 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-process.exitCode = await main(process.argv.slice(2));
+try {
+  process.exitCode = await main(process.argv.slice(2));
+} catch (err) {
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`error: ${message}\n`);
+  process.exitCode = 1;
+}

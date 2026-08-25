@@ -39,6 +39,7 @@ const BIN = 'pingcode';
 const NODE_MAJOR_REQUIRED = 20;
 const GITHUB_REPO = 'anine09/pingcode-cli-unofficial';
 const GITHUB_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+const FETCH_TIMEOUT_MS = 30_000;
 
 function die(message) {
   process.stderr.write(`\n✗ install failed: ${message}\n`);
@@ -118,8 +119,11 @@ function binShimPath() {
  * Extract a ZIP archive from a Buffer to a destination directory.
  * Supports stored (method 0) and deflated (method 8) entries.
  * Skips directories and entries with unsupported compression methods.
+ * Throws on error (caller is responsible for cleanup and die()).
  */
 function extractZip(buffer, destDir) {
+  const resolvedDest = path.resolve(destDir);
+
   // --- End of Central Directory record ---
   // Scan backwards for the EOCD signature (0x06054b50).
   let eocdOffset = -1;
@@ -129,7 +133,7 @@ function extractZip(buffer, destDir) {
       break;
     }
   }
-  if (eocdOffset === -1) die('not a valid zip file (EOCD record not found)');
+  if (eocdOffset === -1) throw new Error('not a valid zip file (EOCD record not found)');
 
   const entryCount = buffer.readUInt16LE(eocdOffset + 10);
   let cdOffset = buffer.readUInt32LE(eocdOffset + 16);
@@ -137,7 +141,7 @@ function extractZip(buffer, destDir) {
   // --- Walk central directory entries ---
   for (let i = 0; i < entryCount; i++) {
     if (buffer.readUInt32LE(cdOffset) !== 0x02014b50) {
-      die(`corrupt zip: invalid central directory signature at offset ${cdOffset}`);
+      throw new Error(`corrupt zip: invalid central directory signature at offset ${cdOffset}`);
     }
 
     const compressionMethod = buffer.readUInt16LE(cdOffset + 10);
@@ -158,7 +162,7 @@ function extractZip(buffer, destDir) {
 
     // --- Read local file header to find the data offset ---
     if (buffer.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
-      die(`corrupt zip: invalid local file header signature for "${fileName}"`);
+      throw new Error(`corrupt zip: invalid local file header signature for "${fileName}"`);
     }
     const localNameLength = buffer.readUInt16LE(localHeaderOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localHeaderOffset + 28);
@@ -175,14 +179,17 @@ function extractZip(buffer, destDir) {
       try {
         data = inflateRawSync(compressed);
       } catch {
-        die(`failed to decompress "${fileName}" (corrupt deflate data)`);
+        throw new Error(`failed to decompress "${fileName}" (corrupt deflate data)`);
       }
     } else {
-      die(`unsupported compression method ${compressionMethod} for "${fileName}"`);
+      throw new Error(`unsupported compression method ${compressionMethod} for "${fileName}"`);
     }
 
-    // --- Write file to disk ---
-    const outPath = path.join(destDir, fileName);
+    // --- Write file to disk (with path traversal guard) ---
+    const outPath = path.resolve(resolvedDest, fileName);
+    if (!outPath.startsWith(resolvedDest + path.sep) && outPath !== resolvedDest) {
+      throw new Error(`path traversal detected: "${fileName}" escapes destination directory`);
+    }
     mkdirSync(path.dirname(outPath), { recursive: true });
     writeFileSync(outPath, data);
   }
@@ -197,6 +204,7 @@ async function fetchReleaseInfo() {
   try {
     response = await fetch(GITHUB_API, {
       headers: { Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
   } catch (err) {
     die(`failed to reach GitHub API: ${String(err)}`);
@@ -228,7 +236,10 @@ function findAsset(release, platform, arch) {
 async function downloadFile(url, destPath) {
   let response;
   try {
-    response = await fetch(url, { redirect: 'follow' });
+    response = await fetch(url, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch (err) {
     die(`download failed: ${String(err)}`);
   }
@@ -321,27 +332,41 @@ async function installFromRelease() {
   await downloadFile(asset.browser_download_url, zipPath);
   process.stdout.write(`  saved to ${zipPath}\n`);
 
-  // 4. Extract to XDG install directory.
+  // 4. Extract to a fresh temp directory, validate, then atomically replace.
   const dir = installDir();
+  const backup = `${dir}.backup`;
+  const extractTmp = path.join(os.tmpdir(), `pingcode-cli-extract-${Date.now()}`);
+  mkdirSync(extractTmp, { recursive: true });
   process.stdout.write(`\n→ extracting to ${dir}…\n`);
 
   try {
     const zipBuffer = readFileSync(zipPath);
-    extractZip(zipBuffer, dir);
-  } catch (err) {
-    // Clean up partial install.
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors.
-    }
-    die(`extraction failed: ${String(err)}`);
-  }
+    extractZip(zipBuffer, extractTmp);
 
-  // 5. Verify the entry point exists.
-  const entryPoint = path.join(dir, 'dist', 'bin', 'pingcode.js');
-  if (!existsSync(entryPoint)) {
-    die(`extraction completed but entry point not found: ${entryPoint}`);
+    // Validate the extracted payload before touching the install dir.
+    const entryPoint = path.join(extractTmp, 'dist', 'bin', 'pingcode.js');
+    if (!existsSync(entryPoint)) {
+      throw new Error(`extraction completed but entry point not found: ${entryPoint}`);
+    }
+
+    // Atomic replace: backup old → move new in → clean up backup.
+    if (existsSync(backup)) rmSync(backup, { recursive: true, force: true });
+    if (existsSync(dir)) renameSync(dir, backup);
+    try {
+      renameSync(extractTmp, dir);
+    } catch (err) {
+      // Restore backup on failure so the previous install is not lost.
+      if (existsSync(backup)) {
+        try { renameSync(backup, dir); } catch {}
+      }
+      throw err;
+    }
+    // Clean up backup on success.
+    if (existsSync(backup)) rmSync(backup, { recursive: true, force: true });
+  } catch (err) {
+    // Clean up only the temp extract dir; the install dir and backup are untouched.
+    try { rmSync(extractTmp, { recursive: true, force: true }); } catch {}
+    die(`extraction failed: ${String(err)}`);
   }
 
   // 6. Create bin shim.

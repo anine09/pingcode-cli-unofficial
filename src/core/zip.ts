@@ -82,6 +82,8 @@ interface CentralEntry {
  * Returns the offset of the EOCD signature, or -1 if not found.
  */
 function findEOCD(buf: Buffer): number {
+  // EOCD is at least 22 bytes; a shorter buffer cannot contain a valid record.
+  if (buf.length < 22) return -1;
   // EOCD is at least 22 bytes; the comment is at most 65535 bytes, so we only
   // need to scan the tail of the file.
   const maxBack = Math.min(buf.length, 22 + 0xffff);
@@ -188,7 +190,8 @@ export async function extractZip(zipPath: string, destDir: string): Promise<stri
   const buf = readFileSync(zipPath);
   const entries = parseCentralDirectory(buf);
 
-  mkdirSync(destDir, { recursive: true });
+  const resolvedDest = path.resolve(destDir);
+  mkdirSync(resolvedDest, { recursive: true });
 
   const extracted: string[] = [];
 
@@ -211,7 +214,12 @@ export async function extractZip(zipPath: string, destDir: string): Promise<stri
     }
 
     const data = extractEntryData(buf, entry);
-    const dest = path.join(destDir, entry.name);
+    const dest = path.resolve(resolvedDest, entry.name);
+
+    // Path traversal guard: reject entries that escape the destination directory.
+    if (!dest.startsWith(resolvedDest + path.sep) && dest !== resolvedDest) {
+      throw new Error(`path traversal detected: "${entry.name}" escapes destination directory`);
+    }
 
     // Create any intermediate directories (e.g. "dist/bin/").
     mkdirSync(path.dirname(dest), { recursive: true });

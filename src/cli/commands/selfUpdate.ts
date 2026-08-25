@@ -35,8 +35,8 @@ import { addGlobalOptions } from '../globals';
  */
 
 type SelfUpdateFlags = {
-  checkOnly: boolean;
-  force: boolean;
+  checkOnly?: boolean;
+  force?: boolean;
 };
 
 export function registerSelfUpdateCommands(program: Command): void {
