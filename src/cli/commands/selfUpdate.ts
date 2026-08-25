@@ -59,8 +59,8 @@ async function runSelfUpdate(flags: SelfUpdateFlags, command: Command): Promise<
   const { ctx } = contextFor(command);
   const mode = modeOf(ctx);
 
-  // 1. Check for update.
-  const check = await checkForUpdate();
+  // 1. Check for update.  --check-only bypasses cache so it always queries the network.
+  const check = await checkForUpdate(undefined, flags.checkOnly ? { skipCache: true } : undefined);
 
   // --check-only: print result and exit.
   if (flags.checkOnly) {
@@ -84,6 +84,17 @@ async function runSelfUpdate(flags: SelfUpdateFlags, command: Command): Promise<
       printJson({ status: 'skipped' });
     } else {
       errLine(paint.dim('Update check skipped (PINGCODE_NO_UPDATE_CHECK is set)'));
+    }
+    return;
+  }
+
+  // Could not determine version (network error, rate limit, no cache) and not forcing.
+  if (check.status === 'unknown' && !flags.force) {
+    if (mode.json) {
+      printJson({ status: 'unknown', error: 'could not check for updates' });
+    } else {
+      errLine(paint.yellow('Could not check for updates (network error or rate limit)'));
+      errLine(paint.dim('  try again later, or use --force to skip the check'));
     }
     return;
   }
@@ -212,6 +223,9 @@ function printCheckResult(
       break;
     case 'skipped':
       errLine(paint.dim('Update check skipped (PINGCODE_NO_UPDATE_CHECK is set)'));
+      break;
+    case 'unknown':
+      errLine(paint.yellow('Could not check for updates (network error or rate limit)'));
       break;
   }
 }
