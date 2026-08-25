@@ -7,6 +7,7 @@ import { registerProjectCommands } from './commands/project';
 import { registerReleaseCommands } from './commands/release';
 import { registerResolveCommands } from './commands/resolve';
 import { registerScmCommands } from './commands/scm';
+import { registerSelfUpdateCommands } from './commands/selfUpdate';
 import { registerSettingsCommands } from './commands/settings';
 import { registerTesthubCommands } from './commands/testhub';
 
@@ -46,4 +47,5 @@ export const GROUPS: readonly (readonly [string, (program: Command) => void])[] 
   ['build', registerBuildCommands],
   ['release', registerReleaseCommands],
   ['settings', registerSettingsCommands],
+  ['self-update', registerSelfUpdateCommands],
 ];
