@@ -28,6 +28,7 @@ import {
   type UpdateWorkItemInput,
   type WorkItemListQuery,
 } from '../../api/workItems';
+import { getProjectMember } from '../../api/projects';
 import type { Ctx } from '../../core/context';
 import { ApiError, NotFoundError, PingcodeError, UsageError } from '../../core/errors';
 import {
@@ -235,7 +236,7 @@ export function registerWorkItemCommands(parent: Command): void {
           .description('list work items of a project (some filters switch to the search endpoint)')
           .requiredOption('--project <name|id>', 'project name or id')
           .option('--type <name|id>', 'work-item type')
-          .option('--assignee <name|id>', 'assignee: display name, username, email or id')
+          .option('--assignee <name|id>', 'assignee: display name, username, email or id — must be a project member')
           .option('--sprint <name|id>', 'sprint (scrum/hybrid projects only)')
           .option('--parent <ref>', 'only children of this work item: id, short_id, identifier or URL')
           .option('--keywords <text>', 'fuzzy search over title and description')
@@ -334,7 +335,7 @@ export function registerWorkItemCommands(parent: Command): void {
         .option('--title <text>', 'new title')
         .option('--description <text>', 'new description (replaces the old one)')
         .option('--type <name|id>', TYPE_FLAG_HELP)
-        .option('--assignee <name|id>', 'new assignee (the Open API cannot clear it — use the Web UI to unassign)')
+        .option('--assignee <name|id>', 'new assignee — must be a project member (the Open API cannot clear it — use the Web UI to unassign)')
         .option('--priority <name|id>', 'new priority')
         .option('--parent <ref>', 'new parent work item')
         .option('--sprint <name|id>', 'move into this sprint (scrum/hybrid projects only)')
@@ -424,8 +425,8 @@ export function registerWorkItemCommands(parent: Command): void {
         )
         .option('--project <name|id>', 'scope for resolving --state / --priority by NAME')
         .option('--type <name|id>', 'work-item type, needed with --state <name>')
-        .option('--assignee <name|id>', 'new assignee')
-        .option('--assignee-id <id>', 'new assignee, given as an id')
+        .option('--assignee <name|id>', 'new assignee — must be a project member (requires --project)')
+        .option('--assignee-id <id>', 'new assignee, given as an id — must be a project member (requires --project)')
         .option('--priority <name>', 'new priority (needs --project)')
         .option('--priority-id <id>', 'new priority, given as an id')
         .option('--title <text>', 'new title — the same title for every work item')
@@ -1185,6 +1186,33 @@ async function getByIdentifier(ctx: Ctx, identifier: string): Promise<WorkItem> 
 // create
 // ---------------------------------------------------------------------------
 
+/**
+ * Block assignment of a non-member: PingCode's visibility model ties work-item
+ * access to project membership, so a non-member assignee cannot see the card.
+ * `getProjectMember` answers membership in one call; a 404 means the user is
+ * not a member, any other error (auth, network) is re-thrown as-is.
+ */
+async function assertProjectMember(
+  ctx: Ctx,
+  projectId: string,
+  userId: string,
+  label: string | undefined,
+): Promise<void> {
+  try {
+    await getProjectMember(ctx, projectId, userId);
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw new UsageError(
+        `${label ?? userId} is not a member of this project — a non-member assignee cannot see the card`,
+        {
+          hint: `add them first: pingcode pjm member add --project <project> --user ${label ?? userId}`,
+        },
+      );
+    }
+    throw error;
+  }
+}
+
 async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
   const title = requireFlag(flags.title, '--title');
@@ -1205,6 +1233,9 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
         : await resolveWorkItemPriority(attemptCtx, project.id, flags.priority);
     const assignee =
       flags.assignee === undefined ? undefined : await resolveUser(attemptCtx, flags.assignee);
+    if (assignee !== undefined) {
+      await assertProjectMember(attemptCtx, project.id, assignee.id, assignee.name);
+    }
     const sprint =
       flags.sprint === undefined
         ? undefined
@@ -1383,6 +1414,9 @@ async function runUpdate(target: string, flags: UpdateFlags, command: Command): 
         });
       }
       assignee = await resolveUser(attemptCtx, flags.assignee);
+      if (projectId !== undefined) {
+        await assertProjectMember(attemptCtx, projectId, assignee.id, assignee.name);
+      }
     }
     const parent =
       flags.parent === undefined ? undefined : await resolveWorkItem(attemptCtx, flags.parent);
@@ -1570,13 +1604,42 @@ async function runBulkUpdate(flags: BulkUpdateFlags, command: Command): Promise<
       // One read per --id: the endpoint takes real ids only ('ids.0'格式不正确 for
       // anything else), and this is what lets an identifier or a pasted URL work.
       const ids: string[] = [];
+      const itemProjects = new Set<string>();
       for (const ref of refs) {
-        ids.push((await resolveWorkItem(attemptCtx, ref)).id);
+        const locator = await resolveWorkItem(attemptCtx, ref);
+        // When assigning, every item must report a project — otherwise we
+        // cannot verify the assignee is a member of the right project.
+        if (chosen === 'assignee' && locator.projectId === undefined) {
+          throw new UsageError(
+            `work item ${locator.identifier ?? locator.id} did not report a project, so --assignee cannot verify membership`,
+            { hint: 'the work item must report a project ID — check that the item exists and is not archived' },
+          );
+        }
+        ids.push(locator.id);
+        if (locator.projectId !== undefined) itemProjects.add(locator.projectId);
       }
 
       const project =
         flags.project === undefined ? undefined : await resolveProject(attemptCtx, flags.project);
       if (project !== undefined) resolutions.push(project);
+
+      // When assigning, all items must belong to the specified project — a
+      // non-member check against the wrong project would be meaningless.
+      if (chosen === 'assignee' && project !== undefined) {
+        for (const projId of itemProjects) {
+          if (projId !== project.id) {
+            throw new UsageError(
+              'all work items must belong to the --project when --assignee is set',
+              {
+                hint:
+                  'bulk-update --assignee verifies membership in --project, so items from other ' +
+                  'projects cannot be included. Split into per-project calls, each with the ' +
+                  'matching --project value',
+              },
+            );
+          }
+        }
+      }
 
       const pair = await resolvePropertyValue(attemptCtx, flags, chosen, project?.id, resolutions);
       return {
@@ -1635,8 +1698,21 @@ async function resolvePropertyValue(
 ): Promise<{ name: string; value: unknown }> {
   switch (chosen) {
     case 'assignee': {
-      if (flags.assigneeId !== undefined) return { name: 'assignee_id', value: flags.assigneeId };
+      // A non-member assignee cannot see the card, so the project must be known
+      // to verify membership. Require --project (consistent with --state and --priority).
+      if (projectId === undefined) {
+        throw new UsageError('--assignee requires --project to verify project membership', {
+          hint:
+            'a non-member assignee cannot see the card; pass --project <name|id> to verify ' +
+            'membership, or add the user to the project first',
+        });
+      }
+      if (flags.assigneeId !== undefined) {
+        await assertProjectMember(ctx, projectId, flags.assigneeId, flags.assigneeId);
+        return { name: 'assignee_id', value: flags.assigneeId };
+      }
       const user = await resolveUser(ctx, requireFlag(flags.assignee, '--assignee'));
+      await assertProjectMember(ctx, projectId, user.id, user.name);
       resolutions.push(user);
       return { name: 'assignee_id', value: user.id };
     }

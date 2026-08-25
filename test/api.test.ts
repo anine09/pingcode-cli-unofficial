@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { getMyself, listSprints, listUsers, listWorkItemStates, listWorkItemTypes } from '../src/api/meta';
+import {
+  getMyself,
+  iterateUsers,
+  listBoardEntries,
+  listBoards,
+  listBoardSwimlanes,
+  listSprints,
+  listUsers,
+  listWorkItemPriorities,
+  listWorkItemStates,
+  listWorkItemTypes,
+} from '../src/api/meta';
+import type { User } from '../src/types/api';
 import {
   asBooleanFlag,
   parseProject,
@@ -277,5 +289,91 @@ describe('meta api', () => {
     expect(me.display_name).toBe('张三');
     expect(me.is_deleted).toBe(false);
     expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/myself');
+  });
+
+  it('lists work item priorities scoped to a project', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 100,
+          total: 1,
+          values: [{ id: 'high', name: '高', color: '#f00' }],
+        }),
+    ]);
+    const priorities = await listWorkItemPriorities(ctx, 'p1');
+    expect(priorities[0]?.id).toBe('high');
+    expect(priorities[0]?.name).toBe('高');
+    const url = new URL(fake.urls()[0] ?? '');
+    expect(url.pathname).toBe('/v1/pjm/work_item/priorities');
+    expect(url.searchParams.get('project_id')).toBe('p1');
+  });
+
+  it('iterates directory users across pages as an async generator', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 30,
+          total: 1,
+          values: [{ id: 'a0417f68e846aae315c85d24643678a9', name: '张三', is_deleted: 0 }],
+        }),
+    ]);
+    const users: User[] = [];
+    for await (const user of iterateUsers(ctx, { keywords: 'zhang' })) {
+      users.push(user);
+    }
+    expect(users).toHaveLength(1);
+    expect(users[0]?.id).toBe('a0417f68e846aae315c85d24643678a9');
+    const url = new URL(fake.urls()[0] ?? '');
+    expect(url.pathname).toBe('/v1/directory/users');
+    expect(url.searchParams.get('keywords')).toBe('zhang');
+  });
+
+  it('lists the boards of a project', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 100,
+          total: 1,
+          values: [{ id: 'b1', name: '看板一', project_id: 'p1' }],
+        }),
+    ]);
+    const boards = await listBoards(ctx, 'p1');
+    expect(boards[0]?.id).toBe('b1');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/pjm/projects/p1/boards');
+  });
+
+  it('lists the entries (columns) of a board', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 100,
+          total: 1,
+          values: [{ id: 'e1', name: '待处理', board_id: 'b1' }],
+        }),
+    ]);
+    const entries = await listBoardEntries(ctx, 'p1', 'b1');
+    expect(entries[0]?.id).toBe('e1');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe('/v1/pjm/projects/p1/boards/b1/entries');
+  });
+
+  it('lists the swimlanes of a board', async () => {
+    const { ctx, fake } = ctxFor([
+      () =>
+        jsonResponse({
+          page_index: 0,
+          page_size: 100,
+          total: 1,
+          values: [{ id: 'sw1', name: '泳道一', board_id: 'b1' }],
+        }),
+    ]);
+    const swimlanes = await listBoardSwimlanes(ctx, 'p1', 'b1');
+    expect(swimlanes[0]?.id).toBe('sw1');
+    expect(new URL(fake.urls()[0] ?? '').pathname).toBe(
+      '/v1/pjm/projects/p1/boards/b1/swimlanes',
+    );
   });
 });

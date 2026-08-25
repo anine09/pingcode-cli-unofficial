@@ -1,0 +1,14 @@
+# <type>(<scope>): <subject>
+# |<-- Type: feat|fix|docs|refactor|test|chore|build|perf|revert
+# |  |<- Scope: cli|core|api|auth|http|skill|research|spec|task
+# |  |  |<-- Subject: imperative mood, lowercase, ≤ 72 chars, no trailing period
+#
+# Body: explain WHY, not what. Record decisions a future reader can't recover from the diff.
+#       - What constraint or API fact forced this shape
+#       - What alternatives were rejected and why
+#       - What this deliberately does NOT do
+#
+# Footer:
+# BREAKING CHANGE: <description>
+#
+# Wrap body at 100 columns. Blank line above body, blank line above footer.

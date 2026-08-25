@@ -1,6 +1,6 @@
 {
   "name": "pingcode-cli",
-  "version": "1.4.1",
+  "version": "1.5.1",
   "private": true,
   "description": "Command-line client for the PingCode Open API",
   "type": "module",
@@ -21,6 +21,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "catalog:sync": "node --experimental-strip-types scripts/catalog-sync.ts",
     "catalog:check": "node --experimental-strip-types scripts/catalog-sync.ts --check",
     "skill:install": "node --experimental-strip-types scripts/install-skill.ts",
@@ -36,6 +37,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "tsup": "^8.5.0",
     "typescript": "^5.9.0",
     "vitest": "^2.1.9"
