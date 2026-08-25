@@ -1612,7 +1612,7 @@ async function runBulkUpdate(flags: BulkUpdateFlags, command: Command): Promise<
         if (chosen === 'assignee' && locator.projectId === undefined) {
           throw new UsageError(
             `work item ${locator.identifier ?? locator.id} did not report a project, so --assignee cannot verify membership`,
-            { hint: 'pass items that report a project, or use --project to scope the check' },
+            { hint: 'the work item must report a project ID — check that the item exists and is not archived' },
           );
         }
         ids.push(locator.id);
