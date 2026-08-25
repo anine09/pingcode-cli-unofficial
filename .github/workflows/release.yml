@@ -1,84 +1,136 @@
-# Tag-driven release (prd 08-01-ci-cd-pipeline: D7/D8).
+# Auto-release: every push to main checks if the version is new.
 #
-# Cut a release by tagging a commit that is already green on `main`:
+# Triggered on **any** push to `main` — merge, direct push, whatever. If the
+# version in `package.json` has no matching `v{version}` tag yet, it builds,
+# packages, tags and creates a GitHub Release. If the tag already exists, it
+# skips. No manual version bump step and no manual `git tag` needed.
 #
-#   git tag -a vX.Y.Z -m 'vX.Y.Z' && git push origin vX.Y.Z
+# Flow:
+#   1. Extract version from package.json
+#   2. Skip if tag v{version} already exists (idempotent)
+#   3. typecheck → test → build → smoke
+#   4. Package 6 platform zips (scripts/package-release.ts)
+#   5. Create git tag v{version}
+#   6. Create GitHub Release with 6 zips + npm tarball
 #
-# The tag must equal `package.json`'s version; that is asserted before anything
-# else happens, so a mistyped tag costs one failed step instead of a bad
-# release. Nothing is pushed to the npm registry — the package name is not
-# claimed yet, and registry publishing stays an explicit non-goal.
+# Rollback:
+#   gh release delete v{version}
+#   git push origin :refs/tags/v{version}
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   release:
-    name: verify the tag and publish the GitHub release
+    name: build, package and release
     runs-on: ubuntu-latest
     permissions:
-      # The only elevated grant in the repository, and only for `gh release create`.
       contents: write
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
-          # The floor from `engines`: if the release artifact builds and runs
-          # here, it runs everywhere the package claims to support.
-          node-version: '20'
+          node-version: '24'
           cache: npm
 
-      # First, and before install/build, so a tag/version mismatch fails fast.
-      - name: assert the tag matches package.json
-        env:
-          TAG: ${{ github.ref_name }}
+      # --- Extract version and check idempotency ---
+      - name: extract version
+        id: version
         run: |
-          set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          echo "tag: ${TAG}"
-          echo "package.json: ${version}"
-          if [ "${TAG}" != "v${version}" ]; then
-            echo "::error::tag ${TAG} does not match package.json version ${version} (expected v${version})"
-            exit 1
-          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "current version: v${version}"
 
+      - name: skip if already released
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "tag v${VERSION} already exists — skipping release"
+            gh release view "v${VERSION}" --json tagName --jq '.tagName' >/dev/null 2>&1 && {
+              echo "release v${VERSION} already exists — nothing to do"
+              echo "skip=true" >> "$GITHUB_ENV"
+              exit 0
+            }
+          fi
+          echo "skip=false" >> "$GITHUB_ENV"
+
+      # --- Quality gates ---
       - name: install
+        if: env.skip != 'true'
         run: npm ci
 
       - name: typecheck
+        if: env.skip != 'true'
         run: npm run typecheck
 
       - name: test
+        if: env.skip != 'true'
         run: npm test
 
       - name: build
+        if: env.skip != 'true'
         run: npm run build
 
       - name: smoke the built binary
+        if: env.skip != 'true'
         run: |
           node dist/bin/pingcode.js --version
           node dist/bin/pingcode.js --help
 
-      # `files` in package.json decides the contents: dist, skills, README.
-      # `--ignore-scripts` suppresses the `prepare` hook; `tail -1` guards against
-      # any residual stdout (the hook's CI-detection message) before the tarball name.
-      - name: pack the tarball
+      # --- Package 6 platform zips ---
+      - name: install zip
+        if: env.skip != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zip
+
+      - name: package release zips
+        if: env.skip != 'true'
+        run: npm run package:release
+
+      # --- Pack npm tarball ---
+      - name: pack the npm tarball
+        if: env.skip != 'true'
         id: pack
         run: |
-          set -euo pipefail
           tarball="$(npm pack --silent --ignore-scripts 2>/dev/null | tail -1)"
           echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
           ls -l "${tarball}"
 
-      - name: create the GitHub release
+      # --- Create tag and release ---
+      - name: create git tag
+        if: env.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+          echo "created tag v${VERSION}"
+
+      - name: create GitHub Release
+        if: env.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
-        run: gh release create "$TAG" "$TARBALL" --title "$TAG" --generate-notes
+        run: |
+          assets=(release/pingcode-cli-v*.zip)
+          echo "uploading ${#assets[@]} platform zip(s) + npm tarball"
+          for a in "${assets[@]}"; do
+            echo "  ${a}"
+          done
+          gh release create "v${VERSION}" \
+            "${assets[@]}" \
+            "$TARBALL" \
+            --title "v${VERSION}" \
+            --generate-notes

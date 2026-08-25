@@ -208,33 +208,53 @@ describe('ci.yml', () => {
 });
 
 describe('release.yml', () => {
-  it('runs only for v-prefixed tags', () => {
-    expect(release).toMatch(/on:\s*\n\s+push:\s*\n\s+tags: \['v\*'\]/);
+  it('triggers on any push to main and lets the idempotency check decide, not on tags', () => {
+    expect(release).toMatch(/on:\s*\n\s+push:\s*\n\s+branches: \[main\]\s*\n/);
+    expect(release).not.toContain('paths:');
+    expect(release).not.toMatch(/tags:/);
   });
 
-  it('asserts the tag matches package.json before doing anything else', () => {
-    const guard = release.indexOf('assert the tag matches package.json');
-    expect(guard).toBeGreaterThan(-1);
-    // The guard runs before install/build, so a mistyped tag fails in seconds.
-    expect(guard).toBeLessThan(release.indexOf('npm ci'));
-    expect(release).toContain('if [ "${TAG}" != "v${version}" ]; then');
-    expect(release).toContain('exit 1');
-    expect(release).toContain('TAG: ${{ github.ref_name }}');
-  });
-
-  it("reads the version from package.json rather than hardcoding today's", () => {
+  it('extracts the version from package.json rather than hardcoding', () => {
     expect(release).toContain(`require('./package.json').version`);
     expect(release).not.toContain(pkg.version);
+  });
+
+  it('skips when the tag already exists (idempotent)', () => {
+    expect(release).toContain('git rev-parse');
+    expect(release).toContain('skip=true');
+    expect(release).toContain('skip=false');
+  });
+
+  it('runs the full gate order before packaging', () => {
+    const order = ['npm ci', 'npm run typecheck', 'npm test', 'npm run build'];
+    let cursor = -1;
+    for (const step of order) {
+      const at = release.indexOf(step);
+      expect(at, step).toBeGreaterThan(cursor);
+      cursor = at;
+    }
+  });
+
+  it('packages 6 platform zips via the package-release script', () => {
+    expect(release).toContain('npm run package:release');
+    expect(release).toContain('install zip');
+  });
+
+  it('creates the git tag automatically after checks pass', () => {
+    expect(release).toContain('git tag "v${VERSION}"');
+    expect(release).toContain('git push origin "v${VERSION}"');
+  });
+
+  it('attaches the 6 platform zips and the npm tarball to the release', () => {
+    expect(release).toContain('npm pack --silent');
+    expect(release).toContain('release/pingcode-cli-v*.zip');
+    expect(release).toContain('gh release create');
+    expect(release).toContain('--generate-notes');
   });
 
   it('elevates contents: write on the release job only, at job level', () => {
     expect(release).toContain('permissions:\n  contents: read');
     expect(release).toMatch(/jobs:[\s\S]*permissions:\n(?: *#[^\n]*\n)* {6}contents: write/);
-  });
-
-  it('attaches the packed tarball with auto-generated notes', () => {
-    expect(release).toContain('npm pack --silent');
-    expect(release).toContain('gh release create "$TAG" "$TARBALL" --title "$TAG" --generate-notes');
   });
 
   it('never publishes to npm — that is an explicit non-goal', () => {
