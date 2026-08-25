@@ -38,6 +38,7 @@ conditionally rather than assigned `undefined`.
 | Shape-validating an id client-side | Ids are 24-hex, 32-hex (users), *or* bare slugs (`task`, `story`, `bug`). Ids pass through untouched. |
 | Naming a leaf flag `--version` (or binding `-v`) | The root owns `--version`, and commander's root parses options across the whole argv: `project work-item update X --version 1.4` printed the CLI version, exited 0 and sent nothing. Use `--release`. Pinned by `test/help/project.test.ts` and `test/help/root.test.ts`. |
 | Exposing a flag for a field or filter the server silently ignores | A flag that lies is worse than an absent one; the API answers 200 and sometimes echoes the value it discarded. See [Live Verification](./live-verification.md). |
+| Setting a resource reference (assignee, owner) without validating the principal's membership in the parent resource | PingCode's visibility model ties access to membership — a non-member assignee cannot see the work item. Use `getProjectMember` (one GET, 404 = not a member) before the write. |
 
 ## Required Patterns
 
@@ -53,6 +54,15 @@ conditionally rather than assigned `undefined`.
   only in `cli/output.ts`.
 - **Every mutating command supports `--dry-run`**, and the gate lives in the transport layer so it
   cannot be forgotten by a new command.
+- **Validate resource references against their parent scope before writing.** When a command sets a
+  reference (assignee, owner, participant) on a scoped resource (work item in a project, idea in a
+  product), verify the principal is a member of that scope. Use the parent's membership endpoint
+  (`getProjectMember` for projects, `getProductMember` for products) — one GET call, 404 = not a
+  member. Only `NotFoundError` triggers the block; auth/network errors propagate. Place the check in
+  the `resolve` phase (before the `send`), so it runs under `--dry-run` too and surfaces a clear
+  `UsageError` with an actionable hint.
+
+  Reference implementation: `assertProjectMember()` in `src/cli/commands/workItem.ts`.
 
 ## Testing Requirements
 
@@ -145,6 +155,8 @@ Unit tests prove our logic; they cannot prove the API's. So:
 - [ ] Every new flag is backed by a live observation that the field or filter it sends actually takes
       effect.
 - [ ] No new runtime dependency, or a reason stated.
+- [ ] Resource references (assignee, owner) validated against parent scope membership — a non-member
+      cannot see the resource they are assigned to.
 - [ ] A new or edited workflow was actually triggered on GitHub once, not merely pushed.
 - [ ] API-behaviour claims trace back to `research/`, not to guesswork.
 - [ ] **Version bumped** if this change adds/changes user-visible capability — new command or flag is MINOR, bug fix is PATCH, breaking change is MAJOR. `package.json` and `src/version.ts` must agree.

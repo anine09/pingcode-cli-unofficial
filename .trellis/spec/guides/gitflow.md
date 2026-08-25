@@ -146,6 +146,12 @@ When you are asked to implement a feature or fix:
 
 **Common mistake**: committing feature work directly on `main` without a feature branch. This bypasses CI and breaks the GitFlow model. Always use `feature/*` branches off `develop`.
 
+**Common mistake**: pushing directly to `develop` without a feature branch and PR. `develop` is the integration branch — it should only receive merges from `feature/*` and `release/*` branches via PRs. Direct pushes bypass CI and CodeRabbit review. If this happens by accident, roll back with a force-push (after tagging a backup), then redo via feature branch + PR.
+
+**Exception — Trellis spec/documentation changes**: `.trellis/spec/`, `.trellis/guides/`, and other Trellis-internal documentation updates can be committed and pushed directly to `develop` without a feature branch or PR. These are non-code artifacts (no CLI behavior change, no CI impact) and don't benefit from CodeRabbit review. The commit message still follows Conventional Commits (`docs(spec): …`).
+
+**After every release**: back-merge `main` to `develop` via a `chore/sync-main-to-develop-<ver>` branch and PR. Release-time fixes (CI, docs, version bumps) are applied on `main` and must be brought back to `develop` so they don't diverge.
+
 When you are asked to release:
 
 1. Verify you are on `develop` and it is up to date.

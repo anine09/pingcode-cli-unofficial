@@ -4,6 +4,9 @@
 > [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). The history is public,
 > so the log is documentation.
 >
+> **Public-facing version**: see [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) at the repo root for
+> the contributor-facing version of these conventions.
+>
 > **Machine-enforced.** The checkable rules below — the `type(scope): subject` shape, the type table,
 > and the subject-line constraints — are validated by `scripts/check-commits.ts` (`npm run
 > check:commits`), which runs in CI on every push and pull request (and on a PR, against the PR title
