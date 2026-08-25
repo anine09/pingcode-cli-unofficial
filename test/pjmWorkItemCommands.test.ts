@@ -60,6 +60,9 @@ const usersPage = () =>
     values: [{ id: USER, name: 'wangxiao', display_name: '王小', username: 'wangxiao' }],
   });
 
+const memberPage = () =>
+  jsonResponse({ id: USER, type: 'user', user: { id: USER, name: 'wangxiao' }, role: { id: 'r', name: '普通成员' } });
+
 const itemBody = (overrides: Record<string, unknown> = {}) => ({
   id: ITEM,
   identifier: 'MOB-219',
@@ -848,7 +851,7 @@ describe('project work-item update — --sprint and --release', () => {
     // Regression guard: the clear-intent branch must not shadow a normal assign.
     const run = await runCli(
       ['project', 'work-item', 'update', ITEM, '--assignee', 'wangxiao'],
-      [itemResponse, usersPage, itemResponse],
+      [itemResponse, usersPage, memberPage, itemResponse],
     );
 
     expect(run.exit).toBe(0);
@@ -903,11 +906,13 @@ describe('project work-item bulk-update', () => {
 
   it('sends ids, one property name and one value', async () => {
     const run = await runCli(
-      ['project', 'work-item', 'bulk-update', ...IDS, '--assignee', 'wangxiao'],
+      ['project', 'work-item', 'bulk-update', ...IDS, '--assignee', 'wangxiao', '--project', 'Mobile App'],
       [
         itemResponse,
         () => jsonResponse(itemBody({ id: OTHER, identifier: 'MOB-220' })),
+        projectsPage,
         usersPage,
+        memberPage,
         () => jsonResponse({ inserts: 0, updates: 2, deletes: 0 }),
       ],
     );
