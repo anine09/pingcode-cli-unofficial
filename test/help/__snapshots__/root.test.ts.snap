@@ -6,30 +6,32 @@ exports[`root --help > root 1`] = `
 Command-line client for the PingCode Open API
 
 Options:
-  --version       output the CLI version
-  --host <url>    PingCode host (default https://open.pingcode.com; self-hosted:
-                  https://pingcode.example.com)
-  --json          emit machine-readable JSON on stdout
-  --dry-run       preview mutating requests without sending them
-  --no-cache      bypass the on-disk metadata cache
-  --verbose       log requests to stderr (secrets redacted)
-  -h, --help      display help for command
+  --version              output the CLI version
+  --host <url>           PingCode host (default https://open.pingcode.com; self-hosted:
+                         https://pingcode.example.com)
+  --json                 emit machine-readable JSON on stdout
+  --dry-run              preview mutating requests without sending them
+  --no-cache             bypass the on-disk metadata cache
+  --verbose              log requests to stderr (secrets redacted)
+  -h, --help             display help for command
 
 Commands:
-  auth            authenticate against PingCode (enterprise app or user token)
-  api             通用逃生舱: call any documented v1 endpoint directly (catalog-checked passthrough)
-  resolve         name → id: resolve a name, alias or id for any of the CLI's lookup kinds
-  product         产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)
-  project         项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
-  testhub         测试管理 testhub: libraries 测试库, cases 用例, plans 测试计划, runs 执行用例 (scopes
-                  pcp:read:testhub:testcase / :testplan / :configuration)
-  scm             源码管理 scm: the DevOps write-back surface for code hosting data (企业令牌 only, scopes
-                  pcp:read:devops:code / pcp:write:devops:code)
-  build           构建与部署 build: CI build records 构建记录 written back onto work items (企业令牌 only,
-                  scopes pcp:read:devops:build / pcp:write:devops:build)
-  release         构建与部署 release: deploy targets 环境 and deployment records 部署 (企业令牌 only, scopes
-                  pcp:read:devops:deploy / pcp:write:devops:deploy)
-  settings        后台设置: organisation-wide directory data
-  help [command]  display help for command
+  auth                   authenticate against PingCode (enterprise app or user token)
+  api                    通用逃生舱: call any documented v1 endpoint directly (catalog-checked
+                         passthrough)
+  resolve                name → id: resolve a name, alias or id for any of the CLI's lookup kinds
+  product                产品管理 ship: products, ideas 需求, tickets 工单 (scope pcp:read:ship:product)
+  project                项目管理 pjm: projects and work items (scope pcp:read:pjm:project)
+  testhub                测试管理 testhub: libraries 测试库, cases 用例, plans 测试计划, runs 执行用例 (scopes
+                         pcp:read:testhub:testcase / :testplan / :configuration)
+  scm                    源码管理 scm: the DevOps write-back surface for code hosting data (企业令牌 only,
+                         scopes pcp:read:devops:code / pcp:write:devops:code)
+  build                  构建与部署 build: CI build records 构建记录 written back onto work items (企业令牌
+                         only, scopes pcp:read:devops:build / pcp:write:devops:build)
+  release                构建与部署 release: deploy targets 环境 and deployment records 部署 (企业令牌 only,
+                         scopes pcp:read:devops:deploy / pcp:write:devops:deploy)
+  settings               后台设置: organisation-wide directory data
+  self-update [options]  update the CLI to the latest GitHub Release
+  help [command]         display help for command
 "
 `;

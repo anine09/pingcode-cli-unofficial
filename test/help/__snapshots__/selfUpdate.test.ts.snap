@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`self-update --help > self-update 1`] = `
+"Usage: pingcode self-update [options]
+
+update the CLI to the latest GitHub Release
+
+Options:
+  --check-only  check for updates without downloading
+  --force       force update even if already up to date
+  --host <url>  PingCode host (default https://open.pingcode.com; self-hosted:
+                https://pingcode.example.com)
+  --json        emit machine-readable JSON on stdout
+  --dry-run     preview mutating requests without sending them
+  --no-cache    bypass the on-disk metadata cache
+  --verbose     log requests to stderr (secrets redacted)
+  -h, --help    display help for command
+"
+`;

@@ -24,7 +24,7 @@ function notifyUpdateCheck(jsonMode: boolean): void {
           `Update available: ${result.current} → ${result.latest}`,
         ),
       );
-      errLine(paint.dim('Run: git pull && ./install.sh'));
+      errLine(paint.dim('Run: pingcode self-update'));
     }
   });
 }

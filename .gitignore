@@ -11,3 +11,6 @@ coverage/
 # Credential store. It normally lives in ~/.pingcode/, but PINGCODE_CONFIG_DIR
 # can point anywhere — never let one land in a commit.
 .pingcode/
+
+# Build-time release packaging output (platform zip artifacts for GitHub Releases).
+release/
