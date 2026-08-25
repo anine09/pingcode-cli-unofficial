@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "New files (zip.ts, paths.ts, selfUpdate.ts) must follow the enforced layering: cli → {api, core}, api → core, core imports neither. Runtime deps frozen at commander + picocolors only."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "self-update must throw typed errors (UsageError for bad flags, TransportError for download failures), never process.exit. Need proper exit codes for update failures."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing policy: no network in unit tests (fetch injected through Ctx). Self-update tests must mock GitHub API responses."}
+{"file": ".trellis/spec/guides/versioning.md", "reason": "Release packaging script must respect SemVer. Version in package.json and src/version.ts must stay in sync."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Skill sync logic in self-update reuses targets()/collectPayload() from install-skill.ts. Avoid duplicating the file-set logic."}

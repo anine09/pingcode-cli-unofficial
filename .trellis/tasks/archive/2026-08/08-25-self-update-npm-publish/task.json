@@ -1,0 +1,28 @@
+{
+  "id": "self-update-npm-publish",
+  "name": "self-update-npm-publish",
+  "title": "PingCode CLI 自主更新命令与 npm 发布",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "epsilon",
+  "assignee": "epsilon",
+  "createdAt": "2026-08-25",
+  "completedAt": "2026-08-25",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "status": "completed"
+  }
+}

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify new files follow layering rules (test/layering.test.ts enforces this). Check zip.ts is in core/, selfUpdate.ts is in cli/commands/."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify all error paths in self-update throw typed errors with proper exit codes. Check no process.exit in command code."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify tests mock network (no real fetch). Check test coverage for zip extractor edge cases."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify skill sync logic is reused from install-skill.ts patterns, not duplicated."}
+{"file": ".trellis/spec/guides/versioning.md", "reason": "Verify VERSION in src/version.ts matches package.json. test/version.test.ts asserts this."}
