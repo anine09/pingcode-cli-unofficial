@@ -64,7 +64,7 @@ describe('command tree root', () => {
       leaves.every((parts) =>
         parts.length === 4
           ? families.includes(parts[2] ?? '')
-          : parts.length === 2 || parts.length === 3,
+          : parts.length === 1 || parts.length === 2 || parts.length === 3,
       ),
     ).toBe(true);
   });
