@@ -1,6 +1,6 @@
 {
   "name": "pingcode-cli",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "private": true,
   "description": "Command-line client for the PingCode Open API",
   "type": "module",
