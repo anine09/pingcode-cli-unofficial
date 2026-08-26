@@ -16,16 +16,27 @@ import {
   createWriteStream,
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import type { Writable } from 'node:stream';
-import type { SkillTarget } from './paths';
+import { configDir } from './config';
 import { TransportError } from './errors';
 import type { FetchLike } from './context';
+import { parseSemver, compareSemver } from './update-check';
+import { extractZip } from './zip';
+import { VERSION } from '../version';
+import type { SkillTarget } from './paths';
+import { detectArch, detectPlatform, installDir, skillTargets } from './paths';
 
 // ---------------------------------------------------------------------------
 // constants
@@ -58,6 +69,11 @@ export interface ReleaseInfo {
 
 /** A function that executes a child process and returns stdout. */
 export type ExecFn = (file: string, args: string[]) => string;
+
+/** Default exec: synchronous child process, returns stdout. */
+function defaultExec(file: string, args: string[]): string {
+  return execFileSync(file, args, { encoding: 'utf8' });
+}
 
 // ---------------------------------------------------------------------------
 // internal helpers
@@ -419,5 +435,240 @@ export function verifyInstall(dir: string, exec: ExecFn): string {
         cause: error,
       },
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// background auto-update: lock, cooldown, hint
+// ---------------------------------------------------------------------------
+
+const LOCK_FILENAME = 'update.lock';
+const HINT_FILENAME = 'update-available';
+const COOLDOWN_FILENAME = 'auto-update-check';
+const DEFAULT_COOLDOWN_MS = 18 * 60 * 1000; // 18 min
+
+/** Result of attempting to acquire the update lock. */
+export interface LockResult {
+  /** Whether the lock was acquired (caller owns it). */
+  acquired: boolean;
+  /** Release the lock. No-op if not acquired. */
+  release: () => void;
+}
+
+/**
+ * Acquire an exclusive PID-based lock file.
+ *
+ * - If the lock doesn't exist: create it and acquire.
+ * - If the lock exists and the holder PID is alive: fail to acquire.
+ * - If the lock exists but the holder PID is dead: steal the lock.
+ *
+ * Returns a `LockResult` with `acquired: true` and a `release()` function if
+ * the lock was obtained; otherwise `acquired: false`.
+ */
+export function acquireLock(dir: string): LockResult {
+  const lockPath = path.join(dir, LOCK_FILENAME);
+  try {
+    writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+    return { acquired: true, release: () => removeFile(lockPath) };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+      return { acquired: false, release: () => {} };
+    }
+  }
+
+  // Lock exists — check if holder is still alive.
+  let holderDead = false;
+  try {
+    const pid = parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
+    process.kill(pid, 0); // throws if PID doesn't exist or no permission
+  } catch {
+    holderDead = true;
+  }
+
+  if (!holderDead) {
+    return { acquired: false, release: () => {} };
+  }
+
+  // Stale lock — steal it.
+  try {
+    removeFile(lockPath);
+    writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+    return { acquired: true, release: () => removeFile(lockPath) };
+  } catch {
+    return { acquired: false, release: () => {} };
+  }
+}
+
+/**
+ * Check whether the auto-update cooldown is still active.
+ *
+ * Uses mtime of the cooldown timestamp file. Returns `true` if the file
+ * exists and was written less than `cooldownMs` ago.
+ */
+export function isCooldownActive(
+  dir: string,
+  cooldownMs: number = DEFAULT_COOLDOWN_MS,
+): boolean {
+  try {
+    const mtime = statSync(path.join(dir, COOLDOWN_FILENAME)).mtimeMs;
+    return Date.now() - mtime < cooldownMs;
+  } catch {
+    return false;
+  }
+}
+
+/** Create or update the cooldown timestamp file. */
+export function touchCooldown(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, COOLDOWN_FILENAME);
+  const now = new Date();
+  try {
+    utimesSync(file, now, now);
+  } catch {
+    writeFileSync(file, '');
+  }
+}
+
+/** Hint file contents — a pending update the user should know about. */
+export interface UpdateHint {
+  version: string;
+}
+
+/** Read the hint file. Returns `undefined` if missing or corrupt. */
+export function readHint(dir: string): UpdateHint | undefined {
+  try {
+    const raw = readFileSync(path.join(dir, HINT_FILENAME), 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    const version = (parsed as Record<string, unknown>).version;
+    if (typeof version !== 'string') return undefined;
+    return { version };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Write a hint file (called when auto-update fails). */
+export function writeHint(dir: string, version: string): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, HINT_FILENAME),
+    JSON.stringify({ version }, null, 2) + '\n',
+    { mode: 0o600 },
+  );
+}
+
+/** Remove the hint file (called on successful update or when up-to-date). */
+export function removeHint(dir: string): void {
+  removeFile(path.join(dir, HINT_FILENAME));
+}
+
+// ---------------------------------------------------------------------------
+// auto-update engine
+// ---------------------------------------------------------------------------
+
+/** Result of an automatic update attempt. */
+export type AutoUpdateResult =
+  | { status: 'updated'; version: string }
+  | { status: 'up-to-date' }
+  | { status: 'failed'; error: string };
+
+/**
+ * Run a full background auto-update: fetch latest version, compare, and if
+ * newer, download + extract + atomic-replace + sync skills.
+ *
+ * This is the engine behind the `__auto-update` hidden command, spawned as
+ * a detached child process on every CLI startup (subject to cooldown).
+ *
+ * Unlike the manual `self-update` command, this:
+ * - Always touches the cooldown (to prevent sibling processes from also
+ *   checking)
+ * - Acquires a PID lock (to prevent concurrent updates)
+ * - Writes a hint file on failure (so the next startup can tell the user)
+ * - Never prompts or blocks — it either succeeds silently or fails silently
+ *   with a hint
+ */
+export async function runAutoUpdate(
+  env: NodeJS.ProcessEnv = process.env,
+  fetchFn: FetchLike = defaultFetch,
+  exec: ExecFn = defaultExec,
+): Promise<AutoUpdateResult> {
+  const dir = installDir(env);
+  const stateDir = configDir(env);
+
+  // Touch cooldown immediately so sibling processes skip.
+  try { touchCooldown(stateDir); } catch { /* best-effort */ }
+
+  // Acquire PID lock.
+  const lock = acquireLock(stateDir);
+  if (!lock.acquired) {
+    return { status: 'failed', error: 'update already in progress' };
+  }
+
+  let release: ReleaseInfo | undefined;
+  try {
+    // Fetch full release metadata (version + assets) in one call.
+    release = await fetchLatestRelease(fetchFn);
+
+    // Compare versions.
+    const localParts = parseSemver(VERSION);
+    const remoteParts = parseSemver(release.version);
+    if (localParts === undefined || remoteParts === undefined) {
+      return { status: 'failed', error: 'version parse error' };
+    }
+    if (compareSemver(localParts, remoteParts) >= 0) {
+      // Already up-to-date — clean up any stale hint.
+      try { removeHint(stateDir); } catch { /* best-effort */ }
+      return { status: 'up-to-date' };
+    }
+
+    // Find matching platform asset.
+    const platform = detectPlatform();
+    const arch = detectArch();
+    const assetName = `pingcode-cli-v${release.version}-${platform}-${arch}.zip`;
+    const asset = release.assets.find((a) => a.name === assetName);
+    if (asset === undefined) {
+      try { writeHint(stateDir, release.version); } catch { /* best-effort */ }
+      return { status: 'failed', error: `no release asset found: ${assetName}` };
+    }
+
+    // Download, extract, validate, replace, sync skills, verify.
+    const stagingDir = path.join(dir, '.staging');
+    const tmpZip = path.join(os.tmpdir(), asset.name);
+    try {
+      await downloadReleaseAsset(asset.browser_download_url, tmpZip, fetchFn);
+      cleanStaging(stagingDir);
+      await extractZip(tmpZip, stagingDir);
+
+      if (!validateStaging(stagingDir)) {
+        cleanStaging(stagingDir);
+        throw new TransportError('invalid release archive');
+      }
+
+      await atomicReplace(dir, stagingDir);
+
+      // Sync skills (only to existing targets).
+      const skillSource = path.join(dir, 'skills', 'pingcode');
+      if (dirExists(skillSource)) {
+        await syncSkills(skillSource, skillTargets(env));
+      }
+
+      // Verify the new binary runs.
+      verifyInstall(dir, exec);
+
+      // Success — remove hint.
+      try { removeHint(stateDir); } catch { /* best-effort */ }
+      return { status: 'updated', version: release.version };
+    } finally {
+      removeFile(tmpZip);
+    }
+  } catch (error) {
+    // Write hint for next startup.
+    if (release !== undefined) {
+      try { writeHint(stateDir, release.version); } catch { /* best-effort */ }
+    }
+    return { status: 'failed', error: errorMessage(error) };
+  } finally {
+    lock.release();
   }
 }

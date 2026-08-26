@@ -1,18 +1,27 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SkillTarget } from '../src/core/paths';
 import {
+  acquireLock,
   atomicReplace,
   cleanStaging,
   dirExists,
   downloadReleaseAsset,
   fetchLatestRelease,
+  isCooldownActive,
+  readHint,
   removeFile,
+  removeHint,
+  runAutoUpdate,
   syncSkills,
+  touchCooldown,
   validateStaging,
   verifyInstall,
+  writeHint,
+  type ExecFn,
 } from '../src/core/update';
+import { VERSION } from '../src/version';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -467,5 +476,220 @@ describe('verifyInstall', () => {
     };
 
     expect(() => verifyInstall(dir, mockExec)).toThrow(/failed to verify/);
+  });
+});
+
+// ===========================================================================
+// acquireLock
+// ===========================================================================
+
+describe('acquireLock', () => {
+  it('acquires when no lock file exists', () => {
+    const dir = tempDir('lock-new');
+    ensureDir(dir);
+
+    const lock = acquireLock(dir);
+    expect(lock.acquired).toBe(true);
+    expect(existsSync(path.join(dir, 'update.lock'))).toBe(true);
+
+    lock.release();
+    expect(existsSync(path.join(dir, 'update.lock'))).toBe(false);
+  });
+
+  it('fails when lock file exists with alive PID', () => {
+    const dir = tempDir('lock-alive');
+    ensureDir(dir);
+    writeFileSync(path.join(dir, 'update.lock'), String(process.pid));
+
+    const lock = acquireLock(dir);
+    expect(lock.acquired).toBe(false);
+  });
+
+  it('steals lock when holder PID is dead', () => {
+    const dir = tempDir('lock-dead');
+    ensureDir(dir);
+    writeFileSync(path.join(dir, 'update.lock'), '999999');
+
+    const lock = acquireLock(dir);
+    expect(lock.acquired).toBe(true);
+    expect(existsSync(path.join(dir, 'update.lock'))).toBe(true);
+
+    lock.release();
+    expect(existsSync(path.join(dir, 'update.lock'))).toBe(false);
+  });
+
+  it('release() removes the lock file', () => {
+    const dir = tempDir('lock-release');
+    ensureDir(dir);
+
+    const lock = acquireLock(dir);
+    expect(lock.acquired).toBe(true);
+    expect(existsSync(path.join(dir, 'update.lock'))).toBe(true);
+
+    lock.release();
+    expect(existsSync(path.join(dir, 'update.lock'))).toBe(false);
+  });
+});
+
+// ===========================================================================
+// isCooldownActive / touchCooldown
+// ===========================================================================
+
+describe('isCooldownActive / touchCooldown', () => {
+  it('returns false when cooldown file does not exist', () => {
+    const dir = tempDir('cooldown-none');
+    ensureDir(dir);
+    expect(isCooldownActive(dir)).toBe(false);
+  });
+
+  it('returns true after touchCooldown()', () => {
+    const dir = tempDir('cooldown-active');
+    ensureDir(dir);
+    touchCooldown(dir);
+    expect(isCooldownActive(dir)).toBe(true);
+  });
+
+  it('returns false when cooldown file mtime is older than threshold', () => {
+    const dir = tempDir('cooldown-old');
+    ensureDir(dir);
+    touchCooldown(dir);
+    // Set mtime to 20 minutes ago
+    const past = new Date(Date.now() - 20 * 60 * 1000);
+    utimesSync(path.join(dir, 'auto-update-check'), past, past);
+    expect(isCooldownActive(dir, 1000)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// readHint / writeHint / removeHint
+// ===========================================================================
+
+describe('readHint / writeHint / removeHint', () => {
+  it('writeHint creates file with { version } JSON', () => {
+    const dir = tempDir('hint-write');
+    ensureDir(dir);
+    writeHint(dir, '1.6.3');
+
+    const raw = JSON.parse(readFileSync(path.join(dir, 'update-available'), 'utf8'));
+    expect(raw).toEqual({ version: '1.6.3' });
+  });
+
+  it('readHint returns parsed version', () => {
+    const dir = tempDir('hint-read');
+    ensureDir(dir);
+    writeHint(dir, '1.6.3');
+
+    expect(readHint(dir)).toEqual({ version: '1.6.3' });
+  });
+
+  it('readHint returns undefined for missing file', () => {
+    const dir = tempDir('hint-missing');
+    ensureDir(dir);
+    expect(readHint(dir)).toBeUndefined();
+  });
+
+  it('readHint returns undefined for corrupt file', () => {
+    const dir = tempDir('hint-corrupt');
+    ensureDir(dir);
+    writeFileSync(path.join(dir, 'update-available'), 'not json');
+
+    expect(readHint(dir)).toBeUndefined();
+  });
+
+  it('removeHint removes the file', () => {
+    const dir = tempDir('hint-remove');
+    ensureDir(dir);
+    writeHint(dir, '1.6.3');
+    expect(existsSync(path.join(dir, 'update-available'))).toBe(true);
+
+    removeHint(dir);
+    expect(existsSync(path.join(dir, 'update-available'))).toBe(false);
+  });
+
+  it('removeHint is no-op if file is missing', () => {
+    const dir = tempDir('hint-remove-missing');
+    ensureDir(dir);
+    expect(() => removeHint(dir)).not.toThrow();
+  });
+});
+
+// ===========================================================================
+// runAutoUpdate
+// ===========================================================================
+
+describe('runAutoUpdate', () => {
+  function makeEnv(): Record<string, string | undefined> {
+    return {
+      PINGCODE_CONFIG_DIR: tempDir('rau-config'),
+      XDG_DATA_HOME: tempDir('rau-data'),
+    };
+  }
+
+  const mockExec: ExecFn = (_file: string, _args: string[]) => {
+    throw new Error('exec should not be called in this test');
+  };
+
+  it('returns up-to-date when local version >= remote', async () => {
+    const env = makeEnv();
+    const result = await runAutoUpdate(
+      env,
+      jsonFetch({ tag_name: `v${VERSION}`, assets: [] }),
+      mockExec,
+    );
+    expect(result).toEqual({ status: 'up-to-date' });
+  });
+
+  it('returns failed when lock not acquired', async () => {
+    const env = makeEnv();
+    const configDir = env.PINGCODE_CONFIG_DIR!;
+    ensureDir(configDir);
+    writeFileSync(path.join(configDir, 'update.lock'), String(process.pid));
+
+    const result = await runAutoUpdate(
+      env,
+      jsonFetch({ tag_name: 'v2.0.0', assets: [] }),
+      mockExec,
+    );
+    expect(result).toEqual({ status: 'failed', error: 'update already in progress' });
+  });
+
+  it('writes hint file on failure (no matching asset)', async () => {
+    const env = makeEnv();
+    const configDir = env.PINGCODE_CONFIG_DIR!;
+
+    const result = await runAutoUpdate(
+      env,
+      jsonFetch({ tag_name: 'v2.0.0', assets: [] }),
+      mockExec,
+    );
+    expect(result.status).toBe('failed');
+    expect(readHint(configDir)).toEqual({ version: '2.0.0' });
+  });
+
+  it('removes hint file on up-to-date', async () => {
+    const env = makeEnv();
+    const configDir = env.PINGCODE_CONFIG_DIR!;
+    ensureDir(configDir);
+    writeHint(configDir, '2.0.0');
+
+    const result = await runAutoUpdate(
+      env,
+      jsonFetch({ tag_name: `v${VERSION}`, assets: [] }),
+      mockExec,
+    );
+    expect(result).toEqual({ status: 'up-to-date' });
+    expect(readHint(configDir)).toBeUndefined();
+  });
+
+  it('touches cooldown on every call', async () => {
+    const env = makeEnv();
+    const configDir = env.PINGCODE_CONFIG_DIR!;
+
+    await runAutoUpdate(
+      env,
+      jsonFetch({ tag_name: `v${VERSION}`, assets: [] }),
+      mockExec,
+    );
+    expect(isCooldownActive(configDir)).toBe(true);
   });
 });
