@@ -65,7 +65,7 @@ export type CheckResult =
 /** Strict semver component: `0` or a non-zero digit followed by digits (no leading zeros). */
 const SEMVER_COMPONENT = /^(0|[1-9]\d*)$/;
 
-function parseSemver(raw: string): [number, number, number] | undefined {
+export function parseSemver(raw: string): [number, number, number] | undefined {
   const stripped = raw.replace(/^v/, '').split('-')[0] ?? '';
   const parts = stripped.split('.');
   if (parts.length !== 3) return undefined;
@@ -84,7 +84,10 @@ function parseSemver(raw: string): [number, number, number] | undefined {
  *  - 0 if equal
  *  - positive if a > b
  */
-function compareSemver(a: [number, number, number], b: [number, number, number]): number {
+export function compareSemver(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
   for (let i = 0; i < 3; i++) {
     const diff = (a[i] ?? 0) - (b[i] ?? 0);
     if (diff !== 0) return diff;
