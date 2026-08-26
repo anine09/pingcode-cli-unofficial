@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend conventions: layering, stdout purity, exit codes"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing policy: no network in unit tests, fetch injected through Ctx"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error contract: UsageError exit 2 for bad input, exit code table stability"}
+{"file": ".trellis/spec/backend/live-verification.md", "reason": "Verify board PATCH support live — don't assume API behavior"}

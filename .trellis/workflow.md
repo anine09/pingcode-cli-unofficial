@@ -280,13 +280,13 @@ When a user request matches one of these intents inside an active task, route fi
 
 [/Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi, Oh My Pi, ZCode, Snow, Reasonix, Trae, Grok, Kimi Code]
 
-[codex-inline, Kilo, Antigravity, Devin]
+[codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 - Planning or unclear requirements -> `trellis-brainstorm`.
 - Before editing -> `trellis-before-dev`; after editing -> `trellis-check`.
 - Repeated debugging -> `trellis-break-loop`; spec updates -> `trellis-update-spec`.
 
-[/codex-inline, Kilo, Antigravity, Devin]
+[/codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 ### Guardrails
 
@@ -363,11 +363,11 @@ Spawn the research sub-agent:
 
 [/Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi, Oh My Pi, ZCode, Snow, Reasonix, Trae, Grok, Kimi Code]
 
-[codex-inline, Kilo, Antigravity, Devin]
+[codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 Do the research in the main session directly and write findings into `{TASK_DIR}/research/`. `codex-inline` is the explicit mode that keeps work in the main session.
 
-[/codex-inline, Kilo, Antigravity, Devin]
+[/codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 **Research artifact conventions**:
 - One file per research topic (e.g. `research/auth-library-comparison.md`)
@@ -427,11 +427,11 @@ Skip this step only when both files already have real curated entries.
 
 [/Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi, Oh My Pi, ZCode, Snow, Reasonix, Trae, Grok, Kimi Code]
 
-[codex-inline, Kilo, Antigravity, Devin]
+[codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 Skip this step. Context is loaded directly by the `trellis-before-dev` skill in Phase 2.
 
-[/codex-inline, Kilo, Antigravity, Devin]
+[/codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 #### 1.4 Activate task `[required · once]`
 
@@ -515,7 +515,7 @@ The platform prelude auto-handles the context load requirement:
 
 [/Kiro]
 
-[codex-inline, Kilo, Antigravity, Devin]
+[codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 1. Load the `trellis-before-dev` skill to read project guidelines
 2. Read `{TASK_DIR}/prd.md`, then `design.md` if present, then `implement.md` if present
@@ -523,7 +523,7 @@ The platform prelude auto-handles the context load requirement:
 4. Implement the code per reviewed artifacts
 5. Run project lint and type-check
 
-[/codex-inline, Kilo, Antigravity, Devin]
+[/codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 #### 2.2 Quality check `[required · repeatable]`
 
@@ -543,7 +543,7 @@ The check agent's job:
 
 [/Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi, Oh My Pi, ZCode, Snow, Reasonix, Trae, Grok, Kimi Code]
 
-[codex-inline, Kilo, Antigravity, Devin]
+[codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 Load the `trellis-check` skill and verify the code per its guidance:
 - Spec compliance
@@ -552,7 +552,7 @@ Load the `trellis-check` skill and verify the code per its guidance:
 
 If issues are found → fix → re-check, until green.
 
-[/codex-inline, Kilo, Antigravity, Devin]
+[/codex-inline, Kilo, Antigravity, Devin, DeepSeek Harness]
 
 **Final pass (before Phase 3.4 commit)**: the last 2.2 of a task must run full-scope, not just on the latest implement chunk. List all affected packages with `python3 ./.trellis/scripts/get_context.py --mode packages`, then load each package's spec index Quality Check section. This catches cross-layer / multi-package issues a mid-iteration local 2.2 cannot.
 
@@ -589,21 +589,6 @@ Update the docs under `.trellis/spec/` accordingly. Even if the conclusion is "n
 #### 3.4 Commit changes `[required · once]`
 
 **Spec-sync preamble**: before drafting commits, ask: did this task fix a bug or surface non-obvious knowledge that should land in `.trellis/spec/` so future-you (or future-AI) doesn't repeat the mistake? If yes, return to Phase 3.3 first — spec writes belong in the same task's commit batch, not as a forgotten follow-up.
-
-**Version bump preamble**: before drafting commits, classify every user-visible change against [Versioning](./spec/guides/versioning.md) and bump `package.json` + `src/version.ts` in the SAME commit batch — a new command/flag is MINOR, a bug fix is PATCH, a breaking change is MAJOR. Missing a version bump is a process failure; the diff must never leave the tree with new capability and a stale version. The version bump is its own commit (`chore: bump version to X.Y.Z (reason)`) following the work commits.
-
-**GitFlow preamble**: this project follows GitFlow (see [GitFlow Guide](./spec/guides/gitflow.md)). Never commit directly to `main`. All feature work happens on `feature/*` branches off `develop`. After committing feature work + version bump, follow the release flow:
-
-1. Merge feature branch → `develop` (via PR or local merge)
-2. Push `develop` → CI runs
-3. If CI green, release: merge `develop` → `main` (or via `release/<ver>` branch)
-4. Tag on `main`: `git tag -a vX.Y.Z -m "release X.Y.Z"`
-5. Push tag: `git push origin vX.Y.Z` → triggers release workflow (GitHub Release with tarball)
-6. Merge `main` back to `develop` (via release branch merge) so fixes aren't lost
-
-The AI MUST NOT push to `main` directly or create tags without explicit user instruction.
-
-**Issue reply rule**: before closing a GitHub issue, post a comment explaining the fix (what changed, which release version fixed it, commit links). Never close an issue silently — the comment is the audit trail that connects the issue to the release.
 
 The AI drives a batched commit of this task's code changes so `/finish-work` can run cleanly afterwards. Goal: produce work commits FIRST, then bookkeeping (archive + journal) commits land after — never interleaved.
 

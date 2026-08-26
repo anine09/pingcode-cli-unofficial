@@ -1,0 +1,29 @@
+{
+    "id": "board-commands",
+    "name": "board-commands",
+    "title": "Board 看板 CLI 命令",
+    "description": "",
+    "status": "completed",
+    "dev_type": null,
+    "scope": null,
+    "package": null,
+    "priority": "P2",
+    "creator": "epsilon",
+    "assignee": "epsilon",
+    "createdAt": "2026-08-21",
+    "completedAt": "2026-08-26",
+    "branch": null,
+    "base_branch": "main",
+    "worktree_path": null,
+    "commit": null,
+    "pr_url": null,
+    "subtasks": [],
+    "children": [],
+    "parent": "08-21-work-item-cli-fixes",
+    "relatedFiles": [],
+    "notes": "",
+    "meta": {
+        "commit": "d4c3212",
+        "notes": "Added project board list/entries/swimlanes commands. Added --board/--entry/--swimlane to work-item update and create. Version bumped to 1.2.0."
+    }
+}

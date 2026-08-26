@@ -1,0 +1,29 @@
+{
+    "id": "update-type-sent",
+    "name": "update-type-sent",
+    "title": "work-item update --type 实际生效",
+    "description": "",
+    "status": "completed",
+    "dev_type": null,
+    "scope": null,
+    "package": null,
+    "priority": "P2",
+    "creator": "epsilon",
+    "assignee": "epsilon",
+    "createdAt": "2026-08-21",
+    "completedAt": "2026-08-26",
+    "branch": null,
+    "base_branch": "main",
+    "worktree_path": null,
+    "commit": null,
+    "pr_url": null,
+    "subtasks": [],
+    "children": [],
+    "parent": "08-21-work-item-cli-fixes",
+    "relatedFiles": [],
+    "notes": "",
+    "meta": {
+        "commit": "a983374",
+        "notes": "Clarified --type does not modify type. Updated help text. Added clear error for --type alone. Version bumped to 1.3.1. Released v1.3.1. Closed #7."
+    }
+}

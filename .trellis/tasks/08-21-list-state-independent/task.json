@@ -1,0 +1,29 @@
+{
+    "id": "list-state-independent",
+    "name": "list-state-independent",
+    "title": "work-item list --state 独立使用",
+    "description": "",
+    "status": "completed",
+    "dev_type": null,
+    "scope": null,
+    "package": null,
+    "priority": "P2",
+    "creator": "epsilon",
+    "assignee": "epsilon",
+    "createdAt": "2026-08-21",
+    "completedAt": "2026-08-26",
+    "branch": null,
+    "base_branch": "main",
+    "worktree_path": null,
+    "commit": null,
+    "pr_url": null,
+    "subtasks": [],
+    "children": [],
+    "parent": "08-21-work-item-cli-fixes",
+    "relatedFiles": [],
+    "notes": "",
+    "meta": {
+        "commit": "4d557fa",
+        "notes": "Allow --state without --type on work-item list. Resolves across all types. Version bumped to 1.4.0. Released v1.4.0. Closed #9."
+    }
+}
