@@ -18,7 +18,9 @@ See [Coverage](#coverage-reach-vs-ergonomics) for the per-module split.
 
 ## Install
 
-Requires **Node.js >= 20**. The package is not published; build it from a checkout.
+Requires **Node.js >= 20**. The package is not published to npm; release zips
+ship their own `node_modules/` (`commander`, `picocolors`), so an installed
+binary needs only Node — no `npm` on the client. Build from a checkout for development.
 
 ### One-click (recommended)
 
