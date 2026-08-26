@@ -40,6 +40,18 @@ const BIN_ENTRY = path.join('dist', 'bin', 'pingcode.js');
 const SKILL_DIR = path.join('skills', 'pingcode');
 const SKILL_FILE = path.join(SKILL_DIR, 'SKILL.md');
 const SKILL_MODULES_DIR = path.join(SKILL_DIR, 'modules');
+/**
+ * Production npm dependencies the runtime binary imports directly. tsup with
+ * `platform: 'node'` leaves them external, so the release zip ships them under
+ * `node_modules/` so Node resolves them on the client without a package graph.
+ * Both are pure-JS with no runtime transitive deps.
+ *
+ * Client prerequisite (documented in README): Node >= 20. `npm` is only needed
+ * for the repo-checkout install path; the zip install runs straight from `node`
+ * + the bundled `node_modules/`.
+ */
+const RUNTIME_DEPS = ['commander', 'picocolors'] as const;
+const NODE_MODULES_DIR = 'node_modules';
 
 type Args = {
   build: boolean;
@@ -125,6 +137,13 @@ function verifyPayload(root: string): void {
   } else {
     throw new Error(`modules directory not found: ${modulesDir}`);
   }
+  // Runtime deps must be installed so we can ship them in the zip.
+  for (const dep of RUNTIME_DEPS) {
+    const depDir = path.join(root, NODE_MODULES_DIR, dep);
+    if (!existsSync(depDir)) {
+      throw new Error(`runtime dependency not installed: ${depDir} (run npm install)`);
+    }
+  }
 }
 
 /**
@@ -138,9 +157,16 @@ function createZip(root: string, outputDir: string, version: string, platform: P
   const name = `pingcode-cli-v${version}-${platform}-${arch}.zip`;
   const output = path.join(outputDir, name);
   if (existsSync(output)) rmSync(output);
+  // dist + skills, plus the runtime deps under node_modules/ so the installed
+  // binary resolves its external imports without a package graph.
+  const paths = [
+    BIN_ENTRY,
+    'skills/pingcode/',
+    ...RUNTIME_DEPS.map((dep) => path.join(NODE_MODULES_DIR, dep)),
+  ];
   execFileSync(
     'zip',
-    ['-rq', output, BIN_ENTRY, 'skills/pingcode/'],
+    ['-rq', output, ...paths],
     { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' },
   );
   return output;
