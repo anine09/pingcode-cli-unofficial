@@ -19,9 +19,9 @@
 #   1. Extract version from package.json
 #   2. Skip if tag v{version} already exists (idempotent)
 #   3. typecheck → test → build → smoke
-#   4. Package 6 platform zips (scripts/package-release.ts)
+#   4. Pack the npm tarball
 #   5. Create git tag v{version}
-#   6. Create GitHub Release with 6 zips + npm tarball
+#   6. Create GitHub Release with the npm tarball
 #
 # Rollback:
 #   gh release delete v{version}
@@ -81,12 +81,12 @@ jobs:
           # drafts included, which is the state the create step has to live with.
           #
           # But "a release exists" is not "the release is done". A release with no
-          # assets is a half-finished release, and skipping on it means the 6 zips
-          # and the npm tarball are never built and never uploaded — which is how
-          # the current release shipped published with zero assets: the guard
-          # matched, skipped every remaining step, and the run went green. So skip
-          # only when the release is published *and* carries assets. A draft or an
-          # empty release falls through, and the create step attaches the assets
+          # assets is a half-finished release, and skipping on it means the npm
+          # tarball is never built and never uploaded — which is how the current
+          # release shipped published with zero assets: the guard matched,
+          # skipped every remaining step, and the run went green. So skip only
+          # when the release is published *and* carries assets. A draft or an
+          # empty release falls through, and the create step attaches the asset
           # with --clobber.
           state=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
             --jq ".[] | select(.tag_name == \"${tag}\") | \"\(.draft) \(.assets | length)\"" \
@@ -130,15 +130,6 @@ jobs:
         run: |
           node dist/bin/pingcode.js --version
           node dist/bin/pingcode.js --help
-
-      # --- Package 6 platform zips ---
-      - name: install zip
-        if: env.skip != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zip
-
-      - name: package release zips
-        if: env.skip != 'true'
-        run: npm run package:release
 
       # --- Pack npm tarball ---
       - name: pack the npm tarball
@@ -187,11 +178,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
         run: |
-          assets=(release/pingcode-cli-v*.zip)
-          echo "uploading ${#assets[@]} platform zip(s) + npm tarball"
-          for a in "${assets[@]}"; do
-            echo "  ${a}"
-          done
+          echo "uploading the npm tarball: ${TARBALL}"
 
           # A release can appear between the guard above and this step — that is
           # the very race that cost v1.8.2 — so the check is repeated here rather
@@ -199,13 +186,12 @@ jobs:
           # it, so a re-run completes the job instead of dying on a duplicate tag.
           if gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
                --jq '.[].tag_name' 2>/dev/null | grep -qx "v${VERSION}"; then
-            echo "release v${VERSION} already exists — attaching assets to it"
-            gh release upload "v${VERSION}" "${assets[@]}" "$TARBALL" --clobber
+            echo "release v${VERSION} already exists — attaching the tarball to it"
+            gh release upload "v${VERSION}" "$TARBALL" --clobber
             exit 0
           fi
 
           gh release create "v${VERSION}" \
-            "${assets[@]}" \
             "$TARBALL" \
             --title "v${VERSION}" \
             --generate-notes

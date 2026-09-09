@@ -6,8 +6,10 @@
  */
 
 import type { Command } from 'commander';
-import { installDir, skillTargets } from '../../core/paths';
+import path from 'node:path';
+import { skillTargets } from '../../core/paths';
 import type { SkillTarget } from '../../core/paths';
+import { packageSkillDir } from '../../core/update';
 import {
   type InstallResult,
   type SkillStatus,
@@ -18,6 +20,26 @@ import {
 import { addGlobalOptions } from '../globals';
 import { errLine, outLine, paint, printJson, printTable } from '../output';
 import { contextFor, modeOf } from './common';
+
+/**
+ * The root `installSkill` expects: the directory that holds `skills/pingcode`.
+ *
+ * There is no install directory any more. npm owns where the package lives, so
+ * the payload is the one inside the *running* package — the same source
+ * `core/update.ts#syncSkills` copies from after an update, resolved relative to
+ * `import.meta.url` so it is the repo checkout in development and the published
+ * `skills/` directory in an installed package. Deriving it from
+ * `packageSkillDir()` rather than re-deriving the URL keeps the two consumers
+ * provably on the same directory.
+ *
+ * The old `installDir()` layout — `~/.local/share/pingcode-cli`, which the standalone
+ * installer used to populate — is deliberately *not* the source: nothing creates that
+ * directory any more, so reading it made `skill install` report `not-found` for every
+ * target while an older copy sat there untouched.
+ */
+function packageSkillRoot(): string {
+  return path.dirname(path.dirname(packageSkillDir()));
+}
 
 // ---------------------------------------------------------------------------
 // registration
@@ -144,7 +166,7 @@ async function runInstall(flags: SkillFlags): Promise<void> {
   const { ctx } = contextFor(command);
   const mode = modeOf(ctx);
   const targets = resolveTargets(flags);
-  const sourceRoot = installDir();
+  const sourceRoot = packageSkillRoot();
 
   const results: InstallResult[] = installSkill(sourceRoot, targets, flags.force ?? false);
   renderResults(results, mode);
@@ -173,7 +195,7 @@ async function runUpdate(flags: SkillFlags): Promise<void> {
   const { ctx } = contextFor(command);
   const mode = modeOf(ctx);
   const targets = resolveTargets(flags);
-  const sourceRoot = installDir();
+  const sourceRoot = packageSkillRoot();
 
   const results: InstallResult[] = installSkill(sourceRoot, targets, true);
   renderResults(results, mode);

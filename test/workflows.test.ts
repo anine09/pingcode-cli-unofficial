@@ -252,11 +252,11 @@ describe('release.yml', () => {
     expect(commands).not.toContain('gh release view');
     expect(commands).toContain("repos/${GITHUB_REPOSITORY}/releases?per_page=100");
     // "A release exists" is not "the release is done". An asset-less release is a
-    // half-finished release, and skipping on it means the 6 zips and the npm
-    // tarball are never built — which is how the current release shipped published
-    // with zero assets: the guard matched, skipped every remaining step, and the
-    // run went green. So skip only when the release is published *and* carries
-    // assets; a draft or an empty release must fall through and let the create step
+    // half-finished release, and skipping on it means the npm tarball is never
+    // built — which is how the current release shipped published with zero
+    // assets: the guard matched, skipped every remaining step, and the run went
+    // green. So skip only when the release is published *and* carries assets; a
+    // draft or an empty release must fall through and let the create step
     // attach them. These four assertions are the guard's entire decision — drop
     // any one and "release exists" becomes "release succeeded" again.
     expect(commands).toContain('.assets | length');
@@ -273,11 +273,6 @@ describe('release.yml', () => {
       expect(at, step).toBeGreaterThan(cursor);
       cursor = at;
     }
-  });
-
-  it('packages 6 platform zips via the package-release script', () => {
-    expect(release).toContain('npm run package:release');
-    expect(release).toContain('install zip');
   });
 
   it('creates the git tag automatically after checks pass, and idempotently', () => {
@@ -299,9 +294,8 @@ describe('release.yml', () => {
     expect(release).toContain("repos/${GITHUB_REPOSITORY}/releases?per_page=100");
   });
 
-  it('attaches the 6 platform zips and the npm tarball to the release', () => {
+  it('attaches the npm tarball to the release', () => {
     expect(release).toContain('npm pack --silent');
-    expect(release).toContain('release/pingcode-cli-v*.zip');
     expect(release).toContain('gh release create');
     expect(release).toContain('--generate-notes');
   });

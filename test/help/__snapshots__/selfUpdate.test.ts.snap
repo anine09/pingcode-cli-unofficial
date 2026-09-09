@@ -6,7 +6,7 @@ exports[`self-update --help > self-update 1`] = `
 update the CLI to the latest npm-published version
 
 Options:
-  --check-only  check for updates without downloading
+  --check-only  check for updates without installing
   --force       force update even if already up to date
   --host <url>  PingCode host (default https://open.pingcode.com; self-hosted:
                 https://pingcode.example.com)

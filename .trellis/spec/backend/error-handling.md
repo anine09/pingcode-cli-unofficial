@@ -144,26 +144,37 @@ update patch are all `UsageError` (exit 2) raised *before* any network call. A `
 lists candidates must actually list them — that is the difference between exit 2 being useful and
 being noise.
 
-### Rollback must outlive the operation it protects
+### Never report success without having succeeded
 
-**Invariant: the previous state is destroyed only after the replacement is proven.** For
-`self-update`, `atomicReplace` keeps `${install}.backup` and the *caller* removes it, because "the
-rename succeeded" is not evidence that the new bundle starts. Deciding otherwise — deleting the
-backup inside the swap, then verifying afterwards — is what left 1.8.1 → 1.8.2 users with a dead
-binary and nothing to put back.
+The CLI performs no install of its own: `self-update` delegates to `npm i -g`, and `npm` owns
+replacing the package directory atomically. The invariant therefore moves from *rollback* to
+*proof*: **an update is reported only after the new version is observed to be installed.**
 
-So the flow gates **twice**: run the staged bundle before the install dir is touched at all, then
-run the installed bundle after the swap. A broken tarball therefore either never lands or gets
-rolled back.
+That means two checks, not one. `npm` exiting 0 is not evidence — an interrupted install, a registry
+that served something else, or a wrapper that swallowed the failure all produce exit 0 without a
+new binary. So after the spawn the code reads the installed package's version back from disk and
+throws unless it equals the version that was requested. This is the whole remaining safety property
+of the update path, and it is cheap: one JSON read.
 
-Restore is its own export (`restoreBackup`), not a mode of `atomicReplace`. The two have different
-failure semantics: mid-restore the backup is the *only* copy left, so its error must name the manual
-recovery command rather than degrade to a warning. Extending a swap primitive into a restore
-primitive is how the original silently-broken rollback came to exist — it passed a `${dir}.backup`
-path that was not nested under `dir`, so `atomicReplace` treated it as the *incoming* directory and
-the restore collided with itself inside a `catch { /* best-effort */ }`.
+Three failure modes must all refuse rather than report success, and each needs a distinct message
+because each sends the user somewhere different:
 
-Corollary for any future rollback: **a restore that cannot fail loudly is not a rollback.**
+| failure | message must name |
+|---|---|
+| no `npm` binary found | the path that was searched, so the user knows npm is the missing piece |
+| `npm` exited non-zero | the exit status plus npm's captured output as the hint |
+| `npm` exited 0 but the version is wrong | both the actual and the expected version |
+
+Earlier versions of this path *did* keep a rollback: a self-built download → extract → atomic
+rename sequence, with the backup removed only after the staged bundle was verified to run. It was
+deleted, not because the invariant was wrong but because it was ours to get right. It did not
+survive contact with npm: the whole sequence existed to do what `npm i -g` already does, and every
+defect in it — a rollback that passed a non-nested `.backup` path, a non-recursive `rmSync` that
+threw `ENOTEMPTY` into a best-effort `catch` — was a defect in reimplementing npm. The 1.8.1 →
+1.8.2 `ERR_MODULE_NOT_FOUND` release shipped broken *because* the sequence owned the install.
+
+Corollary for any future install-owning code: **if you can hand the operation to a package manager,
+the rollback you would have written is a liability, not a safety net.**
 
 ---
 

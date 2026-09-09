@@ -1,40 +1,33 @@
 import { execFileSync } from 'node:child_process';
 import type { Command } from 'commander';
-import os from 'node:os';
 import path from 'node:path';
 import { VERSION } from '../../version';
 import { checkForUpdate } from '../../core/update-check';
 import {
-  atomicReplace,
-  cleanStaging,
   dirExists,
-  downloadTarball,
-  ensureDir,
   fetchLatestInfo,
-  removeFile,
-  restoreBackup,
+  installViaNpm,
+  packageSkillDir,
   syncSkills,
-  validateStaging,
-  verifyBundle,
-  writeBufferToFile,
 } from '../../core/update';
 import { TransportError } from '../../core/errors';
-import { extractTarball } from '../../core/update';
 import type { ExecFn } from '../../core/update';
 import { contextFor, modeOf } from './common';
 import { errLine, paint, printJson } from '../output';
 import { addGlobalOptions } from '../globals';
-import { installDir, skillTargets } from '../../core/paths';
+import { skillTargets } from '../../core/paths';
 
 /**
- * `pingcode self-update` — download the latest version from npm registry and
- * atomically replace the current installation.
+ * `pingcode self-update` — update the CLI to the latest npm-published version.
  *
- * The command is a thin orchestrator: it checks for an update, fetches the
- * latest version info from npm, downloads and unpacks the tarball, verifies the
- * staged bundle actually runs, swaps the install directory, syncs bundled
- * skill docs, and verifies the installed bundle — restoring the previous
- * install if it does not.
+ * A thin orchestrator: it checks for an update, fetches the latest version from
+ * npm, asks npm to install it globally, re-syncs the bundled skill docs, and
+ * reports the version npm actually installed.
+ *
+ * There is no download, staging, swap or rollback here — npm owns all of that,
+ * including its own registry cache. What is *not* delegated is the check that
+ * the install happened: `installViaNpm` reads the installed version back, so
+ * `updated` is reported only when npm exited 0 **and** the version matches.
  *
  * All file-system work is delegated to `core/update.ts` because the layering
  * rule forbids `cli/` from importing `node:fs`.
@@ -49,7 +42,7 @@ export function registerSelfUpdateCommands(program: Command): void {
   const cmd = program
     .command('self-update')
     .description('update the CLI to the latest npm-published version')
-    .option('--check-only', 'check for updates without downloading')
+    .option('--check-only', 'check for updates without installing')
     .option('--force', 'force update even if already up to date');
 
   addGlobalOptions(cmd).action(async (flags: SelfUpdateFlags, command: Command) => {
@@ -66,6 +59,8 @@ async function runSelfUpdate(flags: SelfUpdateFlags, command: Command): Promise<
   const mode = modeOf(ctx);
 
   // 1. Check for update.  --check-only bypasses cache so it always queries the network.
+  //    This path is plain HTTP and touches npm nowhere, so it works on a box with
+  //    no npm at all (prd R3).
   const check = await checkForUpdate(undefined, flags.checkOnly ? { skipCache: true } : undefined);
 
   // --check-only: print result and exit.
@@ -121,100 +116,57 @@ async function runSelfUpdate(flags: SelfUpdateFlags, command: Command): Promise<
   const oldVersion = VERSION;
   const newVersion = info.version;
 
-  // 3. Download tarball.
-  const tarballBuffer = await downloadTarball(info.tarballUrl);
-
-  // 4. Build display name for tarball URL.
-  const tarballName = path.basename(new URL(info.tarballUrl).pathname);
-
-  const install = installDir();
-  const stagingDir = path.join(install, '.staging');
-
-  // 5. --dry-run: print plan and exit.
+  // 3. --dry-run: print plan and exit.
   if (ctx.dryRun) {
     printDryRunPlan({
       oldVersion,
       newVersion,
-      assetName: tarballName,
+      assetName: path.basename(new URL(info.tarballUrl).pathname),
       downloadUrl: info.tarballUrl,
-      install,
-      stagingDir,
       json: mode.json,
     });
     return;
   }
 
-  // 6. Extract to staging.
-  errLine(paint.dim(`Downloading ${tarballName}...`));
-  errLine(paint.dim('Extracting to staging...'));
-  const tmpTarball = path.join(os.tmpdir(), `pingcode-cli-${newVersion}.tgz`);
+  // 4. Install with npm. Throws on missing npm, non-zero exit, or a version that
+  //    does not read back — none of those may report `updated`.
+  errLine(paint.dim(`Installing v${newVersion}...`));
   try {
-    writeBufferToFile(tmpTarball, tarballBuffer);
-    cleanStaging(stagingDir);
-    ensureDir(stagingDir);
-    extractTarball(tarballBuffer, stagingDir);
-
-    // 7. Validate staging.
-    if (!validateStaging(stagingDir)) {
-      cleanStaging(stagingDir);
-      throw new TransportError(
-        'invalid tarball: dist/bin/pingcode.js not found',
-      );
+    await installViaNpm(cliExec, newVersion);
+  } catch (error) {
+    // Diagnostics to stderr; stdout stays JSON-only under --json.
+    if (!mode.json) {
+      errLine(paint.red(`update failed: ${errorMessageOf(error)}`));
+      const hint = error instanceof TransportError ? error.hint : undefined;
+      if (hint !== undefined && hint !== '') errLine(paint.dim(`  ${hint}`));
     }
-
-    // 8. Verify the staged bundle runs before we touch the live install.
-    errLine(paint.dim('Verifying...'));
-    const exec: ExecFn = (file, args) =>
-      String(execFileSync(file, args, { encoding: 'utf8' }));
-    verifyBundle(stagingDir, exec, newVersion);
-
-    // 9. Atomic replace.
-    errLine(paint.dim(`Installing v${newVersion}...`));
-    await atomicReplace(install, stagingDir);
-
-    // 10. Sync skills.
-    const skillSource = path.join(install, 'skills', 'pingcode');
-    if (dirExists(skillSource)) {
-      errLine(paint.dim('Syncing skills...'));
-      await syncSkills(skillSource, skillTargets());
-    }
-
-    // 11. Verify the installed bundle. The swap kept the backup, and a dead
-    // binary here would strand the user — put the previous install back rather
-    // than leaving nothing runnable on disk.
-    let verified: string;
-    try {
-      verified = verifyBundle(install, exec, newVersion);
-    } catch (error) {
-      restoreBackup(install);
-      throw new TransportError(
-        `installed bundle failed verification: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        {
-          hint: `restore manually: mv "${install}.backup" "${install}"`,
-          cause: error,
-        },
-      );
-    }
-
-    // The previous install is only dropped once the new one is proven good.
-    removeFile(`${install}.backup`);
-
-    // 12. Report.
-    if (mode.json) {
-      printJson({
-        status: 'updated',
-        previous_version: oldVersion,
-        new_version: verified,
-      });
-    } else {
-      errLine(paint.green(`updated v${oldVersion} → v${verified}`));
-    }
-  } finally {
-    // Clean up temp tarball regardless of success or failure.
-    removeFile(tmpTarball);
+    throw error;
   }
+
+  // 5. Sync skills from the package's own directory.
+  const skillSource = packageSkillDir();
+  if (dirExists(skillSource)) {
+    errLine(paint.dim('Syncing skills...'));
+    await syncSkills(skillSource, skillTargets());
+  }
+
+  // 6. Report.
+  if (mode.json) {
+    printJson({
+      status: 'updated',
+      previous_version: oldVersion,
+      new_version: newVersion,
+    });
+  } else {
+    errLine(paint.green(`updated v${oldVersion} → v${newVersion}`));
+  }
+}
+
+/** npm invocation for the interactive command — inherits the terminal's stdin. */
+const cliExec: ExecFn = (file, args) => execFileSync(file, args, { encoding: 'utf8' });
+
+function errorMessageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // ---------------------------------------------------------------------------
@@ -255,8 +207,6 @@ interface DryRunPlan {
   newVersion: string;
   assetName: string;
   downloadUrl: string;
-  install: string;
-  stagingDir: string;
   json: boolean;
 }
 
@@ -268,8 +218,6 @@ function printDryRunPlan(plan: DryRunPlan): void {
       target_version: plan.newVersion,
       asset: plan.assetName,
       download_url: plan.downloadUrl,
-      install_dir: plan.install,
-      staging_dir: plan.stagingDir,
       skill_targets: skillTargets().map((t) => t.dir),
     });
     return;
@@ -279,7 +227,5 @@ function printDryRunPlan(plan: DryRunPlan): void {
   errLine(`  current:  v${plan.oldVersion}`);
   errLine(`  target:   v${plan.newVersion}`);
   errLine(`  asset:    ${plan.assetName}`);
-  errLine(`  install:  ${plan.install}`);
-  errLine(`  staging:  ${plan.stagingDir}`);
   errLine(`  skills:   ${skillTargets().map((t) => t.dir).join(', ')}`);
 }

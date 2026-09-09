@@ -1,6 +1,6 @@
 {
   "name": "pingcode-cli-unofficial",
-  "version": "1.8.3",
+  "version": "1.9.0",
   "description": "Command-line client for the PingCode Open API",
   "type": "module",
   "license": "MIT",
@@ -27,10 +27,8 @@
     "skill:install": "node --experimental-strip-types scripts/install-skill.ts",
     "scan:secrets": "node --experimental-strip-types scripts/scan-secrets.ts",
     "check:commits": "node --experimental-strip-types scripts/check-commits.ts",
-    "package:release": "node --experimental-strip-types scripts/package-release.ts",
     "hooks:install": "node scripts/install-hooks.mjs",
-    "prepare": "node scripts/install-hooks.mjs",
-    "install:cli": "node scripts/install.mjs"
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "commander": "^12.1.0",

@@ -1,12 +1,13 @@
 /**
  * Self-update engine — zero runtime dependencies.
  *
- * Orchestrates the full self-update flow that `cli/commands/selfUpdate.ts`
- * drives: fetch latest version info from npm registry, download the tarball,
- * unpack it to a staging directory, verify the staged bundle actually runs,
- * atomically swap it into the install dir, sync the bundled skill docs to every
- * agent's global skill dir, and verify the installed bundle — restoring the
- * backup if it does not.
+ * A version check plus one npm invocation. `cli/commands/selfUpdate.ts` drives
+ * it: fetch the latest version from the npm registry, compare, and if newer ask
+ * npm to install it globally — then read back the installed version and report
+ * success **only** if it matches what we asked for.
+ *
+ * npm owns downloading, extracting and replacing. We own the check that the
+ * replacement actually happened.
  *
  * All file-system and process work lives here because `cli/` is forbidden
  * from importing `node:fs` (see `test/layering.test.ts`). The command layer
@@ -18,23 +19,21 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import os from 'node:os';
 import path from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 import { configDir } from './config';
 import { TransportError } from './errors';
 import type { FetchLike } from './context';
 import { parseSemver, compareSemver } from './update-check';
 import { VERSION } from '../version';
 import type { SkillTarget } from './paths';
-import { installDir, skillTargets } from './paths';
+import { skillTargets } from './paths';
 
 // ---------------------------------------------------------------------------
 // constants
@@ -56,12 +55,30 @@ export interface RegistryInfo {
   tarballUrl: string;
 }
 
-/** A function that executes a child process and returns stdout. */
+/**
+ * A function that executes a child process and returns stdout.
+ *
+ * Every caller treats a non-zero exit as a throw, so the contract is: return
+ * the captured stdout on success, throw on failure. `defaultExec` keeps npm's
+ * stdin inherited (it may prompt) and captures stdout/stderr so the failure
+ * message can carry them.
+ */
 export type ExecFn = (file: string, args: string[]) => string;
 
-/** Default exec: synchronous child process, returns stdout. */
+/**
+ * Default exec: synchronous child process, returns stdout.
+ *
+ * `stdio: ['inherit', 'pipe', 'pipe']` is deliberate — see `installViaNpm`.
+ * On Windows a `.cmd` sibling needs the shell to run at all, so `shell: true`
+ * is added for exactly those two extensions.
+ */
 function defaultExec(file: string, args: string[]): string {
-  return execFileSync(file, args, { encoding: 'utf8' });
+  const isWindowsBatch = /\.(cmd|bat)$/i.test(file);
+  return execFileSync(file, args, {
+    encoding: 'utf8',
+    stdio: ['inherit', 'pipe', 'pipe'],
+    ...(isWindowsBatch ? { shell: true } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -155,289 +172,148 @@ export async function fetchLatestInfo(
 }
 
 // ---------------------------------------------------------------------------
-// download
+// npm: resolve, invoke, read back
 // ---------------------------------------------------------------------------
 
 /**
- * Download a tarball to an in-memory buffer.
+ * The npm binary that manages the node process running this command.
  *
- * @throws TransportError on network failure or non-2xx.
+ * Resolved as the *sibling* of `process.execPath` rather than through PATH:
+ * PATH is unreliable under cron and minimal environments, and an interactive
+ * shell's PATH can resolve `npm` to a different installation than the node
+ * actually running us. Every npm install ships the CLI next to its node
+ * (nvm, n, system packages, official installers), so the sibling is the one
+ * npm that installs for *this* interpreter.
+ *
+ * @returns The absolute path to npm, or `undefined` when neither sibling exists.
  */
-export async function downloadTarball(
-  url: string,
-  fetchFn: FetchLike = defaultFetch,
-): Promise<Buffer> {
-  let response: Response;
-  try {
-    response = await fetchFn(url, { signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS) });
-  } catch (error) {
-    throw new TransportError(`failed to download tarball: ${errorMessage(error)}`, {
-      cause: error,
-    });
-  }
+export function resolveNpm(): string | undefined {
+  const binDir = path.dirname(process.execPath);
+  // Windows: npm is installed as `npm.cmd` — a bare `npm` there is either a
+  // shell shim without an extension or a Unix-lookalike, and only `.cmd` is
+  // directly spawnable. `npm` is still tried second so an environment that
+  // does ship a bare `npm` keeps working.
+  const candidates =
+    process.platform === 'win32'
+      ? [path.join(binDir, 'npm.cmd'), path.join(binDir, 'npm')]
+      : [path.join(binDir, 'npm')];
+  return candidates.find(existsSync);
+}
 
-  if (!response.ok) {
+/**
+ * Install `version` globally with the resolved npm.
+ *
+ * Success is **not** the exit code alone. npm (or a wrapper, or a proxy) can
+ * exit 0 having installed nothing, or having installed something else — that
+ * is precisely the failure this whole module exists to prevent. So the
+ * installed version is read back and must equal `version`.
+ *
+ * @param exec    Child-process runner.
+ * @param version The exact version to install.
+ * @throws TransportError when npm is missing, exits non-zero, or the installed
+ *         version does not match.
+ */
+export async function installViaNpm(exec: ExecFn, version: string): Promise<void> {
+  const npm = resolveNpm();
+  if (npm === undefined) {
     throw new TransportError(
-      `tarball download returned HTTP ${response.status}`,
-      { status: response.status },
+      `cannot update: no npm binary found next to the node running this command ` +
+        `(tried ${path.join(path.dirname(process.execPath), 'npm')})`,
+      { hint: `install Node.js, then re-run this command` },
     );
   }
 
-  if (response.body === null) {
-    throw new TransportError('tarball download returned empty body');
-  }
-
-  const chunks: Uint8Array[] = [];
-  const reader = response.body.getReader();
-  const MAX_SIZE = 50 * 1024 * 1024; // 50 MB safety cap
-  let total = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
-    if (total > MAX_SIZE) {
-      throw new TransportError(`tarball exceeds maximum size of ${MAX_SIZE} bytes`);
-    }
-    chunks.push(value);
-  }
-
-  return Buffer.concat(chunks);
-}
-
-// ---------------------------------------------------------------------------
-// tar.gz extraction
-// ---------------------------------------------------------------------------
-
-/**
- * Extract a .tar.gz buffer into `destDir`.
- *
- * Strips the top-level `package/` directory that npm tarballs contain.
- * Only regular files and directories are extracted; symlinks and other
- * special entries are skipped.
- *
- * @param buffer  The .tar.gz file contents.
- * @param destDir Destination directory (created recursively if missing).
- * @returns       Relative paths of every extracted file.
- * @throws        Error on corrupt or unsupported tar data.
- */
-export function extractTarball(buffer: Buffer, destDir: string): string[] {
-  const gzipped = gunzipSync(buffer);
-  return extractTar(gzipped, destDir);
-}
-
-/**
- * Parse a raw tar stream and extract entries to `destDir`.
- */
-function extractTar(tarBuffer: Buffer, destDir: string): string[] {
-  const resolvedDest = path.resolve(destDir);
-  mkdirSync(resolvedDest, { recursive: true });
-
-  const extracted: string[] = [];
-  let offset = 0;
-
-  while (offset < tarBuffer.length) {
-    // Each tar entry starts with a 512-byte header.
-    if (offset + 512 > tarBuffer.length) break;
-
-    // Check for end-of-archive marker (two consecutive 512-byte zero blocks).
-    const headerBlock = tarBuffer.subarray(offset, offset + 512);
-    if (headerBlock.every((b) => b === 0)) {
-      break;
-    }
-
-    const name = readTarString(headerBlock, 0, 100);
-    const typeflag = tarBuffer[offset + 156];
-    const size = readTarNumber(headerBlock, 124, 12);
-
-    // Advance past the header.
-    offset += 512;
-
-    // Calculate data block count (512-byte blocks).
-    const dataBlocks = Math.ceil(size / 512);
-    const dataOffset = offset;
-
-    if (typeflag === '5'.charCodeAt(0)) {
-      // Directory entry — create it.
-      const cleanName = stripPackagePrefix(name);
-      if (cleanName) {
-        const dest = path.resolve(resolvedDest, cleanName);
-        if (dest.startsWith(resolvedDest + path.sep) || dest === resolvedDest) {
-          mkdirSync(dest, { recursive: true });
-        }
-      }
-    } else if (typeflag === '0'.charCodeAt(0) || typeflag === 0) {
-      // Regular file entry.
-      const cleanName = stripPackagePrefix(name);
-      if (cleanName) {
-        const data = tarBuffer.subarray(dataOffset, dataOffset + size);
-        const dest = path.resolve(resolvedDest, cleanName);
-        if (dest.startsWith(resolvedDest + path.sep)) {
-          mkdirSync(path.dirname(dest), { recursive: true });
-          writeFileSync(dest, data);
-          extracted.push(cleanName);
-        }
-      }
-    }
-    // Skip other entry types (symlinks, etc.).
-
-    // Advance past the data blocks.
-    offset += dataBlocks * 512;
-  }
-
-  return extracted;
-}
-
-/** Strip the `package/` top-level prefix that npm tarballs contain. */
-function stripPackagePrefix(name: string): string {
-  if (name.startsWith('package/')) {
-    return name.slice('package/'.length);
-  }
-  return name;
-}
-
-/** Read a null-terminated ASCII string from a tar header field. */
-function readTarString(buf: Buffer, start: number, maxLen: number): string {
-  const end = buf.indexOf(0, start);
-  const actualEnd = end < 0 ? start + maxLen : end;
-  return buf.subarray(start, actualEnd).toString('utf8').trim();
-}
-
-/** Read an octal number from a tar header field (null-terminated). */
-function readTarNumber(buf: Buffer, start: number, maxLen: number): number {
-  const str = readTarString(buf, start, maxLen);
-  // Handle binary-encoded sizes (high bit set).
-  if (str.charCodeAt(0) === 0x80) {
-    // Base-256 encoding — not needed for npm packages, but handle gracefully.
-    return 0;
-  }
-  return parseInt(str, 8) || 0;
-}
-
-// ---------------------------------------------------------------------------
-// atomic replace
-// ---------------------------------------------------------------------------
-
-/**
- * Atomically replace the current install directory with the staging directory.
- *
- * 1. If staging is nested under current, move it aside first.
- * 2. Rename `current` → `current.backup` (if `current` exists)
- * 3. Rename `incoming` → `current`
- * 4. If step 3 fails, restore the backup
- *
- * The backup is **kept**, not deleted: whether the new install is any good is
- * decided by the caller's post-swap verify, not by a successful rename. Deleting
- * it here is what left 1.8.1/1.8.2 users with a dead binary and nothing to put
- * back. Callers remove it once the bundle has been verified
- * (`removeFile(`${current}.backup`)`).
- */
-export async function atomicReplace(
-  current: string,
-  staging: string,
-): Promise<void> {
-  const backup = `${current}.backup`;
-
-  // Clean up any leftover backup from a previous failed update.
-  if (existsSync(backup)) {
-    rmSync(backup, { recursive: true, force: true });
-  }
-
-  const isNested = staging.startsWith(`${current}${path.sep}`);
-  const incoming = isNested ? `${current}.incoming` : staging;
-
-  if (isNested) {
-    if (existsSync(incoming)) rmSync(incoming, { recursive: true, force: true });
-    try {
-      renameSync(staging, incoming);
-    } catch (error) {
-      throw new TransportError(
-        `failed to move staging aside: ${errorMessage(error)}`,
-        { cause: error },
-      );
-    }
-  }
-
-  // Step 1: rename current → backup.
-  if (existsSync(current)) {
-    try {
-      renameSync(current, backup);
-    } catch (error) {
-      if (isNested && existsSync(incoming)) {
-        try { renameSync(incoming, staging); } catch { /* best-effort */ }
-      }
-      throw new TransportError(
-        `failed to back up current install: ${errorMessage(error)}`,
-        { cause: error },
-      );
-    }
-  }
-
-  // Step 2: rename incoming → current.
+  const spec = `${PACKAGE_NAME}@${version}`;
+  let output: string;
   try {
-    renameSync(incoming, current);
+    output = exec(npm, ['install', '--global', spec]);
   } catch (error) {
-    try {
-      if (existsSync(backup)) renameSync(backup, current);
-    } catch (restoreError) {
-      throw new TransportError(
-        `CRITICAL: update failed AND backup restore failed. ` +
-          `Restore manually: mv "${backup}" "${current}". ` +
-          `Original error: ${errorMessage(error)}. Restore error: ${errorMessage(restoreError)}`,
-        { cause: error },
-      );
-    }
+    // npm's own stdout/stderr are captured, not inherited — see defaultExec —
+    // so they can be carried here. The underlying message is kept too: the
+    // background auto-update path only surfaces the message, never the hint.
+    const detail = npmOutputOf(error);
     throw new TransportError(
-      `failed to install update (backup restored): ${errorMessage(error)}`,
+      `npm install --global ${spec} failed (exit ${exitStatusOf(error)}): ${errorMessage(error)}`,
       {
-        hint: `if needed, restore manually: mv "${backup}" "${current}"`,
+        hint:
+          detail === ''
+            ? `npm printed nothing; try running manually: ${npm} install --global ${spec}`
+            : detail,
         cause: error,
       },
     );
   }
 
-  // Step 3: keep the backup. See the doc comment — the caller removes it after
-  // the new bundle has been verified.
-}
+  // Forward npm's own output. stderr, never stdout: `--json` keeps stdout
+  // pure (backend/index.md), and this runs under both the interactive command
+  // and the background auto-update, which has no logger.
+  const trimmed = output.trim();
+  if (trimmed !== '') {
+    process.stderr.write(`${output.endsWith('\n') ? output : `${output}\n`}`);
+  }
 
-// ---------------------------------------------------------------------------
-// staging helpers
-// ---------------------------------------------------------------------------
-
-/** Remove the staging directory if it exists. */
-export function cleanStaging(stagingDir: string): void {
-  if (existsSync(stagingDir)) {
-    rmSync(stagingDir, { recursive: true, force: true });
+  const installed = readInstalledVersion();
+  if (installed !== version) {
+    throw new TransportError(
+      `npm install --global ${spec} exited 0 but the installed version is ` +
+        `${installed ?? 'unreadable'}, expected ${version}`,
+      { hint: `verify with: ${npm} list --global --depth=0 ${PACKAGE_NAME}` },
+    );
   }
 }
 
-/** Check that the staging directory contains a valid CLI binary. */
-export function validateStaging(stagingDir: string): boolean {
-  const bin = path.join(stagingDir, 'dist', 'bin', 'pingcode.js');
-  return existsSync(bin);
-}
-
-/** Write a buffer to a file path (used by cli layer, hence exported). */
-export function writeBufferToFile(destPath: string, buffer: Buffer): void {
-  writeFileSync(destPath, buffer);
-}
-
-/** Create a directory recursively (used by cli layer, hence exported). */
-export function ensureDir(dirPath: string): void {
-  mkdirSync(dirPath, { recursive: true });
-}
-
 /**
- * Remove a file or directory (best-effort, never throws).
+ * The version of *this package* as it exists on disk right now.
  *
- * `recursive: true` matters: the pre-update backup being dropped after a
- * verified update is a *directory*, and a non-recursive `rmSync` on it fails
- * with `ENOTEMPTY` — which, being swallowed here, would leave every
- * `${install}.backup` on disk forever.
+ * Read from the running module's own `package.json`. That is deliberate: npm
+ * replaces the files in the package directory in place, so the directory the
+ * running process was loaded from is the same directory npm just wrote. The
+ * in-memory modules stay old, but the files — and therefore this read-back —
+ * are the new install.
+ *
+ * @returns The version string, or `undefined` when it cannot be read.
  */
+export function readInstalledVersion(): string | undefined {
+  try {
+    const raw = readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    const version = (parsed as Record<string, unknown>).version;
+    return typeof version === 'string' ? version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** npm's exit status from a thrown `execFileSync` error, as a display string. */
+function exitStatusOf(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'status' in error) {
+    const status = (error as { status: unknown }).status;
+    if (typeof status === 'number') return String(status);
+    if (typeof status === 'string' && status !== '') return status;
+  }
+  return 'unknown';
+}
+
+/** The stdout/stderr npm left behind on a failed spawn, trimmed. */
+function npmOutputOf(error: unknown): string {
+  if (typeof error !== 'object' || error === null) return '';
+  const e = error as { stdout?: unknown; stderr?: unknown };
+  return [e.stderr, e.stdout]
+    .filter((part): part is string | Buffer => part !== undefined && part !== null)
+    .map((part) => String(part).trim())
+    .filter((part) => part !== '')
+    .join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// small filesystem helpers
+// ---------------------------------------------------------------------------
+
+/** Remove a file (best-effort, never throws). Used for the lock and hint files. */
 export function removeFile(filePath: string): void {
   try {
-    rmSync(filePath, { recursive: true, force: true });
+    rmSync(filePath, { force: true });
   } catch {
     // best-effort
   }
@@ -453,6 +329,21 @@ export function dirExists(dirPath: string): boolean {
 // ---------------------------------------------------------------------------
 
 const MODULES_DIR = 'modules';
+
+/**
+ * The package's own `skills/pingcode` directory.
+ *
+ * There is no install directory any more: npm owns where the binary lives, so
+ * the skills ship inside the package and are resolved relative to the running
+ * module. `skills/` is in `package.json#files`, so the payload is present in
+ * the published tarball.
+ *
+ * `src/core/update.ts` → `../../skills/pingcode` in the source tree, and the
+ * same two levels up from `dist/bin/pingcode.js` inside the installed package.
+ */
+export function packageSkillDir(): string {
+  return fileURLToPath(new URL('../../skills/pingcode', import.meta.url));
+}
 
 /**
  * Copy skill files from `sourceDir` to each target directory.
@@ -493,80 +384,6 @@ export async function syncSkills(
   }
 
   return written;
-}
-
-// ---------------------------------------------------------------------------
-// verify
-// ---------------------------------------------------------------------------
-
-/**
- * Run `<dir>/dist/bin/pingcode.js --version` and return the trimmed output.
- *
- * The bundle that ships in an npm tarball has no `node_modules/`, so "the file
- * exists" (`validateStaging`) is not proof that it *runs*. This is the
- * loadability check, and it doubles as the identity check: a bundle that starts
- * but reports another version is a broken install too.
- *
- * Called twice per update — once on staging, before the install dir is touched
- * at all, and once on the install dir, after the swap.
- *
- * @param dir              Directory holding `dist/bin/pingcode.js`.
- * @param exec             Child-process runner.
- * @param expectedVersion  The version this bundle must report.
- * @throws TransportError when the binary cannot be started, or reports a version
- *         other than `expectedVersion`.
- */
-export function verifyBundle(dir: string, exec: ExecFn, expectedVersion: string): string {
-  const bin = path.join(dir, 'dist', 'bin', 'pingcode.js');
-  let reported: string;
-  try {
-    reported = exec('node', [bin, '--version']).trim();
-  } catch (error) {
-    throw new TransportError(
-      `failed to verify new installation: ${errorMessage(error)}`,
-      {
-        hint: `try running manually: node "${bin}" --version`,
-        cause: error,
-      },
-    );
-  }
-  if (reported !== expectedVersion) {
-    throw new TransportError(
-      `installed bundle reports version ${reported}, expected ${expectedVersion}`,
-      { hint: `try running manually: node "${bin}" --version` },
-    );
-  }
-  return reported;
-}
-
-/**
- * Put the pre-update install back after a failed post-swap verify.
- *
- * `atomicReplace` is deliberately not extended into a restore primitive: restore
- * has different failure semantics (the backup is the *only* copy left) and
- * deserves its own obvious, testable name.
- *
- * `current` is cleared first because `rename` cannot replace an existing
- * non-empty directory — and `current` is by definition the install whose bundle
- * just failed to run, so there is nothing in it worth keeping.
- *
- * @param current The install directory (`current.backup` is the backup).
- * @throws TransportError naming the manual restore command if the restore fails.
- */
-export function restoreBackup(current: string): void {
-  const backup = `${current}.backup`;
-  rmSync(current, { recursive: true, force: true });
-  try {
-    renameSync(backup, current);
-  } catch (error) {
-    throw new TransportError(
-      `failed to restore the previous install: ${errorMessage(error)}`,
-      {
-        hint: `restore manually: mv "${backup}" "${current}"`,
-        cause: error,
-      },
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -678,15 +495,19 @@ export type AutoUpdateResult =
   | { status: 'failed'; error: string };
 
 /**
- * Run a full background auto-update: fetch latest version, compare, and if
- * newer, download + extract + atomic-replace + sync skills.
+ * Run a background auto-update: fetch the latest version, compare, and if newer
+ * install it with npm and re-sync the skills.
+ *
+ * Reports `updated` only once npm has exited 0 **and** the installed version
+ * reads back as the requested one — see `installViaNpm`. Every failure path
+ * writes a hint so the next run re-offers the update, and the lock is released
+ * in `finally` regardless.
  */
 export async function runAutoUpdate(
   env: NodeJS.ProcessEnv = process.env,
   fetchFn: FetchLike = defaultFetch,
   exec: ExecFn = defaultExec,
 ): Promise<AutoUpdateResult> {
-  const dir = installDir(env);
   const stateDir = configDir(env);
 
   try { touchCooldown(stateDir); } catch { /* best-effort */ }
@@ -712,59 +533,18 @@ export async function runAutoUpdate(
 
     const newVersion = info.version;
 
-    // Download tarball as buffer.
-    const tarballBuffer = await downloadTarball(info.tarballUrl, fetchFn);
+    // npm does the install; `installViaNpm` re-reads the installed version, so
+    // `updated` below is only reachable when the install really happened.
+    await installViaNpm(exec, newVersion);
 
-    // Extract to staging.
-    const stagingDir = path.join(dir, '.staging');
-    const tmpTarball = path.join(os.tmpdir(), `pingcode-cli-${newVersion}.tgz`);
-    try {
-      writeFileSync(tmpTarball, tarballBuffer);
-      cleanStaging(stagingDir);
-      mkdirSync(stagingDir, { recursive: true });
-      extractTarball(tarballBuffer, stagingDir);
-
-      if (!validateStaging(stagingDir)) {
-        cleanStaging(stagingDir);
-        throw new TransportError('invalid tarball: dist/bin/pingcode.js not found');
-      }
-
-      // Gate 1 — the staged bundle must actually run, and must be the version we
-      // asked for. Runs before the swap, so a broken tarball leaves the current
-      // install completely untouched: no swap, no `.backup`, staging cleaned.
-      try {
-        verifyBundle(stagingDir, exec, newVersion);
-      } catch (error) {
-        cleanStaging(stagingDir);
-        throw error;
-      }
-
-      await atomicReplace(dir, stagingDir);
-
-      // Sync skills.
-      const skillSource = path.join(dir, 'skills', 'pingcode');
-      if (dirExists(skillSource)) {
-        await syncSkills(skillSource, skillTargets(env));
-      }
-
-      // Gate 2 — the installed bundle must run. The swap kept the backup, which
-      // is the only copy of the previous install left; if the new one is dead,
-      // put it back rather than stranding the user with an unstartable binary.
-      try {
-        verifyBundle(dir, exec, newVersion);
-      } catch (error) {
-        restoreBackup(dir);
-        throw error;
-      }
-
-      // The previous install is only dropped once the new one is proven good.
-      removeFile(`${dir}.backup`);
-
-      try { removeHint(stateDir); } catch { /* best-effort */ }
-      return { status: 'updated', version: newVersion };
-    } finally {
-      removeFile(tmpTarball);
+    // Skills ship inside the package — see `packageSkillDir`.
+    const skillSource = packageSkillDir();
+    if (dirExists(skillSource)) {
+      await syncSkills(skillSource, skillTargets(env));
     }
+
+    try { removeHint(stateDir); } catch { /* best-effort */ }
+    return { status: 'updated', version: newVersion };
   } catch (error) {
     if (info !== undefined) {
       try { writeHint(stateDir, info.version); } catch { /* best-effort */ }

@@ -18,15 +18,17 @@ See [Coverage](#coverage-reach-vs-ergonomics) for the per-module split.
 
 ## Install
 
-Requires **Node.js >= 20**. The package is published to **npm** as [`pingcode-cli-unofficial`](https://www.npmjs.com/package/pingcode-cli-unofficial). The build bundles the two runtime deps (`commander`, `picocolors`) into `dist/`, so an installed binary needs only Node — no `npm` on the client. A 1.8.1 or 1.8.2 install cannot self-update and must be reinstalled.
+Requires **Node.js >= 20**. The package is published to **npm** as [`pingcode-cli-unofficial`](https://www.npmjs.com/package/pingcode-cli-unofficial). The build bundles the two runtime deps (`commander`, `picocolors`) into `dist/`, so an installed binary needs only Node — no `npm` on the client to *run* it. A 1.8.1 or 1.8.2 install cannot self-update and must be reinstalled.
 
-### Via npm (recommended)
+### Via npm
 
 ```bash
 npm install -g pingcode-cli-unofficial
 ```
 
-That puts `pingcode` on your `PATH`. Self-update is automatic: the CLI checks npm for new versions on startup and updates silently in the background.
+That puts `pingcode` on your `PATH`, and it is the only install path. Self-update is
+automatic: the CLI checks npm for new versions on startup and installs them with
+`npm i -g`, so the box needs an `npm` alongside the `node` running the CLI.
 
 ### From source
 
@@ -39,8 +41,6 @@ npm install
 npm run build            # → dist/bin/pingcode.js
 npm link                 # then just: pingcode --help
 ```
-
-The one-click installers (`./install.sh`, `.\install.ps1`) still work for source installs, but **npm is the recommended path** for end users.
 
 Development commands:
 

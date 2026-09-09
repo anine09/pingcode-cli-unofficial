@@ -40,9 +40,8 @@ src/
 │   ├── catalog/            # the generated endpoint catalog + its hand-written corrections
 │   ├── endpoints.ts        # every curated path string, in one place
 │   ├── errors.ts           # the 8-way hierarchy + exit-code table + DryRunHalt
-│   ├── zip.ts              # pure-Node ZIP extractor (zero-dep; deflate + stored; path-traversal guard)
-│   ├── paths.ts            # XDG install dir, skill targets, bin shim path, platform/arch detection
-│   ├── update.ts           # update engine: fetch release, download, atomic replace, skill sync, verify
+│   ├── paths.ts            # skill targets only — npm owns where the package lives
+│   ├── update.ts           # update engine: registry version check, npm-install delegation, skill sync
 │   ├── redact.ts           # redactUrl / redactHeaders / redactSnippet / maskIdentifier
 │   └── logger.ts           # warn/debug — always to stderr
 ├── types/                 # hand-written envelope + resource types, per module
@@ -50,7 +49,6 @@ src/
 
 test/                       # vitest; one file per module, layering.test.ts, and help/ per group
 scripts/install-skill.ts    # npm run skill:install
-scripts/package-release.ts  # npm run package:release — build + zip dist/+skills/ for GitHub Releases
 skills/pingcode/SKILL.md    # the agent-facing docs, source of truth
 ```
 
