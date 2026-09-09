@@ -32,6 +32,7 @@ Commands:
                          scopes pcp:read:devops:deploy / pcp:write:devops:deploy)
   settings               后台设置: organisation-wide directory data
   self-update [options]  update the CLI to the latest npm-published version
+  skill                  manage the pingcode skill across agent targets
   help [command]         display help for command
 "
 `;

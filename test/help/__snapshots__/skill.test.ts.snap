@@ -1,0 +1,86 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`skill --help > skill 1`] = `
+"Usage: pingcode skill [options] [command]
+
+manage the pingcode skill across agent targets
+
+Options:
+  -h, --help         display help for command
+
+Commands:
+  list [options]     show where the skill is installed
+  install [options]  install the skill into agent global skill directories
+  remove [options]   remove the skill from agent global skill directories
+  update [options]   update the skill (reinstall with --force)
+  help [command]     display help for command
+"
+`;
+
+exports[`skill install --help > install 1`] = `
+"Usage: pingcode skill install [options]
+
+install the skill into agent global skill directories
+
+Options:
+  --target <name>  comma-separated target(s): claude, opencode, all (default: "all")
+  --force          overwrite existing files
+  --host <url>     PingCode host (default https://open.pingcode.com; self-hosted:
+                   https://pingcode.example.com)
+  --json           emit machine-readable JSON on stdout
+  --dry-run        preview mutating requests without sending them
+  --no-cache       bypass the on-disk metadata cache
+  --verbose        log requests to stderr (secrets redacted)
+  -h, --help       display help for command
+"
+`;
+
+exports[`skill list --help > list 1`] = `
+"Usage: pingcode skill list [options]
+
+show where the skill is installed
+
+Options:
+  --host <url>  PingCode host (default https://open.pingcode.com; self-hosted:
+                https://pingcode.example.com)
+  --json        emit machine-readable JSON on stdout
+  --dry-run     preview mutating requests without sending them
+  --no-cache    bypass the on-disk metadata cache
+  --verbose     log requests to stderr (secrets redacted)
+  -h, --help    display help for command
+"
+`;
+
+exports[`skill remove --help > remove 1`] = `
+"Usage: pingcode skill remove [options]
+
+remove the skill from agent global skill directories
+
+Options:
+  --target <name>  comma-separated target(s): claude, opencode, all (default: "all")
+  --host <url>     PingCode host (default https://open.pingcode.com; self-hosted:
+                   https://pingcode.example.com)
+  --json           emit machine-readable JSON on stdout
+  --dry-run        preview mutating requests without sending them
+  --no-cache       bypass the on-disk metadata cache
+  --verbose        log requests to stderr (secrets redacted)
+  -h, --help       display help for command
+"
+`;
+
+exports[`skill update --help > update 1`] = `
+"Usage: pingcode skill update [options]
+
+update the skill (reinstall with --force)
+
+Options:
+  --target <name>  comma-separated target(s): claude, opencode, all (default: "all")
+  --host <url>     PingCode host (default https://open.pingcode.com; self-hosted:
+                   https://pingcode.example.com)
+  --json           emit machine-readable JSON on stdout
+  --dry-run        preview mutating requests without sending them
+  --no-cache       bypass the on-disk metadata cache
+  --verbose        log requests to stderr (secrets redacted)
+  -h, --help       display help for command
+"
+`;
