@@ -23,11 +23,10 @@
  * Usage: node --experimental-strip-types scripts/install-skill.ts
  *          [--target claude|opencode|all] [--dry-run] [--force]
  *
- * Target selection (prd 08-01-skill-install-targets):
+ * Target selection:
  *   - `--target` given      → exactly those agents
- *   - omitted, stdin is TTY → interactive prompt
- *   - omitted, not a TTY    → both agents (the historical behaviour, so CI and
- *                             pipes keep working unchanged)
+ *   - omitted, stdin is TTY → interactive checkbox list with search
+ *   - omitted, not a TTY    → all agents (historical behaviour)
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import os from 'node:os';
@@ -170,31 +169,100 @@ function selectTargets(all: Target[], requested: string[]): Target[] | string {
   return picked;
 }
 
-/** TTY-only. Returns the chosen targets, or null when the operator aborts. */
+/** TTY-only. Interactive checkbox list with search/filter. */
 async function promptForTargets(all: Target[]): Promise<Target[] | null> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
-  try {
-    process.stderr.write('install the pingcode skill into which coding agent?\n');
-    all.forEach((target, index) => {
-      process.stderr.write(`  ${index + 1}) ${target.label}\n       ${target.file}\n`);
-    });
-    process.stderr.write(`  a) all of them\n`);
-    const answer = (await rl.question('choose [number/name/a, empty = all, q = quit]: ')).trim().toLowerCase();
-    if (answer === 'q' || answer === 'quit') return null;
-    if (answer === '' || answer === 'a' || answer === 'all') return all;
+  const selected = new Set<number>();
+  let filterText = '';
+  let inFilter = false;
 
-    const byIndex = Number.parseInt(answer, 10);
-    if (String(byIndex) === answer && byIndex >= 1 && byIndex <= all.length) {
-      return [all[byIndex - 1] as Target];
+  const render = (): void => {
+    const matches = filterText !== ''
+      ? all.filter((target) => {
+          const text = `${target.label} ${target.name}`.toLowerCase();
+          return text.includes(filterText.toLowerCase());
+        })
+      : all;
+
+    if (!inFilter) {
+      process.stderr.write('install the pingcode skill into which coding agent(s)?\n');
+      matches.forEach((target, displayIndex) => {
+        const index = all.indexOf(target);
+        const boxed = selected.has(index) ? '[x]' : '[ ]';
+        process.stderr.write(`  ${boxed} ${displayIndex + 1}) ${target.label}\n       ${target.file}\n`);
+      });
+      process.stderr.write('  a) toggle all   |   / filter   |   Enter confirm   q = quit\n');
     }
-    const selected = selectTargets(all, [answer]);
-    if (typeof selected === 'string') {
-      process.stderr.write(`${selected}\n`);
-      return null;
+    if (filterText !== '') {
+      process.stderr.write(`filter: ${filterText}\n`);
+      process.stderr.write(`${matches.length} of ${all.length} shown\n`);
     }
-    return selected;
+    process.stderr.write(inFilter ? 'filter: ' : 'choose: ');
+  };
+
+  try {
+    while (true) {
+      render();
+      const raw = await rl.question('');
+      const answer = raw.trim().toLowerCase();
+
+      // Compute the current visible list once per input, after render() updates filterText.
+      const visible = filterText !== ''
+        ? all.filter((target) => {
+            const text = `${target.label} ${target.name}`.toLowerCase();
+            return text.includes(filterText.toLowerCase());
+          })
+        : all;
+      const visibleIndices = visible.map((target) => all.indexOf(target));
+
+      if (inFilter) {
+        if (answer === 'q' || answer === 'quit') return null;
+        if (answer === '') { inFilter = false; filterText = ''; continue; }
+        filterText = answer;
+        inFilter = false;
+        continue;
+      }
+
+      if (answer === 'q' || answer === 'quit') return null;
+      if (answer === 'a' || answer === 'all') {
+        if (selected.size === all.length) selected.clear();
+        else all.forEach((_, index) => selected.add(index));
+        continue;
+      }
+      if (answer === '/') { inFilter = true; filterText = ''; continue; }
+      if (answer === '') {
+        if (selected.size > 0) return all.filter((_, index) => selected.has(index));
+        all.forEach((_, index) => selected.add(index));
+        continue;
+      }
+
+      const parts = answer.split(/[,\s]+/).filter((part) => part !== '');
+      const indices = new Set<number>();
+      for (const part of parts) {
+        const byIndex = Number.parseInt(part, 10);
+        // Resolve against visible list when filtering, against full list otherwise.
+        if (String(byIndex) === part && byIndex >= 1 && byIndex <= visible.length) {
+          indices.add(visibleIndices[byIndex - 1] as number);
+          continue;
+        }
+        const match = all.find((target) => target.name === part);
+        if (match === undefined) {
+          const resolved = selectTargets(all, [part]);
+          if (typeof resolved === 'string') {
+            process.stderr.write(`${resolved}\n`);
+            return null;
+          }
+          resolved.forEach((target) => indices.add(all.indexOf(target)));
+          continue;
+        }
+        indices.add(all.indexOf(match));
+      }
+      indices.forEach((index) => {
+        if (selected.has(index)) selected.delete(index);
+        else selected.add(index);
+      });
+    }
   } catch {
-    // EOF / closed stdin — treat like an abort rather than installing blindly.
     return null;
   } finally {
     rl.close();
