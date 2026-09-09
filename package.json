@@ -1,6 +1,6 @@
 {
   "name": "pingcode-cli-unofficial",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Command-line client for the PingCode Open API",
   "type": "module",
   "license": "MIT",
