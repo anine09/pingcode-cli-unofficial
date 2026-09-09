@@ -1,4 +1,4 @@
-# pingcode-cli
+# pingcode-cli-unofficial
 
 [![CI](https://github.com/anine09/pingcode-cli-unofficial/actions/workflows/ci.yml/badge.svg)](https://github.com/anine09/pingcode-cli-unofficial/actions/workflows/ci.yml)
 
@@ -18,34 +18,29 @@ See [Coverage](#coverage-reach-vs-ergonomics) for the per-module split.
 
 ## Install
 
-Requires **Node.js >= 20**. The package is not published to npm; release zips
-ship their own `node_modules/` (`commander`, `picocolors`), so an installed
-binary needs only Node — no `npm` on the client. Build from a checkout for development.
+Requires **Node.js >= 20**. The package is published to **npm** as [`pingcode-cli-unofficial`](https://www.npmjs.com/package/pingcode-cli-unofficial). Release tarballs ship their own `node_modules/` (`commander`, `picocolors`), so an installed binary needs only Node — no `npm` on the client.
 
-### One-click (recommended)
-
-From the repo checkout, one command installs deps, builds, and links `pingcode` onto your
-`PATH` — compatible with Linux, macOS, and Windows. Re-run it after `git pull` to rebuild +
-relink the latest code:
+### Via npm (recommended)
 
 ```bash
-./install.sh            # Linux / macOS  (or: npm run install:cli)
+npm install -g pingcode-cli-unofficial
 ```
 
-```powershell
-.\install.ps1           # Windows PowerShell  (or: npm run install:cli)
-```
+That puts `pingcode` on your `PATH`. Self-update is automatic: the CLI checks npm for new versions on startup and updates silently in the background.
 
-The Windows variant needs PowerShell (`pwsh` or Windows PowerShell); the `install:cli` npm
-script is the cross-platform fallback (`node scripts/install.mjs`).
+### From source
 
-### Manual
+Build from a checkout when you want the latest code between releases, or want to edit/extend the CLI:
 
 ```bash
+git clone https://github.com/anine09/pingcode-cli-unofficial.git
+cd pingcode-cli-unofficial
 npm install
 npm run build            # → dist/bin/pingcode.js
 npm link                 # then just: pingcode --help
 ```
+
+The one-click installers (`./install.sh`, `.\install.ps1`) still work for source installs, but **npm is the recommended path** for end users.
 
 Development commands:
 
