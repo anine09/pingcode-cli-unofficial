@@ -667,6 +667,18 @@ export async function runAutoUpdate(
 
       await atomicReplace(dir, stagingDir);
 
+      // Install runtime dependencies (npm tarball does not include node_modules).
+      try {
+        exec('npm', ['install', '--production', '--prefix', dir]);
+      } catch (error) {
+        // Roll back to backup on failure.
+        const backup = `${dir}.backup`;
+        try { atomicReplace(dir, backup); } catch { /* best-effort */ }
+        throw new TransportError(
+          `failed to install dependencies: ${errorMessage(error)}`, { cause: error },
+        );
+      }
+
       // Sync skills.
       const skillSource = path.join(dir, 'skills', 'pingcode');
       if (dirExists(skillSource)) {
