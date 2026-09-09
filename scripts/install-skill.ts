@@ -206,6 +206,15 @@ async function promptForTargets(all: Target[]): Promise<Target[] | null> {
       const raw = await rl.question('');
       const answer = raw.trim().toLowerCase();
 
+      // Compute the current visible list once per input, after render() updates filterText.
+      const visible = filterText !== ''
+        ? all.filter((target) => {
+            const text = `${target.label} ${target.name}`.toLowerCase();
+            return text.includes(filterText.toLowerCase());
+          })
+        : all;
+      const visibleIndices = visible.map((target) => all.indexOf(target));
+
       if (inFilter) {
         if (answer === 'q' || answer === 'quit') return null;
         if (answer === '') { inFilter = false; filterText = ''; continue; }
@@ -231,8 +240,9 @@ async function promptForTargets(all: Target[]): Promise<Target[] | null> {
       const indices = new Set<number>();
       for (const part of parts) {
         const byIndex = Number.parseInt(part, 10);
-        if (String(byIndex) === part && byIndex >= 1 && byIndex <= all.length) {
-          indices.add(byIndex - 1);
+        // Resolve against visible list when filtering, against full list otherwise.
+        if (String(byIndex) === part && byIndex >= 1 && byIndex <= visible.length) {
+          indices.add(visibleIndices[byIndex - 1] as number);
           continue;
         }
         const match = all.find((target) => target.name === part);
