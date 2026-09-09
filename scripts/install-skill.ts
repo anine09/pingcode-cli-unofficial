@@ -174,6 +174,7 @@ async function promptForTargets(all: Target[]): Promise<Target[] | null> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   const selected = new Set<number>();
   let filterText = '';
+  let inFilter = false;
 
   const render = (): void => {
     const matches = filterText !== ''
@@ -183,18 +184,20 @@ async function promptForTargets(all: Target[]): Promise<Target[] | null> {
         })
       : all;
 
-    process.stderr.write('install the pingcode skill into which coding agent(s)?\n');
-    matches.forEach((target, displayIndex) => {
-      const index = all.indexOf(target);
-      const boxed = selected.has(index) ? '[x]' : '[ ]';
-      process.stderr.write(`  ${boxed} ${displayIndex + 1}) ${target.label}\n       ${target.file}\n`);
-    });
-    process.stderr.write('  a) toggle all   |   / filter   |   Enter confirm   q = quit\n');
+    if (!inFilter) {
+      process.stderr.write('install the pingcode skill into which coding agent(s)?\n');
+      matches.forEach((target, displayIndex) => {
+        const index = all.indexOf(target);
+        const boxed = selected.has(index) ? '[x]' : '[ ]';
+        process.stderr.write(`  ${boxed} ${displayIndex + 1}) ${target.label}\n       ${target.file}\n`);
+      });
+      process.stderr.write('  a) toggle all   |   / filter   |   Enter confirm   q = quit\n');
+    }
     if (filterText !== '') {
       process.stderr.write(`filter: ${filterText}\n`);
       process.stderr.write(`${matches.length} of ${all.length} shown\n`);
     }
-    process.stderr.write('choose: ');
+    process.stderr.write(inFilter ? 'filter: ' : 'choose: ');
   };
 
   try {
@@ -203,23 +206,27 @@ async function promptForTargets(all: Target[]): Promise<Target[] | null> {
       const raw = await rl.question('');
       const answer = raw.trim().toLowerCase();
 
+      if (inFilter) {
+        if (answer === 'q' || answer === 'quit') return null;
+        if (answer === '') { inFilter = false; filterText = ''; continue; }
+        filterText = answer;
+        inFilter = false;
+        continue;
+      }
+
       if (answer === 'q' || answer === 'quit') return null;
       if (answer === 'a' || answer === 'all') {
         if (selected.size === all.length) selected.clear();
         else all.forEach((_, index) => selected.add(index));
         continue;
       }
-      if (answer === '/') {
-        filterText = '';
-        continue;
-      }
+      if (answer === '/') { inFilter = true; filterText = ''; continue; }
       if (answer === '') {
         if (selected.size > 0) return all.filter((_, index) => selected.has(index));
         all.forEach((_, index) => selected.add(index));
         continue;
       }
 
-      // Check if it's a filter query (contains letters that don't match indices)
       const parts = answer.split(/[,\s]+/).filter((part) => part !== '');
       const indices = new Set<number>();
       for (const part of parts) {
