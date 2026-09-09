@@ -125,6 +125,21 @@ conditionally rather than assigned `undefined`.
   > workflow runs. `test/workflows.test.ts` pins each invalid shape once it has been found (the
   > job-level `env:` context allowlist is one); that list is a record of past accidents, not coverage.
 
+- **Every CI step that touches something already on the remote is idempotent, because an aborted run
+  leaves three different leftovers and each one breaks a different step.** `git tag` fails with exit
+  128 when the tag exists; `gh release create` is rejected when a release for that tag already exists;
+  and a **draft** release is invisible to `gh release view`, because a draft is not associated with
+  its tag yet — so a skip guard written as "if the tag exists *and* a release can be looked up by tag,
+  skip" falls through and runs the entire pipeline into the wall. That race cost v1.8.2: the tag and a
+  draft release were both created at `04:19:13Z`, the workflow's guard ran at `04:20:22Z` while the
+  release was still a draft, and the release was published at `04:20:29Z` — seven seconds too late.
+  The run died at `git tag` with `fatal: tag 'v1.8.2' already exists` and left a published release
+  with **zero assets**. So `release.yml` looks releases up through
+  `gh api repos/${GITHUB_REPOSITORY}/releases?per_page=100` (which sees drafts), force-tags behind a
+  guard that already proved no release exists for that version, and repeats the lookup immediately
+  before `gh release create`. A guard that reads a step output computed earlier in the run is not a
+  guard: the remote changed in between.
+
 - **Zero network in unit tests.** No `msw`, no `nock`: `Ctx.fetch` is replaced with a fake
   (`test/helpers/fake.ts`). A test that would open a socket is a bug in the test.
 - **Determinism is injected**, not mocked globally: `now` and `sleep` come from `Ctx`, so expiry
