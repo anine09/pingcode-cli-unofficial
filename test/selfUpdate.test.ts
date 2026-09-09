@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SkillTarget } from '../src/core/paths';
@@ -17,10 +18,10 @@ import {
   syncSkills,
   touchCooldown,
   validateStaging,
-  verifyInstall,
   writeHint,
   type ExecFn,
 } from '../src/core/update';
+import { installDir } from '../src/core/paths';
 import { VERSION } from '../src/version';
 
 // ---------------------------------------------------------------------------
@@ -247,16 +248,21 @@ describe('atomicReplace', () => {
     expect(existsSync(path.join(install, 'bin.js'))).toBe(true);
   });
 
-  it('removes backup on success', async () => {
+  it('retains the backup so the caller can restore a bad install', async () => {
     const install = tempDir('backup-install');
     const staging = tempDir('backup-staging');
     ensureDir(install);
     ensureDir(staging);
+    writeFileSync(path.join(install, 'v1.txt'), 'v1');
     writeFileSync(path.join(staging, 'v2.txt'), 'v2');
 
     await atomicReplace(install, staging);
 
-    expect(existsSync(`${install}.backup`)).toBe(false);
+    // `atomicReplace` no longer deletes the backup: whether the new install is
+    // good is the caller's post-swap verify to decide, not a successful rename.
+    expect(existsSync(path.join(install, 'v2.txt'))).toBe(true);
+    expect(existsSync(`${install}.backup`)).toBe(true);
+    expect(readFileSync(path.join(`${install}.backup`, 'v1.txt'), 'utf8')).toBe('v1');
   });
 
   it('handles staging nested under install dir', async () => {
@@ -275,7 +281,9 @@ describe('atomicReplace', () => {
     expect(existsSync(path.join(install, 'new.txt'))).toBe(true);
     expect(existsSync(path.join(install, 'old.txt'))).toBe(false);
     expect(existsSync(staging)).toBe(false);
-    expect(existsSync(`${install}.backup`)).toBe(false);
+    // The nested case moves staging to `${install}.incoming` first, so neither
+    // the nested dir nor the sibling survives the swap.
+    expect(existsSync(`${install}.backup`)).toBe(true);
     expect(existsSync(`${install}.incoming`)).toBe(false);
   });
 });
@@ -325,6 +333,15 @@ describe('staging helpers', () => {
     expect(existsSync(file)).toBe(true);
     removeFile(file);
     expect(existsSync(file)).toBe(false);
+  });
+
+  it('removeFile removes a non-empty directory (the post-verify backup)', () => {
+    const dir = tempDir('rm-dir');
+    ensureDir(path.join(dir, 'dist', 'bin'));
+    writeFileSync(path.join(dir, 'dist', 'bin', 'pingcode.js'), 'data');
+
+    removeFile(dir);
+    expect(existsSync(dir)).toBe(false);
   });
 
   it('removeFile does not throw for missing file', () => {
@@ -442,37 +459,66 @@ describe('syncSkills', () => {
   });
 });
 
-// ===========================================================================
-// verifyInstall
-// ===========================================================================
+// ---------------------------------------------------------------------------
+// tarball builder (the inverse of `extractTarball`)
+// ---------------------------------------------------------------------------
 
-describe('verifyInstall', () => {
-  it('returns version output on success', () => {
-    const dir = tempDir('verify-ok');
-    ensureDir(path.join(dir, 'dist', 'bin'));
-    writeFileSync(path.join(dir, 'dist', 'bin', 'pingcode.js'), '#!/usr/bin/env node');
+/**
+ * Build a .tar.gz that looks like an npm tarball: one regular file per entry,
+ * under the `package/` prefix. `verifyBundle` unit coverage lives in
+ * `test/updateArtifact.test.ts`; this exists so the `runAutoUpdate` gate tests
+ * can drive the real download → extract → verify path with no network.
+ */
+function tarGz(files: { name: string; content: string }[]): Buffer {
+  const blocks: Buffer[] = [];
 
-    const mockExec = () => '1.5.2\n';
-    const result = verifyInstall(dir, mockExec);
-    expect(result).toBe('1.5.2');
-  });
+  for (const file of files) {
+    const data = Buffer.from(file.content, 'utf8');
+    const header = Buffer.alloc(512);
+    writeTarString(header, 0, `package/${file.name}`);
+    writeTarString(header, 100, '644');
+    writeTarString(header, 108, '0');
+    writeTarString(header, 116, '0');
+    writeTarOctal(header, 124, 12, data.length);
+    writeTarOctal(header, 136, 12, 1_700_000_000);
+    header[156] = '0'.charCodeAt(0);
+    header.write('ustar\0', 257, 'ascii');
+    header.write('00', 263, 'ascii');
+    // The checksum is summed over the header with its own field blanked.
+    header.fill(' '.charCodeAt(0), 148, 156);
+    let sum = 0;
+    for (const byte of header) sum += byte;
+    header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'ascii');
+    blocks.push(header);
 
-  it('throws TransportError when binary fails', () => {
-    const dir = tempDir('verify-fail');
-    ensureDir(path.join(dir, 'dist', 'bin'));
-    writeFileSync(path.join(dir, 'dist', 'bin', 'pingcode.js'), 'bad');
+    const body = Buffer.alloc(Math.ceil(data.length / 512) * 512);
+    data.copy(body);
+    blocks.push(body);
+  }
 
-    const mockExec = (): never => {
-      throw new Error('spawn ENOENT');
-    };
+  blocks.push(Buffer.alloc(1024)); // end-of-archive marker
+  return gzipSync(Buffer.concat(blocks));
+}
 
-    expect(() => verifyInstall(dir, mockExec)).toThrow(/failed to verify/);
-  });
-});
+function writeTarString(header: Buffer, offset: number, value: string): void {
+  header.write(`${value}\0`, offset, 'ascii');
+}
 
-// ===========================================================================
+function writeTarOctal(header: Buffer, offset: number, width: number, value: number): void {
+  header.write(`${value.toString(8).padStart(width - 1, '0')}\0`, offset, 'ascii');
+}
+
+/** A tarball carrying one runnable-looking bundle plus a pre-update sentinel. */
+function bundleTarball(): Buffer {
+  return tarGz([
+    { name: 'dist/bin/pingcode.js', content: 'console.log("9.9.9");' },
+    { name: 'skills/pingcode/SKILL.md', content: '# PingCode Skill\n' },
+  ]);
+}
+
+// ---------------------------------------------------------------------------
 // acquireLock
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 describe('acquireLock', () => {
   it('acquires when no lock file exists', () => {
@@ -716,5 +762,194 @@ describe('runAutoUpdate', () => {
       mockExec,
     );
     expect(isCooldownActive(configDir)).toBe(true);
+  });
+});
+
+// ===========================================================================
+// runAutoUpdate — bundle gates
+// ===========================================================================
+
+/**
+ * Regression coverage for the 1.8.1/1.8.2 failure: the npm tarball ships
+ * `dist/` with no `node_modules/`, so an "update" could install a binary that
+ * cannot start. The update path must now (a) prove the staged bundle runs
+ * before the swap, (b) prove the installed bundle runs after it, and (c) never
+ * shell out to `npm` to fix either.
+ *
+ * Same harness as the suite above: a fake `fetch`, an injected `exec`, and temp
+ * dirs — no root program, no network.
+ */
+describe('runAutoUpdate — bundle gates', () => {
+  const REMOTE = '2.0.0';
+  const TARBALL_URL = `https://example.com/pingcode-cli-unofficial-${REMOTE}.tgz`;
+
+  /**
+   * Env pointing at throwaway config + data dirs. `HOME` and
+   * `XDG_CONFIG_HOME` are redirected too: `skillTargets` resolves the agent
+   * skill dirs against them, and a test that reached into a real
+   * `~/.claude/skills/pingcode` would overwrite the developer's skill.
+   */
+  function makeEnv(): Record<string, string | undefined> {
+    return {
+      PINGCODE_CONFIG_DIR: tempDir('gate-config'),
+      XDG_DATA_HOME: tempDir('gate-data'),
+      HOME: tempDir('gate-home'),
+      XDG_CONFIG_HOME: tempDir('gate-xdg-config'),
+    };
+  }
+
+  /** A pre-update install with one sentinel file and a runnable-looking bundle. */
+  function seedInstall(install: string): void {
+    ensureDir(path.join(install, 'dist', 'bin'));
+    writeFileSync(path.join(install, 'dist', 'bin', 'pingcode.js'), 'OLD BUNDLE');
+    writeFileSync(path.join(install, 'pre-update.txt'), 'sentinel');
+  }
+
+  /** fetch that answers the registry query, then serves `tarball` as the download. */
+  function updateFetch(tarball: Buffer): typeof globalThis.fetch {
+    return vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.endsWith('.tgz')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(tarball));
+              controller.close();
+            },
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          'dist-tags': { latest: REMOTE },
+          versions: { [REMOTE]: { dist: { tarball: TARBALL_URL } } },
+        }),
+      } as Response;
+    }) as unknown as typeof globalThis.fetch;
+  }
+
+  it('never invokes npm — the bundle carries its own runtime deps', async () => {
+    const env = makeEnv();
+    seedInstall(installDir(env));
+
+    const calls: string[] = [];
+    const exec: ExecFn = (file, args) => {
+      calls.push([file, ...args].join(' '));
+      return `${REMOTE}\n`;
+    };
+
+    const result = await runAutoUpdate(env, updateFetch(bundleTarball()), exec);
+
+    expect(result.status).toBe('updated');
+    expect(calls.some((call) => call.startsWith('npm'))).toBe(false);
+    // Every exec is a version probe of the staged, then the installed bundle.
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call).toMatch(/^node .*dist[\\/]bin[\\/]pingcode\.js --version$/);
+    }
+  });
+
+  it('drops the previous install only after the new one is verified', async () => {
+    const env = makeEnv();
+    const install = installDir(env);
+    seedInstall(install);
+
+    const result = await runAutoUpdate(
+      env,
+      updateFetch(bundleTarball()),
+      () => `${REMOTE}\n`,
+    );
+
+    expect(result.status).toBe('updated');
+    expect(readFileSync(path.join(install, 'dist', 'bin', 'pingcode.js'), 'utf8'))
+      .toBe('console.log("9.9.9");');
+    expect(existsSync(path.join(install, 'pre-update.txt'))).toBe(false);
+    // Verified → the backup is gone, so a later update starts from a clean slate.
+    expect(existsSync(`${install}.backup`)).toBe(false);
+    expect(existsSync(path.join(install, '.staging'))).toBe(false);
+  });
+
+  it('rejects a staging bundle that cannot start, before touching the install', async () => {
+    const env = makeEnv();
+    const install = installDir(env);
+    seedInstall(install);
+    const before = readFileSync(path.join(install, 'pre-update.txt'), 'utf8');
+
+    const exec: ExecFn = () => {
+      throw new Error('spawn ENOENT');
+    };
+    const result = await runAutoUpdate(env, updateFetch(bundleTarball()), exec);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: expect.stringMatching(/failed to verify/),
+    });
+    expect(readFileSync(path.join(install, 'pre-update.txt'), 'utf8')).toBe(before);
+    expect(readFileSync(path.join(install, 'dist', 'bin', 'pingcode.js'), 'utf8'))
+      .toBe('OLD BUNDLE');
+    expect(existsSync(`${install}.backup`)).toBe(false);
+    expect(existsSync(path.join(install, '.staging'))).toBe(false);
+  });
+
+  it('rejects a staging bundle reporting the wrong version', async () => {
+    const env = makeEnv();
+    const install = installDir(env);
+    seedInstall(install);
+
+    const result = await runAutoUpdate(env, updateFetch(bundleTarball()), () => '9.9.9\n');
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: expect.stringMatching(/reports version 9\.9\.9, expected 2\.0\.0/),
+    });
+    expect(readFileSync(path.join(install, 'dist', 'bin', 'pingcode.js'), 'utf8'))
+      .toBe('OLD BUNDLE');
+    expect(existsSync(`${install}.backup`)).toBe(false);
+  });
+
+  it('restores the backup when the installed bundle does not run', async () => {
+    const env = makeEnv();
+    const install = installDir(env);
+    seedInstall(install);
+    const before = readFileSync(path.join(install, 'pre-update.txt'), 'utf8');
+
+    // Gate 1 (staging) reports the right version; gate 2 (installed) is dead.
+    const exec: ExecFn = (_file, args) => {
+      if (String(args[0]).includes('.staging')) return `${REMOTE}\n`;
+      throw new Error('Error: Cannot find package \'picocolors\'');
+    };
+
+    const result = await runAutoUpdate(env, updateFetch(bundleTarball()), exec);
+
+    expect(result).toMatchObject({
+      error: expect.stringMatching(/failed to verify/),
+    });
+    expect(readFileSync(path.join(install, 'pre-update.txt'), 'utf8')).toBe(before);
+    expect(readFileSync(path.join(install, 'dist', 'bin', 'pingcode.js'), 'utf8'))
+      .toBe('OLD BUNDLE');
+    expect(existsSync(`${install}.backup`)).toBe(false);
+  });
+
+  it('writes a hint so the next run re-offers the update', async () => {
+    const env = makeEnv();
+    const install = installDir(env);
+    seedInstall(install);
+    const configDir = env.PINGCODE_CONFIG_DIR!;
+
+    const result = await runAutoUpdate(
+      env,
+      updateFetch(bundleTarball()),
+      () => {
+        throw new Error('spawn ENOENT');
+      },
+    );
+
+    expect(result.status).toBe('failed');
+    expect(readHint(configDir)).toEqual({ version: REMOTE });
   });
 });

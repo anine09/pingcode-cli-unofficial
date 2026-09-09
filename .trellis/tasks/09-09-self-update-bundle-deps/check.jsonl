@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Checklist for the review: gate green, no new runtime dependency, layering respected, --json stdout unchanged, exit codes unchanged, and the code-review item that a new or edited workflow must actually be triggered once on GitHub."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify test/layering.test.ts still passes conceptually: verifyBundle and restoreBackup must not drag node:fs into cli/, and core must not import cli/ or api/."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Confirm the new pre-swap and post-swap failures map to the same exit code and render through the same typed-error path as the rest of the update flow."}
+{"file": ".trellis/spec/guides/versioning.md", "reason": "Confirm the bump is a PATCH and that package.json and src/version.ts agree before the commit is called done."}
+{"file": ".trellis/spec/guides/commit-conventions.md", "reason": "Verify the commit message format and that the tree was green at commit time."}
+{"file": ".trellis/spec/guides/gitflow.md", "reason": "Verify the work landed on the right branch and that no tag or main push happened without explicit user instruction."}

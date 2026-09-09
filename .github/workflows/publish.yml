@@ -40,6 +40,26 @@ jobs:
 
       - run: npm run build
 
+      # `pingcode self-update` downloads the tarball published below, and npm
+      # strips node_modules/ from it. The binary built above ran inside the
+      # checkout, where those dependencies exist, so pack and smoke the artifact
+      # exactly as a client receives it before it can reach the registry.
+      - name: pack the npm tarball
+        id: pack
+        run: |
+          tarball="$(npm pack --silent --ignore-scripts 2>/dev/null | tail -1)"
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
+          ls -l "${tarball}"
+
+      - name: smoke the packed npm tarball
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          dir="$(mktemp -d)"
+          tar -xzf "${TARBALL}" -C "${dir}"
+          node "${dir}/package/dist/bin/pingcode.js" --version
+          node "${dir}/package/dist/bin/pingcode.js" --help
+
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

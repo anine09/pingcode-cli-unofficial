@@ -18,7 +18,7 @@ See [Coverage](#coverage-reach-vs-ergonomics) for the per-module split.
 
 ## Install
 
-Requires **Node.js >= 20**. The package is published to **npm** as [`pingcode-cli-unofficial`](https://www.npmjs.com/package/pingcode-cli-unofficial). Release tarballs ship their own `node_modules/` (`commander`, `picocolors`), so an installed binary needs only Node — no `npm` on the client.
+Requires **Node.js >= 20**. The package is published to **npm** as [`pingcode-cli-unofficial`](https://www.npmjs.com/package/pingcode-cli-unofficial). The build bundles the two runtime deps (`commander`, `picocolors`) into `dist/`, so an installed binary needs only Node — no `npm` on the client. A 1.8.1 or 1.8.2 install cannot self-update and must be reinstalled.
 
 ### Via npm (recommended)
 

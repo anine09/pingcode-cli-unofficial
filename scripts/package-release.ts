@@ -10,10 +10,15 @@
  * the release matrix gets the **same contents**; only the filename differs, and
  * only so the self-update flow can match an asset to the machine it runs on.
  *
- * Each zip contains:
+ * tsup bundles the two runtime deps (`commander`, `picocolors`) into
+ * `dist/bin/pingcode.js` via `noExternal`, so a zip needs **no `node_modules/`
+ * payload**. Each zip contains:
  *   dist/bin/pingcode.js
  *   skills/pingcode/SKILL.md
  *   skills/pingcode/modules/*.md
+ *
+ * Client prerequisite (documented in README): Node >= 20, and nothing else —
+ * no `npm` is needed to run an installed zip.
  *
  * Deliberately dependency-free — only `node:*` modules, plus the system `zip`
  * binary, so `node --experimental-strip-types` can run it without resolving a
@@ -40,18 +45,6 @@ const BIN_ENTRY = path.join('dist', 'bin', 'pingcode.js');
 const SKILL_DIR = path.join('skills', 'pingcode');
 const SKILL_FILE = path.join(SKILL_DIR, 'SKILL.md');
 const SKILL_MODULES_DIR = path.join(SKILL_DIR, 'modules');
-/**
- * Production npm dependencies the runtime binary imports directly. tsup with
- * `platform: 'node'` leaves them external, so the release zip ships them under
- * `node_modules/` so Node resolves them on the client without a package graph.
- * Both are pure-JS with no runtime transitive deps.
- *
- * Client prerequisite (documented in README): Node >= 20. `npm` is only needed
- * for the repo-checkout install path; the zip install runs straight from `node`
- * + the bundled `node_modules/`.
- */
-const RUNTIME_DEPS = ['commander', 'picocolors'] as const;
-const NODE_MODULES_DIR = 'node_modules';
 
 type Args = {
   build: boolean;
@@ -137,13 +130,6 @@ function verifyPayload(root: string): void {
   } else {
     throw new Error(`modules directory not found: ${modulesDir}`);
   }
-  // Runtime deps must be installed so we can ship them in the zip.
-  for (const dep of RUNTIME_DEPS) {
-    const depDir = path.join(root, NODE_MODULES_DIR, dep);
-    if (!existsSync(depDir)) {
-      throw new Error(`runtime dependency not installed: ${depDir} (run npm install)`);
-    }
-  }
 }
 
 /**
@@ -157,13 +143,8 @@ function createZip(root: string, outputDir: string, version: string, platform: P
   const name = `pingcode-cli-v${version}-${platform}-${arch}.zip`;
   const output = path.join(outputDir, name);
   if (existsSync(output)) rmSync(output);
-  // dist + skills, plus the runtime deps under node_modules/ so the installed
-  // binary resolves its external imports without a package graph.
-  const paths = [
-    BIN_ENTRY,
-    'skills/pingcode/',
-    ...RUNTIME_DEPS.map((dep) => path.join(NODE_MODULES_DIR, dep)),
-  ];
+  // dist + skills; the runtime deps are already inside the bundled binary.
+  const paths = [BIN_ENTRY, 'skills/pingcode/'];
   execFileSync(
     'zip',
     ['-rq', output, ...paths],

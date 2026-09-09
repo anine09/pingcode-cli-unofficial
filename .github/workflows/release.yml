@@ -106,6 +106,21 @@ jobs:
           echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
           ls -l "${tarball}"
 
+      # --- Smoke the packed npm tarball ---
+      # The binary smoked above runs inside the checkout, where node_modules/
+      # exists. This tarball is what `pingcode self-update` actually downloads
+      # and it is extracted by `npm pack` without node_modules/, so it is
+      # executed from an empty temp dir before it is attached to a release.
+      - name: smoke the packed npm tarball
+        if: env.skip != 'true'
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          dir="$(mktemp -d)"
+          tar -xzf "${TARBALL}" -C "${dir}"
+          node "${dir}/package/dist/bin/pingcode.js" --version
+          node "${dir}/package/dist/bin/pingcode.js" --help
+
       # --- Create tag and release ---
       - name: create git tag
         if: env.skip != 'true'

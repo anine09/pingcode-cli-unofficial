@@ -3,9 +3,10 @@
  *
  * Orchestrates the full self-update flow that `cli/commands/selfUpdate.ts`
  * drives: fetch latest version info from npm registry, download the tarball,
- * unpack it to a staging directory, atomically swap it into the install dir,
- * sync the bundled skill docs to every agent's global skill dir, and verify
- * the new binary.
+ * unpack it to a staging directory, verify the staged bundle actually runs,
+ * atomically swap it into the install dir, sync the bundled skill docs to every
+ * agent's global skill dir, and verify the installed bundle — restoring the
+ * backup if it does not.
  *
  * All file-system and process work lives here because `cli/` is forbidden
  * from importing `node:fs` (see `test/layering.test.ts`). The command layer
@@ -324,7 +325,12 @@ function readTarNumber(buf: Buffer, start: number, maxLen: number): number {
  * 2. Rename `current` → `current.backup` (if `current` exists)
  * 3. Rename `incoming` → `current`
  * 4. If step 3 fails, restore the backup
- * 5. Clean up the backup on success
+ *
+ * The backup is **kept**, not deleted: whether the new install is any good is
+ * decided by the caller's post-swap verify, not by a successful rename. Deleting
+ * it here is what left 1.8.1/1.8.2 users with a dead binary and nothing to put
+ * back. Callers remove it once the bundle has been verified
+ * (`removeFile(`${current}.backup`)`).
  */
 export async function atomicReplace(
   current: string,
@@ -390,12 +396,8 @@ export async function atomicReplace(
     );
   }
 
-  // Step 3: clean up backup.
-  try {
-    rmSync(backup, { recursive: true, force: true });
-  } catch {
-    // Non-fatal.
-  }
+  // Step 3: keep the backup. See the doc comment — the caller removes it after
+  // the new bundle has been verified.
 }
 
 // ---------------------------------------------------------------------------
@@ -425,10 +427,17 @@ export function ensureDir(dirPath: string): void {
   mkdirSync(dirPath, { recursive: true });
 }
 
-/** Remove a single file (best-effort, never throws). */
+/**
+ * Remove a file or directory (best-effort, never throws).
+ *
+ * `recursive: true` matters: the pre-update backup being dropped after a
+ * verified update is a *directory*, and a non-recursive `rmSync` on it fails
+ * with `ENOTEMPTY` — which, being swallowed here, would leave every
+ * `${install}.backup` on disk forever.
+ */
 export function removeFile(filePath: string): void {
   try {
-    rmSync(filePath, { force: true });
+    rmSync(filePath, { recursive: true, force: true });
   } catch {
     // best-effort
   }
@@ -490,15 +499,70 @@ export async function syncSkills(
 // verify
 // ---------------------------------------------------------------------------
 
-export function verifyInstall(dir: string, exec: ExecFn): string {
+/**
+ * Run `<dir>/dist/bin/pingcode.js --version` and return the trimmed output.
+ *
+ * The bundle that ships in an npm tarball has no `node_modules/`, so "the file
+ * exists" (`validateStaging`) is not proof that it *runs*. This is the
+ * loadability check, and it doubles as the identity check: a bundle that starts
+ * but reports another version is a broken install too.
+ *
+ * Called twice per update — once on staging, before the install dir is touched
+ * at all, and once on the install dir, after the swap.
+ *
+ * @param dir              Directory holding `dist/bin/pingcode.js`.
+ * @param exec             Child-process runner.
+ * @param expectedVersion  The version this bundle must report.
+ * @throws TransportError when the binary cannot be started, or reports a version
+ *         other than `expectedVersion`.
+ */
+export function verifyBundle(dir: string, exec: ExecFn, expectedVersion: string): string {
   const bin = path.join(dir, 'dist', 'bin', 'pingcode.js');
+  let reported: string;
   try {
-    return exec('node', [bin, '--version']).trim();
+    reported = exec('node', [bin, '--version']).trim();
   } catch (error) {
     throw new TransportError(
       `failed to verify new installation: ${errorMessage(error)}`,
       {
         hint: `try running manually: node "${bin}" --version`,
+        cause: error,
+      },
+    );
+  }
+  if (reported !== expectedVersion) {
+    throw new TransportError(
+      `installed bundle reports version ${reported}, expected ${expectedVersion}`,
+      { hint: `try running manually: node "${bin}" --version` },
+    );
+  }
+  return reported;
+}
+
+/**
+ * Put the pre-update install back after a failed post-swap verify.
+ *
+ * `atomicReplace` is deliberately not extended into a restore primitive: restore
+ * has different failure semantics (the backup is the *only* copy left) and
+ * deserves its own obvious, testable name.
+ *
+ * `current` is cleared first because `rename` cannot replace an existing
+ * non-empty directory — and `current` is by definition the install whose bundle
+ * just failed to run, so there is nothing in it worth keeping.
+ *
+ * @param current The install directory (`current.backup` is the backup).
+ * @throws TransportError naming the manual restore command if the restore fails.
+ */
+export function restoreBackup(current: string): void {
+  const backup = `${current}.backup`;
+  rmSync(current, { recursive: true, force: true });
+  try {
+    renameSync(backup, current);
+  } catch (error) {
+    throw new TransportError(
+      `failed to restore the previous install: ${errorMessage(error)}`,
+      {
+        hint: `restore manually: mv "${backup}" "${current}"`,
         cause: error,
       },
     );
@@ -665,19 +729,17 @@ export async function runAutoUpdate(
         throw new TransportError('invalid tarball: dist/bin/pingcode.js not found');
       }
 
-      await atomicReplace(dir, stagingDir);
-
-      // Install runtime dependencies (npm tarball does not include node_modules).
+      // Gate 1 — the staged bundle must actually run, and must be the version we
+      // asked for. Runs before the swap, so a broken tarball leaves the current
+      // install completely untouched: no swap, no `.backup`, staging cleaned.
       try {
-        exec('npm', ['install', '--production', '--prefix', dir]);
+        verifyBundle(stagingDir, exec, newVersion);
       } catch (error) {
-        // Roll back to backup on failure.
-        const backup = `${dir}.backup`;
-        try { atomicReplace(dir, backup); } catch { /* best-effort */ }
-        throw new TransportError(
-          `failed to install dependencies: ${errorMessage(error)}`, { cause: error },
-        );
+        cleanStaging(stagingDir);
+        throw error;
       }
+
+      await atomicReplace(dir, stagingDir);
 
       // Sync skills.
       const skillSource = path.join(dir, 'skills', 'pingcode');
@@ -685,8 +747,18 @@ export async function runAutoUpdate(
         await syncSkills(skillSource, skillTargets(env));
       }
 
-      // Verify.
-      verifyInstall(dir, exec);
+      // Gate 2 — the installed bundle must run. The swap kept the backup, which
+      // is the only copy of the previous install left; if the new one is dead,
+      // put it back rather than stranding the user with an unstartable binary.
+      try {
+        verifyBundle(dir, exec, newVersion);
+      } catch (error) {
+        restoreBackup(dir);
+        throw error;
+      }
+
+      // The previous install is only dropped once the new one is proven good.
+      removeFile(`${dir}.backup`);
 
       try { removeHint(stateDir); } catch { /* best-effort */ }
       return { status: 'updated', version: newVersion };
