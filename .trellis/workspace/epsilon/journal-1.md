@@ -58,3 +58,25 @@ Full-scope check, docs, spec, cleanup. AC verdicts with per-criterion evidence n
   wording without changing the `--type` flag's necessity.
 
 
+
+
+## Session 1: Fix broken self-update: bundle runtime deps and gate the published tarball
+
+**Date**: 2026-09-09
+**Task**: Fix broken self-update: bundle runtime deps and gate the published tarball
+**Branch**: `main`
+
+### Summary
+
+self-update 1.8.1->1.8.2 安装出无法启动的二进制：npm tarball 装不进 node_modules 而 tsup 把 commander/picocolors 留作外部依赖，且 verifyInstall 在原子替换之后才跑、备份又在替换成功时被删，失败即死且无法自愈。修复：tsup 加 noExternal + createRequire banner 把两个冻结依赖打进 dist（单加 noExternal 会撞 Dynamic require of events；shims:true 无效，两个键缺一不可，产物 +143KB）；两条更新路径都改成验 staging -> 替换 -> 验安装，atomicReplace 不再自删备份、新增独立 restoreBackup 替换原来静默失效的回滚，顺手修掉 removeFile 缺 recursive 与 renameSync 覆盖非空目录两个文件系统陷阱；删掉 npm install --production；release.yml 与 publish.yml 加打包->解包->跑的产物级 CI gate；README 改正错误声明。验证：npm test 2942 通过、typecheck 干净、npm pack 解包后无 node_modules 且 --version/--help 正常（直接复现并切断用户报错链路）。遗留：需手动触发两个改过的 workflow 确认可启动、发版后补 release body 的 1.8.1/1.8.2 重新安装说明、release zips 冗余待另开任务删除。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `93e2757` | (see git log) |
+| `cdf119d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
