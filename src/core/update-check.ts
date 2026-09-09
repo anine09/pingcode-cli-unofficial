@@ -1,17 +1,15 @@
 /**
- * Startup version check against GitHub Releases.
+ * Startup version check against the npm registry.
  *
- * On CLI startup, a fire-and-forget check queries the latest GitHub Release
- * for this repo. If the remote tag is newer than the local `VERSION`, a
- * one-line hint is printed to stderr — unless `--json` is active or the user
- * opted out via `PINGCODE_NO_UPDATE_CHECK=1`.
+ * On CLI startup, a fire-and-forget check queries the latest published version
+ * of this package on the npm registry. If the remote version is newer than the
+ * local `VERSION`, a one-line hint is printed to stderr — unless `--json` is
+ * active or the user opted out via `PINGCODE_NO_UPDATE_CHECK=1`.
  *
- * The check is **non-blocking**: a 2-second timeout and a 24-hour on-disk
+ * The check is **non-blocking**: a 5-second timeout and a 24-hour on-disk
  * cache mean the normal cold path is a single cache read; the network is hit
  * at most once per day. Any failure (DNS, timeout, 404, malformed JSON) is
  * silently swallowed — a notification must never break the CLI.
- *
- * Design: see `.trellis/tasks/08-21-startup-version-check/prd.md`.
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -22,14 +20,11 @@ import { VERSION } from '../version';
 // constants
 // ---------------------------------------------------------------------------
 
-const OWNER = 'anine09';
-const REPO = 'pingcode-cli-unofficial';
-const API_URL = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
-const CHECK_TIMEOUT_MS = 2_000;
+const PACKAGE_NAME = 'pingcode-cli-unofficial';
+const REGISTRY_URL = `https://registry.npmjs.org/${encodeURIComponent(PACKAGE_NAME)}`;
+const CHECK_TIMEOUT_MS = 5_000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1_000; // 24 h
 const CACHE_FILENAME = 'update-check.json';
-/** Delay before retrying a rate-limited (403) request. */
-const RETRY_DELAY_MS = 1_000;
 
 /** Environment variable that disables the check entirely. */
 export const ENV_NO_UPDATE_CHECK = 'PINGCODE_NO_UPDATE_CHECK';
@@ -152,39 +147,39 @@ function isCacheFresh(cache: CheckCache): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch the latest release tag from GitHub. Returns the version string
- * (without leading `v`) or `undefined` on any failure.
- *
- * Retries once on HTTP 403 (rate limit) after a short delay.
+ * Fetch the latest published version from the npm registry. Returns the
+ * version string (without leading `v`) or `undefined` on any failure.
  */
 async function fetchLatestVersion(): Promise<string | undefined> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const response = await fetch(API_URL, {
-        headers: { Accept: 'application/vnd.github+json' },
-        signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
-      });
-      if (response.status === 403 && attempt === 0) {
-        // Rate limited — wait briefly and retry once.
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-        continue;
-      }
-      if (!response.ok) return undefined;
-      const body: unknown = await response.json();
-      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-        return undefined;
-      }
-      const tag = (body as Record<string, unknown>).tag_name;
-      if (typeof tag !== 'string') return undefined;
-      // Strip leading 'v' (tags are like "v1.4.1")
-      const normalized = tag.replace(/^v/, '');
-      // Reject malformed tags (e.g. "latest") — never cache them.
-      return parseSemver(normalized) === undefined ? undefined : normalized;
-    } catch {
+  try {
+    const response = await fetch(REGISTRY_URL, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
+    });
+    if (!response.ok) return undefined;
+    const body: unknown = await response.json();
+    if (
+      typeof body !== 'object' ||
+      body === null ||
+      Array.isArray(body)
+    ) {
       return undefined;
     }
+    const distTags = (body as Record<string, unknown>)['dist-tags'];
+    if (
+      typeof distTags !== 'object' ||
+      distTags === null ||
+      Array.isArray(distTags)
+    ) {
+      return undefined;
+    }
+    const latest = (distTags as Record<string, unknown>).latest;
+    if (typeof latest !== 'string') return undefined;
+    // Reject malformed versions — never cache them.
+    return parseSemver(latest) === undefined ? undefined : latest;
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +188,7 @@ async function fetchLatestVersion(): Promise<string | undefined> {
 
 /**
  * Check whether a newer version is available. Uses cache when fresh;
- * otherwise fetches from GitHub. Always resolves (never rejects).
+ * otherwise fetches from the npm registry. Always resolves (never rejects).
  *
  * Pass `{ skipCache: true }` to bypass the cache (e.g. `--check-only` should
  * always query the network).

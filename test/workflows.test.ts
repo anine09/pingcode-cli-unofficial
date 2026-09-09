@@ -29,6 +29,7 @@ const workflows = readdirSync(fileURLToPath(new URL(`../${WORKFLOW_DIR}`, import
 
 const ci = read(`${WORKFLOW_DIR}/ci.yml`);
 const release = read(`${WORKFLOW_DIR}/release.yml`);
+const publish = read(`${WORKFLOW_DIR}/publish.yml`);
 const catalogCheck = read(`${WORKFLOW_DIR}/catalog-check.yml`);
 const pkg = JSON.parse(read('package.json')) as {
   scripts: Record<string, string>;
@@ -102,7 +103,7 @@ describe('workflows', () => {
   it('are each governed by an explicit block below', () => {
     // Adding a workflow means adding its own assertions; the loops in this
     // describe cover every file, the per-file describes cover the rest.
-    expect(workflows.map((w) => w.name)).toEqual(['catalog-check.yml', 'ci.yml', 'release.yml']);
+    expect(workflows.map((w) => w.name)).toEqual(['catalog-check.yml', 'ci.yml', 'publish.yml', 'release.yml']);
   });
 
   it('only run npm scripts that exist, so a rename cannot break CI silently', () => {
@@ -118,6 +119,7 @@ describe('workflows', () => {
     // suite cannot see would be governed by nothing.
     expect(npmScriptsUsedIn(catalogCheck)).toContain('catalog:check');
     expect(npmScriptsUsedIn(ci)).toContain('typecheck');
+    expect(npmScriptsUsedIn(publish)).toContain('build');
     expect(npmScriptsUsedIn(release)).toContain('build');
   });
 

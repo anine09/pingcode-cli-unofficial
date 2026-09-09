@@ -31,7 +31,7 @@ Commands:
   release                构建与部署 release: deploy targets 环境 and deployment records 部署 (企业令牌 only,
                          scopes pcp:read:devops:deploy / pcp:write:devops:deploy)
   settings               后台设置: organisation-wide directory data
-  self-update [options]  update the CLI to the latest GitHub Release
+  self-update [options]  update the CLI to the latest npm-published version
   help [command]         display help for command
 "
 `;
