@@ -251,6 +251,18 @@ describe('release.yml', () => {
     const commands = withoutComments(release);
     expect(commands).not.toContain('gh release view');
     expect(commands).toContain("repos/${GITHUB_REPOSITORY}/releases?per_page=100");
+    // "A release exists" is not "the release is done". An asset-less release is a
+    // half-finished release, and skipping on it means the 6 zips and the npm
+    // tarball are never built — which is how the current release shipped published
+    // with zero assets: the guard matched, skipped every remaining step, and the
+    // run went green. So skip only when the release is published *and* carries
+    // assets; a draft or an empty release must fall through and let the create step
+    // attach them. These four assertions are the guard's entire decision — drop
+    // any one and "release exists" becomes "release succeeded" again.
+    expect(commands).toContain('.assets | length');
+    expect(commands).toContain('.draft');
+    expect(commands).toContain('[ "${draft}" = "false" ]');
+    expect(commands).toContain('[ "${assets}" -gt 0 ]');
   });
 
   it('runs the full gate order before packaging', () => {

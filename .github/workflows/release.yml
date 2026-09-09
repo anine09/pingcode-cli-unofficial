@@ -79,14 +79,33 @@ jobs:
           # `gh release create` fail with "a release with the same tag name
           # already exists" at v1.8.0. Match tag_name across every release,
           # drafts included, which is the state the create step has to live with.
-          if gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-               --jq '.[].tag_name' 2>/dev/null | grep -qx "${tag}"; then
-            echo "release ${tag} already exists (published or draft) — nothing to do"
-            echo "skip=true" >> "$GITHUB_ENV"
-            exit 0
+          #
+          # But "a release exists" is not "the release is done". A release with no
+          # assets is a half-finished release, and skipping on it means the 6 zips
+          # and the npm tarball are never built and never uploaded — which is how
+          # the current release shipped published with zero assets: the guard
+          # matched, skipped every remaining step, and the run went green. So skip
+          # only when the release is published *and* carries assets. A draft or an
+          # empty release falls through, and the create step attaches the assets
+          # with --clobber.
+          state=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"${tag}\") | \"\(.draft) \(.assets | length)\"" \
+            2>/dev/null | head -1 || true)
+
+          if [ -z "${state}" ]; then
+            echo "tag ${tag} exists but no release does — re-running the release"
+          else
+            draft="${state%% *}"
+            assets="${state##* }"
+            echo "release ${tag} exists: draft=${draft} assets=${assets}"
+            if [ "${draft}" = "false" ] && [ "${assets}" -gt 0 ]; then
+              echo "release ${tag} is published and complete — nothing to do"
+              echo "skip=true" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "release ${tag} is incomplete (draft or no assets) — re-running the release"
           fi
 
-          echo "tag ${tag} exists but no release does — re-running the release"
           echo "skip=false" >> "$GITHUB_ENV"
 
       # --- Quality gates ---
