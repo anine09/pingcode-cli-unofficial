@@ -80,3 +80,24 @@ self-update 1.8.1->1.8.2 安装出无法启动的二进制：npm tarball 装不�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: Let npm own installation: drop the standalone install/update paths
+
+**Date**: 2026-09-09
+**Task**: Let npm own installation: drop the standalone install/update paths
+**Branch**: `main`
+
+### Summary
+
+Session summary was not supplied.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `27c9475` | (see git log) |
+
+### Status
+
+[OK] **Completed**
