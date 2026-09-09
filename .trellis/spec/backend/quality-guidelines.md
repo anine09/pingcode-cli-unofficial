@@ -64,6 +64,22 @@ conditionally rather than assigned `undefined`.
 
   Reference implementation: `assertProjectMember()` in `src/cli/commands/workItem.ts`.
 
+- **The build's dependency policy is part of the distribution contract, and CI smokes the *packed*
+  artifact — not the checkout.** `self-update` installs whatever `npm pack` produces, and
+  `package.json#files` can never carry `node_modules/`, so `dist/bin/pingcode.js` must run with none
+  beside it. That is `noExternal` in `tsup.config.ts`. A green `node dist/bin/pingcode.js --version`
+  in CI proves **nothing** while it runs in the checkout, because the checkout has `node_modules/` —
+  which is precisely how a binary that could not start shipped in 1.8.0–1.8.2. Every workflow that
+  publishes packs the tarball and runs it from a `mktemp -d` (`publish.yml`, `release.yml`).
+  Changing the *distribution channel* means re-deriving this policy, not just swapping the download
+  URL; that migration is what introduced the bug.
+
+- **Two filesystem traps sit behind every rollback.** `rmSync(dir, { force: true })` without
+  `recursive` throws `ENOTEMPTY` on a directory, and a `catch` that only means "best-effort" will
+  swallow it and leave the rollback artifact on disk forever. And `renameSync` cannot replace an
+  existing non-empty directory, so a restore must clear its target first. Both would have shipped as
+  permanent silent failures in `core/update.ts`; `test/updateArtifact.test.ts` is what caught them.
+
 ## Testing Requirements
 
 - **Vitest, `test/*.test.ts`, one file per module**, plus the cross-cutting suites:

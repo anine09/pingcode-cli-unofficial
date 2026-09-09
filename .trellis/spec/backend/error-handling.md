@@ -144,6 +144,27 @@ update patch are all `UsageError` (exit 2) raised *before* any network call. A `
 lists candidates must actually list them — that is the difference between exit 2 being useful and
 being noise.
 
+### Rollback must outlive the operation it protects
+
+**Invariant: the previous state is destroyed only after the replacement is proven.** For
+`self-update`, `atomicReplace` keeps `${install}.backup` and the *caller* removes it, because "the
+rename succeeded" is not evidence that the new bundle starts. Deciding otherwise — deleting the
+backup inside the swap, then verifying afterwards — is what left 1.8.1 → 1.8.2 users with a dead
+binary and nothing to put back.
+
+So the flow gates **twice**: run the staged bundle before the install dir is touched at all, then
+run the installed bundle after the swap. A broken tarball therefore either never lands or gets
+rolled back.
+
+Restore is its own export (`restoreBackup`), not a mode of `atomicReplace`. The two have different
+failure semantics: mid-restore the backup is the *only* copy left, so its error must name the manual
+recovery command rather than degrade to a warning. Extending a swap primitive into a restore
+primitive is how the original silently-broken rollback came to exist — it passed a `${dir}.backup`
+path that was not nested under `dir`, so `atomicReplace` treated it as the *incoming* directory and
+the restore collided with itself inside a `catch { /* best-effort */ }`.
+
+Corollary for any future rollback: **a restore that cannot fail loudly is not a rollback.**
+
 ---
 
 ## API Error Responses
