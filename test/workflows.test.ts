@@ -86,6 +86,22 @@ function jobLevelEnvEntries(workflow: string): string[] {
   return entries;
 }
 
+/**
+ * The workflow with comment lines removed, so prose that *names* a command it is
+ * explaining is not mistaken for that command being run.
+ *
+ * `jobLevelEnvEntries` strips them for the same reason, and
+ * `test/githooks.test.ts` does it before banning `git stash`: catalog-check.yml
+ * documents the `${{ runner.temp }}` rule in prose that names it, and a check
+ * that fails on its own explanation would be deleted rather than obeyed.
+ */
+function withoutComments(workflow: string): string {
+  return workflow
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n');
+}
+
 /** The root context of every `${{ … }}` expression in a fragment of YAML. */
 function contextsUsedIn(text: string): string[] {
   const contexts = new Set<string>();
@@ -225,6 +241,16 @@ describe('release.yml', () => {
     expect(release).toContain('git rev-parse');
     expect(release).toContain('skip=true');
     expect(release).toContain('skip=false');
+    // A draft release is not associated with its tag, so `gh release view`
+    // cannot see it — yet it still blocks `gh release create`. v1.8.2 failed on
+    // exactly that: the guard ran 7 s before its draft was published, fell
+    // through, and the run died on `git tag` with exit 128. So the guard has to
+    // match tag_name across every release, drafts included. Asserted against the
+    // comment-stripped text, because the workflow explains this rule in prose
+    // that names the command it must not use.
+    const commands = withoutComments(release);
+    expect(commands).not.toContain('gh release view');
+    expect(commands).toContain("repos/${GITHUB_REPOSITORY}/releases?per_page=100");
   });
 
   it('runs the full gate order before packaging', () => {
@@ -242,9 +268,23 @@ describe('release.yml', () => {
     expect(release).toContain('install zip');
   });
 
-  it('creates the git tag automatically after checks pass', () => {
-    expect(release).toContain('git tag "v${VERSION}"');
-    expect(release).toContain('git push origin "v${VERSION}"');
+  it('creates the git tag automatically after checks pass, and idempotently', () => {
+    // `git tag` without `-f` turns a tag left behind by an aborted run into
+    // `fatal: tag 'v1.8.2' already exists` and exit 128 — that is what failed
+    // run 34310574571. Force is safe: the guard above has already proven no
+    // release exists for the version, and a version maps to exactly one commit.
+    expect(release).toContain('git tag -f "v${VERSION}"');
+    expect(release).toContain('git push --force origin "v${VERSION}"');
+  });
+
+  it('reuses an existing release instead of dying on a duplicate tag', () => {
+    // `gh release create` rejects a tag that already has a release, and it
+    // rejects a draft too. So the create step looks the release up by tag_name
+    // across every release and uploads onto it, which is what makes a re-run
+    // complete the job instead of blocking on it.
+    expect(release).toContain('gh release upload');
+    expect(release).toContain('--clobber');
+    expect(release).toContain("repos/${GITHUB_REPOSITORY}/releases?per_page=100");
   });
 
   it('attaches the 6 platform zips and the npm tarball to the release', () => {

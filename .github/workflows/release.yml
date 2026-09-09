@@ -5,6 +5,16 @@
 # packages, tags and creates a GitHub Release. If the tag already exists, it
 # skips. No manual version bump step and no manual `git tag` needed.
 #
+# Every step that touches something already on the remote is idempotent, because
+# a re-run is the normal outcome of a failure, not an exception. Three states can
+# be left behind by an aborted run, and none of them is an error:
+#   - the tag exists (`git tag` fails with exit 128 without `-f`);
+#   - the release exists (`gh release create` rejects the duplicate tag);
+#   - the release exists **as a draft** — a draft is not associated with its tag,
+#     so `gh release view` cannot find it, yet it still blocks `gh release create`.
+# v1.8.2 failed on the third: the run's check ran 7 s before its draft was
+# published, so the guard fell through and the run died on `git tag`.
+#
 # Flow:
 #   1. Extract version from package.json
 #   2. Skip if tag v{version} already exists (idempotent)
@@ -55,14 +65,28 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "tag v${VERSION} already exists — skipping release"
-            gh release view "v${VERSION}" --json tagName --jq '.tagName' >/dev/null 2>&1 && {
-              echo "release v${VERSION} already exists — nothing to do"
-              echo "skip=true" >> "$GITHUB_ENV"
-              exit 0
-            }
+          tag="v${VERSION}"
+
+          if ! git rev-parse "${tag}" >/dev/null 2>&1; then
+            echo "tag ${tag} does not exist yet — releasing"
+            echo "skip=false" >> "$GITHUB_ENV"
+            exit 0
           fi
+          echo "tag ${tag} already exists"
+
+          # `gh release view` resolves *published* releases only, so a release
+          # still in draft is invisible to it — and a draft is exactly what made
+          # `gh release create` fail with "a release with the same tag name
+          # already exists" at v1.8.0. Match tag_name across every release,
+          # drafts included, which is the state the create step has to live with.
+          if gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+               --jq '.[].tag_name' 2>/dev/null | grep -qx "${tag}"; then
+            echo "release ${tag} already exists (published or draft) — nothing to do"
+            echo "skip=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "tag ${tag} exists but no release does — re-running the release"
           echo "skip=false" >> "$GITHUB_ENV"
 
       # --- Quality gates ---
@@ -128,8 +152,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          git tag "v${VERSION}"
-          git push origin "v${VERSION}"
+          # Force, so a tag left behind by an aborted run is a no-op instead of
+          # `fatal: tag 'v1.8.2' already exists` and exit 128 — that is what
+          # failed run 34310574571. Safe: the guard above has already proven no
+          # release exists for this version, and a version number maps to exactly
+          # one commit, the one that declares it.
+          git tag -f "v${VERSION}"
+          git push --force origin "v${VERSION}"
           echo "created tag v${VERSION}"
 
       - name: create GitHub Release
@@ -144,6 +173,18 @@ jobs:
           for a in "${assets[@]}"; do
             echo "  ${a}"
           done
+
+          # A release can appear between the guard above and this step — that is
+          # the very race that cost v1.8.2 — so the check is repeated here rather
+          # than trusted from a step output. Reuse the release and upload onto
+          # it, so a re-run completes the job instead of dying on a duplicate tag.
+          if gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+               --jq '.[].tag_name' 2>/dev/null | grep -qx "v${VERSION}"; then
+            echo "release v${VERSION} already exists — attaching assets to it"
+            gh release upload "v${VERSION}" "${assets[@]}" "$TARBALL" --clobber
+            exit 0
+          fi
+
           gh release create "v${VERSION}" \
             "${assets[@]}" \
             "$TARBALL" \
