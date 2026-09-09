@@ -43,7 +43,7 @@ describe('checkForUpdate — opt-out', () => {
 
   it('does not skip when env var is unset', async () => {
     // Will hit network (no cache) — should resolve to up-to-date or whatever
-    // GitHub returns. We just verify it doesn't return 'skipped'.
+    // the npm registry returns. We just verify it doesn't return 'skipped'.
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     const result = await checkForUpdate({});
     expect(result.status).not.toBe('skipped');
@@ -86,7 +86,7 @@ describe('checkForUpdate — cache', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ tag_name: 'v99.99.99' }),
+        json: () => Promise.resolve({ 'dist-tags': { latest: '99.99.99' } }),
       }),
     );
 
@@ -103,7 +103,7 @@ describe('checkForUpdate — cache', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ tag_name: 'v99.99.99' }),
+        json: () => Promise.resolve({ 'dist-tags': { latest: '99.99.99' } }),
       }),
     );
 
@@ -150,7 +150,7 @@ describe('checkForUpdate — network failures', () => {
     expect(result).toEqual({ status: 'unknown' });
   });
 
-  it('returns unknown when GitHub returns non-ok status', async () => {
+  it('returns unknown when npm registry returns non-ok status', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -174,7 +174,7 @@ describe('checkForUpdate — version comparison', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ tag_name: 'v99.99.99' }),
+        json: () => Promise.resolve({ 'dist-tags': { latest: '99.99.99' } }),
       }),
     );
 
@@ -187,7 +187,7 @@ describe('checkForUpdate — version comparison', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ tag_name: `v${VERSION}` }),
+        json: () => Promise.resolve({ 'dist-tags': { latest: VERSION } }),
       }),
     );
 
@@ -200,7 +200,7 @@ describe('checkForUpdate — version comparison', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ tag_name: 'v0.0.1' }),
+        json: () => Promise.resolve({ 'dist-tags': { latest: '0.0.1' } }),
       }),
     );
 
@@ -208,12 +208,12 @@ describe('checkForUpdate — version comparison', () => {
     expect(result).toEqual({ status: 'up-to-date' });
   });
 
-  it('handles tags without leading v', async () => {
+  it('handles versions without leading v', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ tag_name: '99.99.99' }),
+        json: () => Promise.resolve({ 'dist-tags': { latest: '99.99.99' } }),
       }),
     );
 
@@ -221,7 +221,7 @@ describe('checkForUpdate — version comparison', () => {
     expect(result.status).toBe('update-available');
   });
 
-  it('returns unknown when tag_name is missing from response', async () => {
+  it('returns unknown when dist-tags.latest is missing from response', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -261,12 +261,12 @@ describe('checkForUpdate — skipCache', () => {
     };
     writeFileSync(CACHE_FILE, JSON.stringify(freshCache, null, 2));
 
-    // The network says a different newer version exists.
+    // The npm registry says a different newer version exists.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ tag_name: 'v88.88.88' }),
+        json: () => Promise.resolve({ 'dist-tags': { latest: '88.88.88' } }),
       }),
     );
 
@@ -289,33 +289,17 @@ describe('checkForUpdate — skipCache', () => {
 });
 
 // ---------------------------------------------------------------------------
-// rate limit retry
+// non-ok response handling
 // ---------------------------------------------------------------------------
 
-describe('checkForUpdate — rate limit retry', () => {
-  it('retries once on 403 and succeeds on second attempt', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ status: 403, ok: false })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ tag_name: 'v99.99.99' }),
-      });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await checkForUpdate({});
-    expect(result).toEqual({
-      status: 'update-available',
-      current: VERSION,
-      latest: '99.99.99',
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('returns unknown when both attempts get 403', async () => {
+describe('checkForUpdate — non-ok response', () => {
+  it('returns unknown when npm registry returns non-ok status', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({ status: 403, ok: false }),
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+      }),
     );
 
     const result = await checkForUpdate({});

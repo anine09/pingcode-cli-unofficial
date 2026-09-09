@@ -3,7 +3,7 @@
 exports[`self-update --help > self-update 1`] = `
 "Usage: pingcode self-update [options]
 
-update the CLI to the latest GitHub Release
+update the CLI to the latest npm-published version
 
 Options:
   --check-only  check for updates without downloading

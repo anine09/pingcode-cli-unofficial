@@ -7,8 +7,8 @@ import {
   atomicReplace,
   cleanStaging,
   dirExists,
-  downloadReleaseAsset,
-  fetchLatestRelease,
+  downloadTarball,
+  fetchLatestInfo,
   isCooldownActive,
   readHint,
   removeFile,
@@ -95,121 +95,95 @@ afterEach(() => {
 });
 
 // ===========================================================================
-// fetchLatestRelease
+// fetchLatestInfo
 // ===========================================================================
 
-describe('fetchLatestRelease', () => {
-  it('parses a valid release response', async () => {
-    const release = await fetchLatestRelease(
+describe('fetchLatestInfo', () => {
+  it('parses a valid registry response', async () => {
+    const info = await fetchLatestInfo(
       jsonFetch({
-        tag_name: 'v1.5.2',
-        assets: [
-          { name: 'pingcode-cli-v1.5.2-linux-x64.zip', browser_download_url: 'https://dl/linux.zip' },
-          { name: 'pingcode-cli-v1.5.2-darwin-arm64.zip', browser_download_url: 'https://dl/darwin.zip' },
-        ],
+        'dist-tags': { latest: '1.5.2' },
+        versions: {
+          '1.5.2': { dist: { tarball: 'https://registry.npmjs.org/package-1.5.2.tgz' } },
+        },
       }),
     );
 
-    expect(release).toEqual({
-      tag: 'v1.5.2',
+    expect(info).toEqual({
       version: '1.5.2',
-      assets: [
-        { name: 'pingcode-cli-v1.5.2-linux-x64.zip', browser_download_url: 'https://dl/linux.zip' },
-        { name: 'pingcode-cli-v1.5.2-darwin-arm64.zip', browser_download_url: 'https://dl/darwin.zip' },
-      ],
+      tarballUrl: 'https://registry.npmjs.org/package-1.5.2.tgz',
     });
   });
 
-  it('strips leading v from tag', async () => {
-    const release = await fetchLatestRelease(
-      jsonFetch({ tag_name: 'v2.0.0', assets: [] }),
-    );
-    expect(release.version).toBe('2.0.0');
-    expect(release.tag).toBe('v2.0.0');
-  });
-
-  it('handles missing v prefix', async () => {
-    const release = await fetchLatestRelease(
-      jsonFetch({ tag_name: '2.0.0', assets: [] }),
-    );
-    expect(release.version).toBe('2.0.0');
-  });
-
-  it('handles release with no assets', async () => {
-    const release = await fetchLatestRelease(
-      jsonFetch({ tag_name: 'v1.5.2', assets: [] }),
-    );
-    expect(release.assets).toEqual([]);
-  });
-
-  it('filters assets with missing fields', async () => {
-    const release = await fetchLatestRelease(
+  it('returns the latest version from dist-tags', async () => {
+    const info = await fetchLatestInfo(
       jsonFetch({
-        tag_name: 'v1.5.2',
-        assets: [
-          { name: 'valid.zip', browser_download_url: 'https://dl/valid.zip' },
-          { name: 'no-url.zip' },
-          { browser_download_url: 'https://dl/no-name.zip' },
-          'not-an-object',
-        ],
+        'dist-tags': { latest: '2.0.0' },
+        versions: {
+          '2.0.0': { dist: { tarball: 'https://registry.npmjs.org/package-2.0.0.tgz' } },
+        },
       }),
     );
-    expect(release.assets).toHaveLength(1);
-    expect(release.assets[0]?.name).toBe('valid.zip');
+
+    expect(info.version).toBe('2.0.0');
+    expect(info.tarballUrl).toBe('https://registry.npmjs.org/package-2.0.0.tgz');
+  });
+
+  it('throws on missing dist-tags', async () => {
+    await expect(fetchLatestInfo(jsonFetch({}))).rejects.toThrow(/dist-tags/);
   });
 
   it('throws TransportError on non-2xx', async () => {
-    await expect(fetchLatestRelease(errorFetch(404))).rejects.toThrow(/HTTP 404/);
+    await expect(fetchLatestInfo(errorFetch(404))).rejects.toThrow(/npm registry returned HTTP 404/);
   });
 
   it('throws TransportError on network failure', async () => {
-    await expect(fetchLatestRelease(throwingFetch())).rejects.toThrow(/failed to fetch/);
-  });
-
-  it('throws on missing tag_name', async () => {
-    await expect(fetchLatestRelease(jsonFetch({ assets: [] }))).rejects.toThrow(/tag_name/);
+    await expect(fetchLatestInfo(throwingFetch())).rejects.toThrow(/failed to fetch npm registry/);
   });
 
   it('throws on non-object response', async () => {
     await expect(
-      fetchLatestRelease(jsonFetch('not an object') as never),
-    ).rejects.toThrow(/unexpected response/);
+      fetchLatestInfo(jsonFetch('not an object') as never),
+    ).rejects.toThrow(/registry response missing dist-tags/);
+  });
+
+  it('throws on missing versions', async () => {
+    await expect(
+      fetchLatestInfo(
+        jsonFetch({
+          'dist-tags': { latest: '1.0.0' },
+        }) as never,
+      ),
+    ).rejects.toThrow(/registry response missing versions/);
   });
 });
 
 // ===========================================================================
-// downloadReleaseAsset
+// downloadTarball
 // ===========================================================================
 
-describe('downloadReleaseAsset', () => {
-  it('downloads asset to file', async () => {
+describe('downloadTarball', () => {
+  it('returns buffer on success', async () => {
     const data = Buffer.from('hello world');
-    const dest = path.join(tempDir('download'), 'asset.zip');
-    ensureDir(path.dirname(dest));
+    const result = await downloadTarball('https://example.com/package.tgz', binaryFetch(data));
 
-    await downloadReleaseAsset('https://example.com/asset.zip', dest, binaryFetch(data));
-
-    expect(readFileSync(dest).toString()).toBe('hello world');
+    expect(result.toString()).toBe('hello world');
   });
 
   it('throws on non-2xx response', async () => {
-    const dest = path.join(tempDir('download-err'), 'asset.zip');
     const data = Buffer.from('x');
     await expect(
-      downloadReleaseAsset('https://example.com/asset.zip', dest, binaryFetch(data, 500)),
-    ).rejects.toThrow(/HTTP 500/);
+      downloadTarball('https://example.com/package.tgz', binaryFetch(data, 500)),
+    ).rejects.toThrow(/tarball download returned HTTP 500/);
   });
 
   it('throws on network failure', async () => {
-    const dest = path.join(tempDir('download-throw'), 'asset.zip');
     await expect(
-      downloadReleaseAsset('https://example.com/asset.zip', dest, throwingFetch()),
-    ).rejects.toThrow(/failed to download/);
+      downloadTarball('https://example.com/package.tgz', throwingFetch()),
+    ).rejects.toThrow(/failed to download tarball/);
   });
 
-  it('cleans up partial file on write failure', async () => {
-    const dest = path.join(tempDir('download-cleanup'), 'asset.zip');
-    // Use a fetch that returns null body
+  it('throws on empty body', async () => {
     const nullBodyFetch = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -218,10 +192,27 @@ describe('downloadReleaseAsset', () => {
     })) as unknown as typeof globalThis.fetch;
 
     await expect(
-      downloadReleaseAsset('https://example.com/asset.zip', dest, nullBodyFetch),
-    ).rejects.toThrow(/empty body/);
+      downloadTarball('https://example.com/package.tgz', nullBodyFetch),
+    ).rejects.toThrow(/tarball download returned empty body/);
+  });
 
-    expect(existsSync(dest)).toBe(false);
+  it('enforces maximum tarball size', async () => {
+    const oversizedChunk = Buffer.alloc(51 * 1024 * 1024); // 51 MB
+    const oversizedFetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(oversizedChunk));
+          controller.close();
+        },
+      }),
+    })) as unknown as typeof globalThis.fetch;
+
+    await expect(
+      downloadTarball('https://example.com/package.tgz', oversizedFetch),
+    ).rejects.toThrow(/tarball exceeds maximum size/);
   });
 });
 
@@ -633,7 +624,12 @@ describe('runAutoUpdate', () => {
     const env = makeEnv();
     const result = await runAutoUpdate(
       env,
-      jsonFetch({ tag_name: `v${VERSION}`, assets: [] }),
+      jsonFetch({
+        'dist-tags': { latest: VERSION },
+        versions: {
+          [VERSION]: { dist: { tarball: 'https://example.com/package.tgz' } },
+        },
+      }),
       mockExec,
     );
     expect(result).toEqual({ status: 'up-to-date' });
@@ -647,21 +643,40 @@ describe('runAutoUpdate', () => {
 
     const result = await runAutoUpdate(
       env,
-      jsonFetch({ tag_name: 'v2.0.0', assets: [] }),
+      jsonFetch({
+        'dist-tags': { latest: '2.0.0' },
+        versions: {
+          '2.0.0': { dist: { tarball: 'https://example.com/package.tgz' } },
+        },
+      }),
       mockExec,
     );
     expect(result).toEqual({ status: 'failed', error: 'update already in progress' });
   });
 
-  it('writes hint file on failure (no matching asset)', async () => {
+  it('writes hint file on download failure', async () => {
     const env = makeEnv();
     const configDir = env.PINGCODE_CONFIG_DIR!;
 
-    const result = await runAutoUpdate(
-      env,
-      jsonFetch({ tag_name: 'v2.0.0', assets: [] }),
-      mockExec,
-    );
+    let callIndex = 0;
+    const mixedFetch = vi.fn(async () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            'dist-tags': { latest: '2.0.0' },
+            versions: {
+              '2.0.0': { dist: { tarball: 'https://example.com/package.tgz' } },
+            },
+          }),
+        } as Response;
+      }
+      return errorFetch(500) as unknown as Response;
+    });
+
+    const result = await runAutoUpdate(env, mixedFetch, mockExec);
     expect(result.status).toBe('failed');
     expect(readHint(configDir)).toEqual({ version: '2.0.0' });
   });
@@ -674,7 +689,12 @@ describe('runAutoUpdate', () => {
 
     const result = await runAutoUpdate(
       env,
-      jsonFetch({ tag_name: `v${VERSION}`, assets: [] }),
+      jsonFetch({
+        'dist-tags': { latest: VERSION },
+        versions: {
+          [VERSION]: { dist: { tarball: 'https://example.com/package.tgz' } },
+        },
+      }),
       mockExec,
     );
     expect(result).toEqual({ status: 'up-to-date' });
@@ -687,7 +707,12 @@ describe('runAutoUpdate', () => {
 
     await runAutoUpdate(
       env,
-      jsonFetch({ tag_name: `v${VERSION}`, assets: [] }),
+      jsonFetch({
+        'dist-tags': { latest: VERSION },
+        versions: {
+          [VERSION]: { dist: { tarball: 'https://example.com/package.tgz' } },
+        },
+      }),
       mockExec,
     );
     expect(isCooldownActive(configDir)).toBe(true);
