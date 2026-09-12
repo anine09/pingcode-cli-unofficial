@@ -52,6 +52,17 @@
 
 - 行为不变（目录顺序、`--json` 形状），接受 48 行输出。
 
+### R8 — 可搜索多选（追加需求）
+
+用户原话："我想在 pingcode skill install 的地方不仅可以多选,还可以搜索, gh skill 是支持这种功能的"。
+
+- TTY 且无 `--target` 时的多选支持**输入搜索过滤**：`@clack/prompts` 的 `multiselect` 换成 `autocompleteMultiselect`。
+- **无需自定义 filter**：默认 filter（label OR hint OR value 小写子串，空串全匹配）已够用——label 为 `Name (id)` 格式，搜 `claude` 同时命中名称和 id。
+- 文案：message `Search and select target agent(s):`，placeholder `Type to search...`。
+- 键位（clack 默认）：输入过滤、`space` 勾选、`enter` 确认。
+- `TargetPromptIO` 接口不变（`select(labels, defaultIndexes)`），`chooseTargets`、`skill.ts`、`skill-prompts.test.ts` 零改动。
+- gh 对照：gh 选 agent 用 huh v2 MultiSelect **无搜索**；搜索框（`multiSelectSearchField`）是 gh 从 repo 选 skill 用的。本功能在 gh agent 选择基础上增强——用户明确要求。
+
 ## Constraints
 
 - `src/core/paths.ts` 保持零运行时依赖；交互组件只能加在 `cli` 层。
@@ -66,6 +77,7 @@
 - [ ] `skill install --target claude` 与 `--target claude-code` 等价；`--target nosuchagent` 退出 `2` 并在 stderr 列出合法 id。
 - [ ] `skill install --target codex,cline,universal,warp` 只往 `~/.agents/skills/pingcode` 写一次。
 - [ ] TTY 且无 `--target` 时出现复选框多选；`--json` 与非 TTY 下绝不出现提示。
+- [ ] 多选带搜索框（`autocompleteMultiselect`，placeholder `Type to search...`）；输入 `claude` 同时命中名称与 id；`TargetPromptIO.select` 签名不变。
 - [ ] 已安装的 agent 与探测到的当前 agent 在多选里默认勾选。
 - [ ] `skill install --dry-run` 不创建任何目录或文件。
 - [ ] `scripts/install-skill.ts` 已删除，`npm run skill:install` 与 CI 都走 `dist/bin/pingcode.js skill install`。

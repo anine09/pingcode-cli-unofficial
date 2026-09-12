@@ -16,8 +16,9 @@ export interface TargetPromptIO {
   /** False when stdout is not a terminal, or prompting was switched off. */
   canPrompt(): boolean;
   /**
-   * Show `labels`, pre-selecting `defaults` (agent ids), and resolve to the
-   * chosen ids — or `'aborted'` when the user cancels.
+   * Show `labels` (searchable — typing filters the list), pre-selecting
+   * `defaults` (agent ids), and resolve to the chosen ids — or `'aborted'`
+   * when the user cancels.
    */
   select(
     labels: readonly string[],
@@ -78,9 +79,10 @@ export function defaultTargetPromptIO(targets: readonly SkillTarget[]): TargetPr
   return {
     canPrompt: () => Boolean(process.stdout.isTTY) && !isSet(process.env['CI']),
     select: async (labels, defaults) => {
-      const { isCancel, multiselect } = await import('@clack/prompts');
-      const result = await multiselect<string>({
-        message: 'Select target agent(s):',
+      const { isCancel, autocompleteMultiselect } = await import('@clack/prompts');
+      const result = await autocompleteMultiselect<string>({
+        message: 'Search and select target agent(s):',
+        placeholder: 'Type to search...',
         options: targets.map((target, index) => ({
           value: target.name,
           // `Name (id)`, not `Name (global)`: the id is what the user has to type

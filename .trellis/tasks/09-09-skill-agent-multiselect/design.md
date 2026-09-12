@@ -86,7 +86,12 @@ export async function chooseTargets(
 
 - **只在 cli 层**，`core` 不碰 TUI。
 - **触发条件**：`flags.target` 未给 且 `io.canPrompt()`（stdout.isTTY 且非 `--json` 且非 `--no-interactive`）。
-- UI：`@clack/prompts` 的 `multiselect`，**动态** `import('@clack/prompts')`，所以非交互快路径（`--json`、CI、管道）从不加载它。
+- UI：`@clack/prompts` 的 `autocompleteMultiselect`（**可搜索多选，R8**），**动态** `import('@clack/prompts')`，所以非交互快路径（`--json`、CI、管道）从不加载它。
+  - **决定（R8）**：用户要求多选带搜索（"不仅可以多选,还可以搜索, gh skill 是支持这种功能的"）。`@clack/prompts` 1.8.0 自带 `autocompleteMultiselect`，搜索+多选一体，无需引入第二套 TUI 依赖。
+  - **默认 filter 足够**：其默认匹配 = 小写 label OR hint OR value 子串（空输入全匹配）。label 格式为 `Name (id)`（同上条），输入 `claude` 同时命中名称与 id，**不传自定义 `filter`**。
+  - 文案：message `Search and select target agent(s):`，placeholder `Type to search...`。
+  - 键位：输入过滤 + space 勾选 + enter 确认。
+  - gh 对照：gh 选 agent 用 huh v2 `MultiSelect` **无搜索**；带搜索框的 `multiSelectSearchField`（cli/cli 内部）是"从 repo 选 skill"用的。本功能是在 gh agent 选择基础上的增强——用户明确要求。
 - 选项 label 用 gh 风格 `- Name (id)`？——不。gh 交互里只显示 Name，因为我们有 48 条；为可读性用 `Name (id)`。**决定：label = `${name} (${id})`**，与 `skill list` 的 label 区分开。
 - **默认勾选** = 已安装（`listSkillStatus` 里 `installed: true` 的 dir）∪ 探测到的当前 agent（D4）。
 - 顺序：**catalog 顺序**（gh 同）。
