@@ -136,3 +136,41 @@ Replaced the browser-channel authorization_code login with paste-only login; bre
 ### Next Steps
 
 - Next release must be MAJOR 2.0.0 (breaking: --channel + oauthRedirectUri removed); .trellis/spec/guides/versioning.md:49 still shows 'add --channel' as MINOR example - stale, not in this task's scope
+
+
+## Session 4: spec sync + release 2.0.0
+
+**Date**: 2026-09-12
+**Task**: spec sync + release 2.0.0
+**Branch**: `main`
+
+### Summary
+
+spec 七处过时点修复后发布 2.0.0（breaking: paste-only login 删 --channel/oauthRedirectUri）
+
+### Main Changes
+
+- paste-only login 后七处 spec 过时修复：versioning/VERSIONING 指针/db-guidelines/directory-structure 补 5 项/guides 索引/两个 thinking-guide 重写/README auth 已实现
+- skill install 对齐 gh：48 agent targets + TTY 多选（7324707）
+- bump 2.0.0（src/version.ts 与 package.json 同步，selfUpdate 测试改用 REMOTE=9.9.9）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `01cec6f` | (see git log) |
+| `689f89b` | (see git log) |
+| `7324707` | (see git log) |
+| `03b0d26` | (see git log) |
+
+### Testing
+
+- [OK] typecheck 干净；npm test 2952 passed（88 文件）；build 成功；CI 三工作流（Release/CI/Publish）全绿，GH Release v2.0.0 + npm 2.0.0 已发布
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- monitor npm 2.0.0 安装反馈（paste-only login UX）
