@@ -7,8 +7,10 @@
 
 import type { Command } from 'commander';
 import path from 'node:path';
+import { UsageError } from '../../core/errors';
 import { skillTargets } from '../../core/paths';
 import type { SkillTarget } from '../../core/paths';
+import { resolveTargetList } from '../../core/skill-targets';
 import { packageSkillDir } from '../../core/update';
 import {
   type InstallResult,
@@ -19,6 +21,7 @@ import {
 } from '../../core/skill-ops';
 import { addGlobalOptions } from '../globals';
 import { errLine, outLine, paint, printJson, printTable } from '../output';
+import { chooseTargets, defaultTargetPromptIO } from '../prompts/target-select';
 import { contextFor, modeOf } from './common';
 
 /**
@@ -54,7 +57,18 @@ interface SkillFlags {
   verbose?: boolean;
   target?: string;
   force?: boolean;
+  /** commander's `--no-interactive` inverts this to `false`. */
+  interactive?: boolean;
 }
+
+/**
+ * The `--target` option, shared by every command that writes. It carries no
+ * default: an absent `--target` is what routes to the interactive selector,
+ * which `resolveTargetList` then treats the same as `all` when it never runs.
+ */
+const TARGET_OPTION = '--target <name>';
+
+const TARGET_HELP = 'agent id(s), comma-separated, or "all"';
 
 export function registerSkillCommands(program: Command): void {
   const skill = program
@@ -71,8 +85,9 @@ export function registerSkillCommands(program: Command): void {
   skill
     .command('install')
     .description('install the skill into agent global skill directories')
-    .option('--target <name>', 'comma-separated target(s): claude, opencode, all', 'all')
+    .option(TARGET_OPTION, TARGET_HELP)
     .option('--force', 'overwrite existing files')
+    .option('--no-interactive', 'skip the interactive agent selector')
     .action(async (flags: SkillFlags) => {
       await runInstall(flags);
     });
@@ -80,7 +95,8 @@ export function registerSkillCommands(program: Command): void {
   skill
     .command('remove')
     .description('remove the skill from agent global skill directories')
-    .option('--target <name>', 'comma-separated target(s): claude, opencode, all', 'all')
+    .option(TARGET_OPTION, TARGET_HELP)
+    .option('--no-interactive', 'skip the interactive agent selector')
     .action(async (flags: SkillFlags) => {
       await runRemove(flags);
     });
@@ -88,7 +104,8 @@ export function registerSkillCommands(program: Command): void {
   skill
     .command('update')
     .description('update the skill (reinstall with --force)')
-    .option('--target <name>', 'comma-separated target(s): claude, opencode, all', 'all')
+    .option(TARGET_OPTION, TARGET_HELP)
+    .option('--no-interactive', 'skip the interactive agent selector')
     .action(async (flags: SkillFlags) => {
       await runUpdate(flags);
     });
@@ -112,11 +129,11 @@ interface TargetRow {
   size: string;
 }
 
-async function runList(flags: SkillFlags): Promise<void> {
+async function runList(_flags: SkillFlags): Promise<void> {
   const command = (await import('../program')).buildProgram();
   const { ctx } = contextFor(command);
   const mode = modeOf(ctx);
-  const targets = resolveTargets(flags);
+  const targets = skillTargets();
 
   const statuses: SkillStatus[] = listSkillStatus(targets);
 
@@ -165,10 +182,16 @@ async function runInstall(flags: SkillFlags): Promise<void> {
   const command = (await import('../program')).buildProgram();
   const { ctx } = contextFor(command);
   const mode = modeOf(ctx);
-  const targets = resolveTargets(flags);
+  const targets = await selectTargets(flags, mode);
+  if (targets === null) return;
   const sourceRoot = packageSkillRoot();
 
-  const results: InstallResult[] = installSkill(sourceRoot, targets, flags.force ?? false);
+  const results: InstallResult[] = installSkill(
+    sourceRoot,
+    targets,
+    flags.force ?? false,
+    flags.dryRun === true,
+  );
   renderResults(results, mode);
 }
 
@@ -180,9 +203,10 @@ async function runRemove(flags: SkillFlags): Promise<void> {
   const command = (await import('../program')).buildProgram();
   const { ctx } = contextFor(command);
   const mode = modeOf(ctx);
-  const targets = resolveTargets(flags);
+  const targets = await selectTargets(flags, mode);
+  if (targets === null) return;
 
-  const results: InstallResult[] = uninstallSkill(targets);
+  const results: InstallResult[] = uninstallSkill(targets, flags.dryRun === true);
   renderResults(results, mode);
 }
 
@@ -194,10 +218,16 @@ async function runUpdate(flags: SkillFlags): Promise<void> {
   const command = (await import('../program')).buildProgram();
   const { ctx } = contextFor(command);
   const mode = modeOf(ctx);
-  const targets = resolveTargets(flags);
+  const targets = await selectTargets(flags, mode);
+  if (targets === null) return;
   const sourceRoot = packageSkillRoot();
 
-  const results: InstallResult[] = installSkill(sourceRoot, targets, true);
+  const results: InstallResult[] = installSkill(
+    sourceRoot,
+    targets,
+    true,
+    flags.dryRun === true,
+  );
   renderResults(results, mode);
 }
 
@@ -205,11 +235,52 @@ async function runUpdate(flags: SkillFlags): Promise<void> {
 // helpers
 // ---------------------------------------------------------------------------
 
-function resolveTargets(flags: SkillFlags): SkillTarget[] {
-  const raw = flags.target ?? 'all';
-  if (raw === 'all') return skillTargets();
-  const names = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  return skillTargets().filter((t) => names.includes(t.name));
+/**
+ * Resolve `--target`, or prompt for it. An unknown value is a usage error
+ * (exit 2) — the old code silently dropped it, which made a typo look like a
+ * successful install of nothing.
+ */
+function resolveTargetListOrThrow(raw: string): SkillTarget[] {
+  const resolution = resolveTargetList(raw);
+  if (!resolution.ok) {
+    throw new UsageError(`unknown --target value(s): ${resolution.unknown.join(', ')}`, {
+      hint: `valid values: ${resolution.valid.join(', ')}`,
+    });
+  }
+  return resolution.targets;
+}
+
+/**
+ * Which agents a mutating command acts on.
+ *
+ * `--target` always wins. Without it, a human at a terminal is asked; anything
+ * else — a pipe, `--json`, CI, `--no-interactive`, an empty selection — falls
+ * back to the whole catalog, which is what the old default `'all'` did.
+ *
+ * `null` means the user cancelled the prompt, so the caller must write nothing
+ * at all rather than installing to everywhere by accident.
+ */
+async function selectTargets(
+  flags: SkillFlags,
+  mode: { json: boolean },
+): Promise<SkillTarget[] | null> {
+  if (flags.target !== undefined) return resolveTargetListOrThrow(flags.target);
+  if (flags.interactive === false || mode.json) return skillTargets();
+
+  const catalog = skillTargets();
+  const io = defaultTargetPromptIO(catalog);
+  if (!io.canPrompt()) return catalog;
+
+  const chosen = await chooseTargets(catalog, io);
+  if (chosen === null) {
+    errLine(paint.dim('cancelled — nothing was written'));
+    return null;
+  }
+  if (chosen.length === 0) {
+    errLine(paint.dim('no agents selected — nothing was written'));
+    return null;
+  }
+  return chosen;
 }
 
 type InstallAction = InstallResult['action'];

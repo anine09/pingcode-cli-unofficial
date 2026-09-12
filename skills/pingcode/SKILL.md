@@ -425,7 +425,22 @@ them inline next to the family they belong to. If a module document does not men
 From a checkout of the CLI repository:
 
 ```bash
-npm run skill:install -- --dry-run    # show the destinations
-npm run skill:install                 # copy to ~/.claude/skills and ./.opencode/skills
+npm run skill:install -- --dry-run    # show the plan, write nothing
+npm run skill:install                 # pick targets on a TTY, else install everywhere
+npm run skill:install -- --target claude-code   # one agent
+npm run skill:install -- --target cursor,codex  # several agents
 npm run skill:install -- --force      # overwrite existing copies
 ```
+
+The target list matches `gh skill install`: 48 agents collapsing onto 43 distinct directories,
+because a few agents read the same one (`.agents/skills` is shared by Codex, Cline, Universal and
+Warp; `.config/agents/skills` by Amp, Kimi Code CLI and Replit). Each directory is written once no
+matter how many agents point at it. `skill list` shows every agent, its directory and whether the
+skill is installed there.
+
+`--target` is comma-separated and case-insensitive, `all` means every agent, and `claude` is still
+accepted as an alias for `claude-code`. An unknown id exits `2` and lists the valid ones — it is
+never silently ignored. With no `--target` the command prompts when stdout is a TTY and `CI` is
+unset, defaulting the selection to the agents that already have the skill plus whichever agent is
+detected from the environment; everywhere else it installs everywhere. `--dry-run` prints the plan
+and writes nothing.

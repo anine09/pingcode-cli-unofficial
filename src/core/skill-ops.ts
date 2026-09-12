@@ -93,10 +93,33 @@ export function readSkillVersion(skillDir: string): string | undefined {
 // install / uninstall / update
 // ---------------------------------------------------------------------------
 
+/**
+ * Group targets that resolve to the same directory, preserving first-seen order.
+ *
+ * Several agents share a global skill dir — `codex`, `cline`, `universal` and
+ * `warp` all read `~/.agents/skills` — so 48 agents collapse to 43 directories
+ * and the payload is written once per directory instead of once per agent.
+ */
+function groupByDir(targets: SkillTarget[]): Map<string, SkillTarget[]> {
+  const groups = new Map<string, SkillTarget[]>();
+  for (const target of targets) {
+    const group = groups.get(target.dir);
+    if (group === undefined) groups.set(target.dir, [target]);
+    else group.push(target);
+  }
+  return groups;
+}
+
+/** Label for a directory group. A lone agent keeps its plain, unchanged label. */
+function groupLabel(group: SkillTarget[]): string {
+  return group.map((target) => target.label).join(', ');
+}
+
 export function installSkill(
   sourceRoot: string,
   targets: SkillTarget[],
   force = false,
+  dryRun = false,
 ): InstallResult[] {
   const skillDir = skillSourceDir(sourceRoot);
   if (!existsSync(skillDir)) {
@@ -106,25 +129,28 @@ export function installSkill(
   const payload = collectSkillPayload(skillDir);
   const results: InstallResult[] = [];
 
-  for (const target of targets) {
-    const targetDir = target.dir;
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
+  for (const [dir, group] of groupByDir(targets)) {
+    const label = groupLabel(group);
+    if (!existsSync(dir) && !dryRun) {
+      mkdirSync(dir, { recursive: true });
     }
 
     for (const file of payload) {
-      const dest = path.join(targetDir, file.relative);
+      const dest = path.join(dir, file.relative);
       const exists = existsSync(dest);
 
       if (exists && !force) {
-        results.push({ target: target.label, action: 'skipped', path: dest });
+        results.push({ target: label, action: 'skipped', path: dest });
         continue;
       }
 
-      mkdirSync(path.dirname(dest), { recursive: true });
-      copyFileSync(file.source, dest);
+      // Dry-run still reports the action, it just never touches the disk.
+      if (!dryRun) {
+        mkdirSync(path.dirname(dest), { recursive: true });
+        copyFileSync(file.source, dest);
+      }
       results.push({
-        target: target.label,
+        target: label,
         action: exists ? 'overwritten' : 'written',
         path: dest,
       });
@@ -136,17 +162,18 @@ export function installSkill(
 
 export function uninstallSkill(
   targets: SkillTarget[],
+  dryRun = false,
 ): InstallResult[] {
   const results: InstallResult[] = [];
 
-  for (const target of targets) {
-    if (!existsSync(target.dir)) {
-      results.push({ target: target.label, action: 'not-found' });
+  for (const [dir, group] of groupByDir(targets)) {
+    if (!existsSync(dir)) {
+      results.push({ target: groupLabel(group), action: 'not-found' });
       continue;
     }
 
-    rmSync(target.dir, { recursive: true, force: true });
-    results.push({ target: target.label, action: 'removed', path: target.dir });
+    if (!dryRun) rmSync(dir, { recursive: true, force: true });
+    results.push({ target: groupLabel(group), action: 'removed', path: dir });
   }
 
   return results;

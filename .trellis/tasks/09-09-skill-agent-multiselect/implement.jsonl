@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/09-09-skill-agent-multiselect/prd.md", "reason": "R1-R7 requirements and acceptance criteria for this task"}
+{"file": ".trellis/tasks/09-09-skill-agent-multiselect/design.md", "reason": "D0-D10: file placement, catalog shape, resolution semantics, prompt contract, dedupe/dry-run, dependency inlining"}
+{"file": ".trellis/tasks/09-09-skill-agent-multiselect/implement.md", "reason": "S1-S10 ordered execution steps with per-step verification and the final acceptance gate"}
+{"file": ".trellis/tasks/09-09-skill-agent-multiselect/research/gh-skill-registry.md", "reason": "The authoritative 48-agent table (id/name/dir, gh order) and gh source analysis — do not re-fetch gh source"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Layering rules (cli -> core, core never imports cli), stdout purity, exit-code table, redactUrl"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Mentions scripts/install-skill.ts which this task deletes"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Single source of truth for the target catalog; grep before changing constants"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Where resolution, prompting and exit codes belong across core/cli"}
+{"file": ".trellis/spec/guides/commit-conventions.md", "reason": "Commit message format for the final change"}

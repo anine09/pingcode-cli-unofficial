@@ -20,7 +20,18 @@ export default defineConfig({
    * `Dynamic require of "events" is not supported`, and tsup's `shims: true`
    * does not inject `createRequire` into the ESM output.
    */
-  noExternal: ['commander', 'picocolors'],
+  noExternal: [
+    'commander',
+    'picocolors',
+    // `@clack/prompts` powers the `skill install` target picker. Its tree comes
+    // in whole for the same reason as the two above, plus `sisteransi`, which is
+    // CJS and therefore needs the `createRequire` banner further down.
+    '@clack/prompts',
+    '@clack/core',
+    'sisteransi',
+    'fast-wrap-ansi',
+    'fast-string-width',
+  ],
   esbuildOptions(options) {
     options.banner = {
       ...options.banner,

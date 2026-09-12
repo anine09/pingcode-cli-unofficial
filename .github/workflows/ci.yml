@@ -56,14 +56,8 @@ jobs:
           node dist/bin/pingcode.js --version
           node dist/bin/pingcode.js --help
 
-      # Non-TTY path: lists both global targets and writes nothing.
-      #
-      # Skipped on Node 20 on purpose: the installer is a `.ts` file run by
-      # `node --experimental-strip-types`, and that flag only exists from Node
-      # 22.6. Gating the step is preferred over adding a build step or a
-      # dependency just to exercise it — see the README's CI/CD section.
+      # Non-TTY path: lists every global target and writes nothing.
       - name: skill installer dry run
-        if: matrix.node != '20'
         run: npm run skill:install -- --dry-run
 
   checks:

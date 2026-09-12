@@ -23,15 +23,16 @@ exports[`skill install --help > install 1`] = `
 install the skill into agent global skill directories
 
 Options:
-  --target <name>  comma-separated target(s): claude, opencode, all (default: "all")
-  --force          overwrite existing files
-  --host <url>     PingCode host (default https://open.pingcode.com; self-hosted:
-                   https://pingcode.example.com)
-  --json           emit machine-readable JSON on stdout
-  --dry-run        preview mutating requests without sending them
-  --no-cache       bypass the on-disk metadata cache
-  --verbose        log requests to stderr (secrets redacted)
-  -h, --help       display help for command
+  --target <name>   agent id(s), comma-separated, or "all"
+  --force           overwrite existing files
+  --no-interactive  skip the interactive agent selector
+  --host <url>      PingCode host (default https://open.pingcode.com; self-hosted:
+                    https://pingcode.example.com)
+  --json            emit machine-readable JSON on stdout
+  --dry-run         preview mutating requests without sending them
+  --no-cache        bypass the on-disk metadata cache
+  --verbose         log requests to stderr (secrets redacted)
+  -h, --help        display help for command
 "
 `;
 
@@ -57,14 +58,15 @@ exports[`skill remove --help > remove 1`] = `
 remove the skill from agent global skill directories
 
 Options:
-  --target <name>  comma-separated target(s): claude, opencode, all (default: "all")
-  --host <url>     PingCode host (default https://open.pingcode.com; self-hosted:
-                   https://pingcode.example.com)
-  --json           emit machine-readable JSON on stdout
-  --dry-run        preview mutating requests without sending them
-  --no-cache       bypass the on-disk metadata cache
-  --verbose        log requests to stderr (secrets redacted)
-  -h, --help       display help for command
+  --target <name>   agent id(s), comma-separated, or "all"
+  --no-interactive  skip the interactive agent selector
+  --host <url>      PingCode host (default https://open.pingcode.com; self-hosted:
+                    https://pingcode.example.com)
+  --json            emit machine-readable JSON on stdout
+  --dry-run         preview mutating requests without sending them
+  --no-cache        bypass the on-disk metadata cache
+  --verbose         log requests to stderr (secrets redacted)
+  -h, --help        display help for command
 "
 `;
 
@@ -74,13 +76,14 @@ exports[`skill update --help > update 1`] = `
 update the skill (reinstall with --force)
 
 Options:
-  --target <name>  comma-separated target(s): claude, opencode, all (default: "all")
-  --host <url>     PingCode host (default https://open.pingcode.com; self-hosted:
-                   https://pingcode.example.com)
-  --json           emit machine-readable JSON on stdout
-  --dry-run        preview mutating requests without sending them
-  --no-cache       bypass the on-disk metadata cache
-  --verbose        log requests to stderr (secrets redacted)
-  -h, --help       display help for command
+  --target <name>   agent id(s), comma-separated, or "all"
+  --no-interactive  skip the interactive agent selector
+  --host <url>      PingCode host (default https://open.pingcode.com; self-hosted:
+                    https://pingcode.example.com)
+  --json            emit machine-readable JSON on stdout
+  --dry-run         preview mutating requests without sending them
+  --no-cache        bypass the on-disk metadata cache
+  --verbose         log requests to stderr (secrets redacted)
+  -h, --help        display help for command
 "
 `;

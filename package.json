@@ -24,13 +24,15 @@
     "test:coverage": "vitest run --coverage",
     "catalog:sync": "node --experimental-strip-types scripts/catalog-sync.ts",
     "catalog:check": "node --experimental-strip-types scripts/catalog-sync.ts --check",
-    "skill:install": "node --experimental-strip-types scripts/install-skill.ts",
+    "skill:install": "node dist/bin/pingcode.js skill install",
+    "preskill:install": "npm run build",
     "scan:secrets": "node --experimental-strip-types scripts/scan-secrets.ts",
     "check:commits": "node --experimental-strip-types scripts/check-commits.ts",
     "hooks:install": "node scripts/install-hooks.mjs",
     "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
+    "@clack/prompts": "^1.8.0",
     "commander": "^12.1.0",
     "picocolors": "^1.1.1"
   },

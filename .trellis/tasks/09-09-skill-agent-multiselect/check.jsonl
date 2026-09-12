@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/09-09-skill-agent-multiselect/prd.md", "reason": "Acceptance criteria R1-R7 are the checklist the reviewer verifies against"}
+{"file": ".trellis/tasks/09-09-skill-agent-multiselect/design.md", "reason": "D0-D10 decisions the implementation must not silently drift from"}
+{"file": ".trellis/tasks/09-09-skill-agent-multiselect/research/gh-skill-registry.md", "reason": "Ground truth for the 48-agent table and the 48 -> 43 dir dedupe claim"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Layering enforcement, stdout purity under --json, exit-code contract"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check no second copy of the target table survives"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check prompting stayed in cli and exit decisions in cli"}
+{"file": ".trellis/spec/guides/versioning.md", "reason": "No release/version bump needed for this internal change"}
