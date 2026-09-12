@@ -210,3 +210,38 @@ spec 七处过时点修复后发布 2.0.0（breaking: paste-only login 删 --cha
 ### Next Steps
 
 - join 任务将替代 bootstrap 任务作为新开发者入口
+
+
+## Session 6: skill agent multiselect: searchable upgrade
+
+**Date**: 2026-09-12
+**Task**: skill agent multiselect: searchable upgrade
+**Branch**: `main`
+
+### Summary
+
+skill install 对齐 gh（48 agent targets + 交互多选）并追加可搜索多选（autocompleteMultiselect）
+
+### Main Changes
+
+- paths.ts 48 agent/43 目录表（gh 序）；@clack/prompts 复选框多选（--json/--no-interactive 跳过）；--target 未知值 exit 2 报错；删 scripts/install-skill.ts 走 dist/bin；--dry-run 接线
+- R8 追加需求：多选 → autocompleteMultiselect 可搜索（默认 filter 命中 Name (id) label），TargetPromptIO 接口不变
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7324707` | (see git log) |
+| `248a5f9` | (see git log) |
+
+### Testing
+
+- [OK] typecheck 干净；npm test 2952 passed（88 文件）；build 成功；随 v2.0.0 发布（搜索多选为 2.0.0 之后的下一个 patch/minor 候选）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- none — task shipped; R8 pending next release bump

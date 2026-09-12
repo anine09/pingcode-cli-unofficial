@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-09-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~212 | Active |
+| `journal-1.md` | ~247 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-09-12 | skill agent multiselect: searchable upgrade | `7324707`, `248a5f9` | `main` |
 | 5 | 2026-09-12 | bootstrap guidelines done | `01cec6f`, `689f89b`, `7324707`, `03b0d26` | `main` |
 | 4 | 2026-09-12 | spec sync + release 2.0.0 | `01cec6f`, `689f89b`, `7324707`, `03b0d26` | `main` |
 | 3 | 2026-09-12 | paste-only-login: paste-only user login, remove browser channel and loopback | `01cec6f` | `main` |
