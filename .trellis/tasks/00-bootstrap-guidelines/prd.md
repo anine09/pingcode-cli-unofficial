@@ -21,9 +21,9 @@ the rest conversationally.
 
 ## Status (update the checkboxes as you complete each item)
 
-- [ ] Fill backend guidelines
-- [ ] Fill frontend guidelines
-- [ ] Add code examples
+- [x] Fill backend guidelines — 8 个文件全部为真实内容（directory-structure / database-guidelines / error-handling / logging-guidelines / quality-guidelines / catalog-drift / live-verification / index），经 08-18-user-token-auth、09-12-paste-only-login、09-12-spec-sync-and-release 等任务持续同步维护，2026-09-12 刚完成一轮过时点同步（paste-only login 后）
+- [x] Fill frontend guidelines — N/A：CLI 项目无前端，`frontend/index.md` 明确声明模板有意留空（"writing frontend conventions for a codebase that has no frontend would be invention, not documentation"）
+- [x] Add code examples — 各 spec 均嵌入真实 file:line 锚点代码示例（error-handling 的 exit code 契约、database-guidelines 的 authorize 流程、guides 的 cli→core→api 分层等）
 
 ---
 
