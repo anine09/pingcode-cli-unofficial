@@ -101,3 +101,38 @@ Session summary was not supplied.
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: paste-only-login: paste-only user login, remove browser channel and loopback
+
+**Date**: 2026-09-12
+**Task**: paste-only-login: paste-only user login, remove browser channel and loopback
+**Branch**: `main`
+
+### Summary
+
+Replaced the browser-channel authorization_code login with paste-only login; breaking change.
+
+### Main Changes
+
+- auth login user path: printAuthorizeUrl + readPaste + new extractCode (URL or bare code); --code skips the prompt
+- Removed --channel flag, openBrowser, captureCodeFromLoopback, parseLoopback, DEFAULT_LOOPBACK_URI, loginHooks loopback hooks
+- Removed oauthRedirectUri config key (Config/ResolvedSettings/readConfig/settings) and Ctx.oauth
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `01cec6f` | (see git log) |
+
+### Testing
+
+- [OK] npm run typecheck clean; npm test 2952 passed; npm run build success
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Next release must be MAJOR 2.0.0 (breaking: --channel + oauthRedirectUri removed); .trellis/spec/guides/versioning.md:49 still shows 'add --channel' as MINOR example - stale, not in this task's scope
