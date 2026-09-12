@@ -46,8 +46,8 @@ hotfix/<name>   ← urgent production fix, branched off main, merged to main (ta
 | Bump | When | Examples |
 |---|---|---|
 | **MAJOR** | an incompatible / breaking change — a removed or renamed command, a changed flag, a dropped config key, a behavior change that breaks existing scripts or agents | rename `work-item` → `workitem`; drop `--mode`; change an exit code's meaning |
-| **MINOR** | new functionality, backward-compatible — a new command, a new flag, a new auth mode | add `auth login --mode user`; add `--channel`/`--code` |
-| **PATCH** | backward-compatible bug fix, doc/test-only, refactor with no behavior change | fix the loopback hint; add redaction; internal refactor |
+| **MINOR** | new functionality, backward-compatible — a new command, a new flag, a new auth mode | add `auth login --mode user`; add `--code`; add a new command group |
+| **PATCH** | backward-compatible bug fix, doc/test-only, refactor with no behavior change | fix the paste hint; add redaction; internal refactor |
 
 - Pre-1.0 (`0.y.z`): `MINOR` may still break; the API is not yet stable. **`1.0.0` is the
   stability commitment** — from it on, the table above is the contract.

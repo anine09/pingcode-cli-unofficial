@@ -108,12 +108,13 @@ type Config = {
 > they log in as themselves, copy the `code`, and `/v1/myself` returns them. Do not expect the
 > backend credential to "point at" a user — it cannot.
 
-> **Gotcha — `redirect_uri` registration is MANDATORY (even for the paste channel).** Without a
-> `redirect_uri` registered in 凭据管理 for the app, `{host}/oauth2/authorize` returns
-> "应用未配置'redirect_uri'" and no `code` is ever produced. Register a loopback address
-> (`http://127.0.0.1:8732/callback`); for paste the user just copies `code` off the (failed)
-> redirect in the address bar — no listener required. The authorize error message is the symptom
-> to recognize (live-verified 2026-08-18).
+> **Gotcha — a `redirect_uri` may still be required, but the CLI never sends one.** The CLI is
+> paste-only: it prints `{host}/oauth2/authorize?…` without a `redirect_uri`, the user logs in in
+> any browser, and copies the `code` off the address-bar redirect. If the instance refuses to
+> produce a `code` without a registered `redirect_uri` (the symptom is the "应用未配置'redirect_uri'"
+> authorize error), register any syntactically valid address for the app in 凭据管理 — nothing
+> ever listens on it. The authorize error message is the symptom to recognize (live-verified
+> 2026-08-18).
 
 ---
 

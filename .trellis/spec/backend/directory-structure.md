@@ -25,6 +25,7 @@ src/
 │   ├── registry.ts         # the group list program.ts iterates — one row per command group
 │   ├── globals.ts          # flags + env + config file → a Ctx
 │   ├── output.ts           # stdout/stderr contract, tables, JSON, dry-run, error rendering
+│   ├── prompts/            # interactive terminal helpers shared by commands
 │   └── commands/           # one file (or directory) per group; _shared/ for cross-object families
 ├── api/                   # thin typed wrappers over the REST surface
 │   ├── projects.ts, workItems.ts, ship.ts, scm.ts, testhub.ts, …
@@ -40,15 +41,20 @@ src/
 │   ├── catalog/            # the generated endpoint catalog + its hand-written corrections
 │   ├── endpoints.ts        # every curated path string, in one place
 │   ├── errors.ts           # the 8-way hierarchy + exit-code table + DryRunHalt
-│   ├── paths.ts            # skill targets only — npm owns where the package lives
+│   ├── paths.ts            # skill targets only — the agent catalog, npm owns where the package lives
+│   ├── skill-targets.ts    # --target parsing: all / comma list / aliases / unknown detection
+│   ├── agent-detect.ts     # which coding agent is running, from env only
+│   ├── skill-ops.ts        # skill install/remove/update engine shared by update.ts and the skill command
 │   ├── update.ts           # update engine: registry version check, npm-install delegation, skill sync
+│   ├── update-check.ts     # the registry version check itself, reused by update.ts and status hints
+│   ├── jsonInput.ts        # reads JSON bodies for POST/PUT from --json flag, stdin, or file
 │   ├── redact.ts           # redactUrl / redactHeaders / redactSnippet / maskIdentifier
 │   └── logger.ts           # warn/debug — always to stderr
 ├── types/                 # hand-written envelope + resource types, per module
 └── version.ts
 
 test/                       # vitest; one file per module, layering.test.ts, and help/ per group
-scripts/install-skill.ts    # npm run skill:install
+├── helpers/               # shared test harnesses: cli.ts (runCli) + fake.ts (credential/config fakes)
 skills/pingcode/SKILL.md    # the agent-facing docs, source of truth
 ```
 

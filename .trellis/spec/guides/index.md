@@ -33,7 +33,7 @@ These guides help you **ask the right questions before coding**.
 
 ### When to Think About Cross-Layer Issues
 
-- [ ] Feature touches 3+ layers (API, Service, Component, Database)
+- [ ] Feature touches 3+ layers (CLI command, core, API)
 - [ ] Data format changes between layers
 - [ ] Multiple consumers need the same data
 - [ ] You're not sure where to put some logic

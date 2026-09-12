@@ -48,7 +48,7 @@ Development commands:
 npm run typecheck        # tsc --noEmit
 npm test                 # vitest run — no network, ever
 npm run dev              # tsup --watch
-npm run skill:install    # copy skills/pingcode/SKILL.md to the agent skill dirs
+npm run skill:install    # build, then copy skills/pingcode into the agent skill dirs
 npm run scan:secrets     # credential / tenant-identifier scan
 npm run check:commits    # commit-message gate
 ```
@@ -164,9 +164,11 @@ layers whose costs are completely different, and it is worth knowing which one y
 | **Ergonomics** — the refined layer | `--flags` instead of raw JSON, name→id resolution, width-aware tables, per-endpoint traps recorded in `--help` | **158 / 459** | one live-verified slice each |
 
 "Complete" (完全体) refers to **Reach**, and Reach is finished: every documented endpoint is
-invocable today. Seven of the 459 are refused *before any request* because they need a user token
-this CLI cannot obtain (`/v1/myself`, `/v1/permission/my/*`, `/v1/permission/check/*` — the
-authorization-code flow is not implemented), which leaves 452 actually callable. Ergonomics is a
+invocable today. Seven of the 459 need a user token (`/v1/myself`, `/v1/permission/my/*`,
+`/v1/permission/check/*`) — run `pingcode auth login --mode user` to obtain one (it prints an
+authorize URL; paste the redirect URL back, or pass `--code`) and all 459 become callable. On the
+default 企业令牌 alone they are refused *before any request*, which leaves 452 actually callable.
+Ergonomics is a
 **curation backlog, not a finish line**: an endpoint earns a named command by being run against a
 live tenant, having its error codes either mapped with evidence or explicitly left alone, and
 keeping `--json` pure and `--dry-run` silent. Endpoints that nobody drives interactively are better
@@ -192,7 +194,7 @@ how many the catalog documents. The module names are the ones `pingcode api list
 | `permission` | 0 | 7 | 6 of the 7 need a user token; `GET /v1/permission/points` is reachable |
 | `workloads` `workload_types` | 0 | 7 | 工时 |
 | `nexus` | 0 | 5 | Nexus/CES app storage |
-| `auth` | 0 | 3 | not user commands: `auth login` calls the `client_credentials` grant internally, and the two user-token grants are not implemented |
+| `auth` | 0 | 3 | `auth login --mode user` runs the authorization-code grant (prints the URL, extracts the `code` from the pasted redirect); `/v1/myself` verifies the user token |
 | `security` `myself` | 0 | 3 | login/audit logs, and the user-token `/v1/myself` |
 | **Total** | **158** | **459** | 301 endpoints are reachable through `pingcode api` only |
 
@@ -740,24 +742,42 @@ would make the docs a merge point for every parallel change. Sync them to your a
 directories:
 
 ```bash
-npm run skill:install -- --dry-run              # show the destinations, write nothing
-npm run skill:install                           # pick a target (prompts on a TTY, else installs both)
-npm run skill:install -- --target claude        # Claude Code only
-npm run skill:install -- --target opencode      # OpenCode only
-npm run skill:install -- --target claude,opencode   # or --target all
+npm run skill:install -- --dry-run              # show the plan, write nothing
+npm run skill:install                           # pick targets on a TTY, else install everywhere
+npm run skill:install -- --target claude-code   # one agent
+npm run skill:install -- --target cursor,codex  # several agents
+npm run skill:install -- --target all           # everything (the non-TTY default)
+npm run skill:install -- --no-interactive       # never prompt, even on a TTY
 npm run skill:install -- --force                # overwrite existing copies
 ```
 
-Installs are **global (user-level)** only, and copy the `modules/` directory alongside `SKILL.md`:
+`npm run skill:install` builds first, then runs the built bundle. `skill install` also exists as a
+subcommand for anyone installing the package globally (`npx pingcode-cli-unofficial skill install`).
+
+Installs are **global (user-level)** only, and copy the `modules/` directory alongside `SKILL.md`.
+The target list matches `gh skill install` — **48 agents collapsing onto 43 distinct directories**,
+because a few agents read the same one (`.agents/skills` is shared by Codex, Cline, Universal and
+Warp; `.config/agents/skills` by Amp, Kimi Code CLI and Replit). Each directory is written once no
+matter how many agents point at it, and the output names every agent it covered.
 
 | Target | Destination |
 | --- | --- |
-| `claude` | `~/.claude/skills/pingcode/SKILL.md` |
+| `claude-code` | `~/.claude/skills/pingcode/SKILL.md` |
+| `cursor` | `~/.cursor/skills/pingcode/SKILL.md` |
 | `opencode` | `$XDG_CONFIG_HOME/opencode/skills/pingcode/SKILL.md` (default `~/.config/opencode/…`) |
+| `codex` | `~/.agents/skills/pingcode/SKILL.md` (shared with `cline`, `universal`, `warp`) |
 
-`--target` is repeatable, comma-separated and case-insensitive. With no `--target` the script
-prompts when stdin is a TTY (prompt on stderr, `q` aborts without writing) and installs **both**
-targets when it isn't, so CI and pipes keep their old behaviour. An unknown target exits `2`.
+`skill list` prints every agent with its directory and whether the skill is there; `skill install
+--help` points at the `--target` ids.
+
+`--target` is comma-separated and case-insensitive, and `all` means every agent. `claude` is still
+accepted as an alias for `claude-code`. An unknown id exits `2` and lists the valid ones — it is
+never silently ignored.
+
+With no `--target` the command prompts when stdout is a TTY and `CI` is unset, defaulting the
+selection to the agents that already have the skill installed plus whichever agent is detected from
+the environment. Everywhere else — `--json`, a pipe, CI, `--no-interactive` — it installs
+everywhere, so automation keeps its old behaviour. `--dry-run` prints the plan and writes nothing.
 
 ---
 
@@ -816,11 +836,12 @@ never reported.
 and at most 72 characters. Merge commits are exempt, and on a pull request the PR title is checked
 too because a squash merge turns it into the commit subject.
 
-> **Node version note.** `skill:install`, `scan:secrets` and `check:commits` are TypeScript run
-> through `node --experimental-strip-types`, which exists from Node **22.6** only. On the Node 20
-> matrix leg the `skill:install --dry-run` step is therefore skipped, and the hygiene job runs on
-> Node 24. `engines` still says `>=20` because the *published bundle* is built for Node 20 and is
-> smoke-tested there; the restriction is on the repository's own scripts, not on the CLI.
+> **Node version note.** `scan:secrets`, `check:commits` and `catalog:sync` are TypeScript run
+> through `node --experimental-strip-types`, which exists from Node **22.6** only, so the hygiene
+> job runs on Node 24. `skill:install` used to be in that group; it now runs the built bundle, so it
+> works on the Node 20 leg too. `engines` still says `>=20` because the *published bundle* is built
+> for Node 20 and is smoke-tested there; the restriction is on the repository's own scripts, not on
+> the CLI.
 
 ### Git hooks
 
