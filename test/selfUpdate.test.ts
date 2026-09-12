@@ -81,6 +81,9 @@ const explodingExec: ExecFn = () => {
   throw new Error('exec should not be called in this test');
 };
 
+/** A remote version strictly newer than any VERSION this suite runs against. */
+const REMOTE = '9.9.9';
+
 beforeEach(() => {
   if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true });
   ensureDir(TEMP_ROOT);
@@ -460,7 +463,7 @@ describe('runAutoUpdate', () => {
     ensureDir(configDir);
     writeFileSync(path.join(configDir, 'update.lock'), String(process.pid));
 
-    const result = await runAutoUpdate(env, jsonFetch(registryFor('2.0.0')), explodingExec);
+    const result = await runAutoUpdate(env, jsonFetch(registryFor(REMOTE)), explodingExec);
     expect(result).toEqual({ status: 'failed', error: 'update already in progress' });
   });
 
@@ -469,19 +472,19 @@ describe('runAutoUpdate', () => {
     const configDir = env.PINGCODE_CONFIG_DIR!;
 
     const exec: ExecFn = () => {
-      throw new Error('npm install --global pingcode-cli-unofficial@2.0.0 failed');
+      throw new Error('npm install --global pingcode-cli-unofficial@9.9.9 failed');
     };
-    const result = await runAutoUpdate(env, jsonFetch(registryFor('2.0.0')), exec);
+    const result = await runAutoUpdate(env, jsonFetch(registryFor(REMOTE)), exec);
 
     expect(result.status).toBe('failed');
-    expect(readHint(configDir)).toEqual({ version: '2.0.0' });
+    expect(readHint(configDir)).toEqual({ version: REMOTE });
   });
 
   it('removes hint file on up-to-date', async () => {
     const env = makeEnv();
     const configDir = env.PINGCODE_CONFIG_DIR!;
     ensureDir(configDir);
-    writeHint(configDir, '2.0.0');
+    writeHint(configDir, REMOTE);
 
     const result = await runAutoUpdate(makeEnv(), jsonFetch(registryFor(VERSION)), explodingExec);
 
@@ -505,7 +508,7 @@ describe('runAutoUpdate', () => {
     const exec: ExecFn = () => {
       throw new Error('npm exploded');
     };
-    await runAutoUpdate(env, jsonFetch(registryFor('2.0.0')), exec);
+    await runAutoUpdate(env, jsonFetch(registryFor(REMOTE)), exec);
 
     expect(existsSync(path.join(configDir, 'update.lock'))).toBe(false);
   });
@@ -518,8 +521,6 @@ describe('runAutoUpdate', () => {
  * claim of success on a path that did not install.
  */
 describe('runAutoUpdate — npm delegation', () => {
-  const REMOTE = '9.9.9';
-
   /**
    * `installViaNpm` proves success by reading back the installed version, and the
    * only version it can ever read back in this environment is the running one
