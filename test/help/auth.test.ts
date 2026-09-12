@@ -29,7 +29,7 @@ describe('auth --help', () => {
 });
 
 describe('auth login --help', () => {
-  it('pins the mode/channel/code flag surface (design D10/D12)', () => {
+  it('pins the mode/code flag surface (design D10/D12)', () => {
     expect(helpFor(['auth', 'login'])).toMatchSnapshot();
   });
 });

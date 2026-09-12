@@ -165,7 +165,6 @@ describe('config file storage', () => {
   it('round-trips the user-token keys through save/load (D3)', () => {
     saveConfig(
       {
-        oauthRedirectUri: 'http://127.0.0.1:8732/callback',
         authMode: 'user',
         userToken: {
           accessToken: 'u',
@@ -178,7 +177,6 @@ describe('config file storage', () => {
       env,
     );
     const after = loadConfig(env);
-    expect(after.oauthRedirectUri).toBe('http://127.0.0.1:8732/callback');
     expect(after.authMode).toBe('user');
     expect(after.userToken?.accessToken).toBe('u');
     expect(after.userToken?.refreshToken).toBe('rt');
@@ -245,7 +243,6 @@ describe('coerceConfig', () => {
   it('coerces the new user-token keys (D1/D3)', () => {
     expect(
       coerceConfig({
-        oauthRedirectUri: 'http://127.0.0.1:8732/callback',
         authMode: 'user',
         userToken: {
           accessToken: 'u',
@@ -256,7 +253,6 @@ describe('coerceConfig', () => {
         },
       }),
     ).toEqual({
-      oauthRedirectUri: 'http://127.0.0.1:8732/callback',
       authMode: 'user',
       userToken: {
         accessToken: 'u',

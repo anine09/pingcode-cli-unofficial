@@ -49,7 +49,6 @@ beforeEach(() => {
   prevConfigDir = process.env.PINGCODE_CONFIG_DIR;
   process.env.PINGCODE_CONFIG_DIR = dir;
   Object.assign(loginHooks, savedHooks);
-  loginHooks.openBrowser = () => {};
 });
 
 afterEach(() => {
@@ -114,14 +113,14 @@ const myself = (name = '张三'): Response =>
 
 describe('auth login — user mode (authorization_code)', () => {
   it('defaults to user mode when --mode is omitted (R2)', async () => {
-    loginHooks.captureCode = async () => ({ code: 'BROWSER-CODE' });
+    loginHooks.readPaste = async () => 'BROWSER-CODE';
     const run = await runCli(['auth', 'login', '--json'], [tokenUser, myself]);
     expect(run.exit).toBe(0);
     expect(JSON.parse(run.stdout).mode).toBe('user');
   });
 
-  it('browser channel persists the user slot, verifies with /v1/myself, prints the URL to stderr', async () => {
-    loginHooks.captureCode = async () => ({ code: 'BROWSER-CODE', domain: 'htz' });
+  it('defaults to the paste-only path: persists the user slot, verifies with /v1/myself, prints the URL to stderr', async () => {
+    loginHooks.readPaste = async () => 'BROWSER-CODE';
     const run = await runCli(['auth', 'login', '--mode', 'user', '--json'], [tokenUser, () => myself('张三')]);
 
     expect(run.exit).toBe(0);
@@ -136,7 +135,7 @@ describe('auth login — user mode (authorization_code)', () => {
     expect(run.stderr).toContain('oauth2/authorize');
     expect(run.stderr).toContain('client_id=test-client');
 
-    // Token exchange carried grant_type=authorization_code + the code.
+    // Token exchange carried grant_type=authorization_code + the code from the prompt.
     const tokenCall = run.calls[0]?.url ?? '';
     expect(tokenCall).toContain('grant_type=authorization_code');
     expect(tokenCall).toContain('code=BROWSER-CODE');
@@ -149,9 +148,9 @@ describe('auth login — user mode (authorization_code)', () => {
     expect((cfg.token as { accessToken?: string }).accessToken).toBe('test-token');
   });
 
-  it('paste channel reads the code from the prompt and persists the user slot', async () => {
-    loginHooks.selectChannel = async () => 'paste';
-    loginHooks.readCode = async () => 'PASTED-CODE';
+  it('extracts the code out of a pasted redirect URL (AC2)', async () => {
+    // The operator pastes the address-bar URL after login, not a bare code.
+    loginHooks.readPaste = async () => 'http://127.0.0.1:8732/callback?code=URL-CODE&domain=htz';
     const run = await runCli(['auth', 'login', '--mode', 'user', '--json'], [tokenUser, () => myself('李四')]);
 
     expect(run.exit).toBe(0);
@@ -160,19 +159,17 @@ describe('auth login — user mode (authorization_code)', () => {
     expect((out.user as { display_name?: string }).display_name).toBe('李四');
 
     const tokenCall = run.calls[0]?.url ?? '';
-    expect(tokenCall).toContain('code=PASTED-CODE');
+    expect(tokenCall).toContain('grant_type=authorization_code');
+    expect(tokenCall).toContain('code=URL-CODE');
     const cfg = readConfig();
     expect(cfg.authMode).toBe('user');
     expect((cfg.userToken as { accessToken?: string }).accessToken).toBe('user-tok');
   });
 
-  it('--code flag uses the code directly, bypassing the channel and hooks (non-interactive)', async () => {
-    // If the flag path were wrong, these would be invoked and throw.
-    loginHooks.captureCode = async () => {
-      throw new Error('captureCode must not be called when --code is given');
-    };
-    loginHooks.readCode = async () => {
-      throw new Error('readCode must not be called when --code is given');
+  it('--code flag uses the code directly, bypassing the paste prompt (non-interactive)', async () => {
+    // If the flag path were wrong, readPaste would be invoked and throw.
+    loginHooks.readPaste = async () => {
+      throw new Error('readPaste must not be called when --code is given');
     };
     const run = await runCli(['auth', 'login', '--mode', 'user', '--code', 'FLAG-CODE', '--json'], [tokenUser, myself]);
 
@@ -185,7 +182,7 @@ describe('auth login — user mode (authorization_code)', () => {
 
   it('two-app isolation: user login routes --client-id to the user slot, leaving the enterprise app intact', async () => {
     // Base config holds the ENTERPRISE app (test-client/test-secret).
-    loginHooks.captureCode = async () => ({ code: 'BROWSER-CODE' });
+    loginHooks.readPaste = async () => 'BROWSER-CODE';
     const run = await runCli(
       [
         'auth',
@@ -224,7 +221,7 @@ describe('auth login — user mode (authorization_code)', () => {
       userClientId: 'stored-user-id',
       userClientSecret: 'stored-user-secret',
     });
-    loginHooks.captureCode = async () => ({ code: 'BROWSER-CODE' });
+    loginHooks.readPaste = async () => 'BROWSER-CODE';
     const run = await runCli(['auth', 'login', '--mode', 'user', '--json'], [tokenUser, myself]);
 
     expect(run.exit).toBe(0);
@@ -352,7 +349,7 @@ describe('auth logout', () => {
 // login — error / edge branches (no network)
 // ---------------------------------------------------------------------------
 
-describe('auth login — resolveMode / resolveChannel / requireClientId errors', () => {
+describe('auth login — resolveMode / requireClientId errors', () => {
   it('rejects an invalid --mode before any network call', async () => {
     const run = await runCli(['auth', 'login', '--mode', 'bogus', '--json'], []);
     expect(run.exit).toBe(2);
@@ -360,11 +357,12 @@ describe('auth login — resolveMode / resolveChannel / requireClientId errors',
     expect(run.calls).toHaveLength(0);
   });
 
-  it('rejects an invalid --channel before printing the authorize URL or touching the network', async () => {
-    const run = await runCli(['auth', 'login', '--mode', 'user', '--channel', 'bogus', '--json'], []);
+  it('rejects the removed --channel flag as an unknown option (breaking: next release is 2.0.0)', async () => {
+    // The channel picker is gone; commander rejects the flag before anything runs.
+    const run = await runCli(['auth', 'login', '--mode', 'user', '--channel', 'paste', '--json'], []);
     expect(run.exit).toBe(2);
-    expect(run.stderr).toContain('--channel must be');
-    // The authorize URL is printed only after the channel resolves, so it must be absent here.
+    expect(run.stderr).toContain('unknown option');
+    // The authorize URL is printed only after the prompt resolves, so it must be absent here.
     expect(run.stderr).not.toContain('oauth2/authorize');
     expect(run.calls).toHaveLength(0);
   });
@@ -377,6 +375,24 @@ describe('auth login — resolveMode / resolveChannel / requireClientId errors',
     expect(run.stderr).toContain('no client id available');
     expect(run.calls).toHaveLength(0);
   });
+
+  it('refuses --json without --code: the paste prompt is TTY-only (AC7)', async () => {
+    // The default (unstubbed) readPasteFromTerminal is TTY-only: under --json,
+    // or a pipe, there is no prompt to read from — pass --code instead. In
+    // --json mode printError renders {kind,message,exit} only (error-handling.md),
+    // so the `--code` hint is deliberately absent from stderr here.
+    const run = await runCli(['auth', 'login', '--mode', 'user', '--json'], []);
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('no authorization code available');
+    // stderr also carries the authorize URL + instructions (stderr is not JSON-only);
+    // the error object is the JSON line at the end.
+    const errorLine = run.stderr.trim().split('\n').filter((line) => line.startsWith('{"error"'));
+    expect(errorLine).toHaveLength(1);
+    expect(JSON.parse(errorLine[0]!) as { error: { kind: string; exit: number } }).toMatchObject({
+      error: { kind: 'usage', exit: 2 },
+    });
+    expect(run.calls).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -385,7 +401,7 @@ describe('auth login — resolveMode / resolveChannel / requireClientId errors',
 
 describe('auth login — human output', () => {
   it('user login prints the field block to stdout and the authenticated note to stderr', async () => {
-    loginHooks.captureCode = async () => ({ code: 'BROWSER-CODE' });
+    loginHooks.readPaste = async () => 'BROWSER-CODE';
     const run = await runCli(['auth', 'login', '--mode', 'user'], [tokenUser, myself]);
 
     expect(run.exit).toBe(0);
@@ -399,7 +415,7 @@ describe('auth login — human output', () => {
   });
 
   it('warns that the app credentials were not stored when they arrive by flag without --save', async () => {
-    loginHooks.captureCode = async () => ({ code: 'BROWSER-CODE' });
+    loginHooks.readPaste = async () => 'BROWSER-CODE';
     // Flag-supplied app creds, no --save, and no user slot on disk → not persisted.
     const run = await runCli(
       ['auth', 'login', '--mode', 'user', '--client-id', 'user-app-id', '--client-secret', 'user-app-secret'],

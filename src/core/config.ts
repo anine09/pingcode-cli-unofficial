@@ -76,8 +76,6 @@ export type Config = {
   userToken?: UserTokenRecord | undefined;
   /** Which slot is active; absent → inferred (D2). */
   authMode?: TokenKind | undefined;
-  /** Registered loopback callback for the browser authorize channel (D13). */
-  oauthRedirectUri?: string | undefined;
 };
 
 /** A patch for `saveConfig`: `undefined` leaves a field alone, `null` deletes it. */
@@ -107,8 +105,6 @@ export type ResolvedSettings = {
   token: TokenRecord | undefined;
   /** Which slot is active, inferred per D2 when the config does not state it. */
   authMode: TokenKind;
-  /** Loopback callback for the browser authorize channel (config only). */
-  oauthRedirectUri: string | undefined;
   sources: {
     host: SettingSource;
     apiBase: SettingSource;
@@ -318,8 +314,6 @@ export function coerceConfig(raw: unknown): Config {
   if (userToken !== undefined) config.userToken = userToken;
   const authMode = asAuthMode(record.authMode);
   if (authMode !== undefined) config.authMode = authMode;
-  const oauthRedirectUri = asString(record.oauthRedirectUri);
-  if (oauthRedirectUri !== undefined) config.oauthRedirectUri = oauthRedirectUri;
   return config;
 }
 
@@ -422,7 +416,6 @@ export function resolveSettings(input: {
     userClientSecret,
     token: activeToken,
     authMode,
-    oauthRedirectUri: file.oauthRedirectUri,
     sources: {
       host: hostSource,
       apiBase: apiBaseSource,

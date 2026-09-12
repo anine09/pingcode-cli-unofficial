@@ -147,17 +147,6 @@ describe('buildContext', () => {
     expect(settings.authMode).toBe('user');
     expect(ctx.auth.mode).toBe('user');
     expect(ctx.auth.token?.accessToken).toBe('usr'); // active slot = user
-    expect(ctx.oauth.redirectUri).toBeUndefined();
-  });
-
-  it('surfaces oauthRedirectUri on ctx.oauth and settings', () => {
-    saveConfig(
-      { host: DEFAULT_HOST, oauthRedirectUri: 'http://127.0.0.1:8732/callback' },
-      env,
-    );
-    const { ctx, settings } = buildContext({ globals, env });
-    expect(settings.oauthRedirectUri).toBe('http://127.0.0.1:8732/callback');
-    expect(ctx.oauth.redirectUri).toBe('http://127.0.0.1:8732/callback');
   });
 
   it('maps --dry-run / --json / --no-cache onto the context', () => {

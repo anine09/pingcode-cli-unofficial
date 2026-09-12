@@ -32,8 +32,6 @@ export type Ctx = {
     clientSecret?: string | undefined;
   };
   auth: AuthSession;
-  /** Loopback callback info for the browser authorize channel (D13). */
-  oauth: { redirectUri?: string | undefined };
   /** `--dry-run`: mutating requests throw `DryRunHalt` instead of being sent. */
   dryRun: boolean;
   /** `--json` */
@@ -64,7 +62,6 @@ export function createContext(options: ContextOptions = {}): Ctx {
     apiBase: options.apiBase ?? deriveApiBase(DEFAULT_HOST),
     credentials: options.credentials ?? {},
     auth: options.auth ?? { clampWarned: false, mode: 'enterprise' },
-    oauth: options.oauth ?? {},
     dryRun: options.dryRun ?? false,
     json: options.json ?? false,
     verbose,

@@ -1,32 +1,20 @@
-import { spawn } from 'node:child_process';
-import { createServer, type Server } from 'node:http';
-import { configFilePath } from '../../core/config';
-import type { Ctx } from '../../core/context';
 import { AuthError, UsageError } from '../../core/errors';
 import { redactUrl } from '../../core/redact';
 import { errLine } from '../output';
 
 /**
- * The OAuth2 authorization-code authorize step (design D12/D13) — CLI layer
- * only, because it binds a local loopback listener and (best-effort) opens a
- * browser. `core` must not do either, so this does not live there.
+ * The OAuth2 authorization-code authorize step (design D12) — CLI layer only.
  *
- * Two authorize channels share one URL builder:
- *  - **browser** — open the authorize URL, the operator logs in + consents, the
- *    browser redirects to the registered loopback and `captureCodeFromLoopback`
- *    catches the `?code=` off the redirect (same machine only);
- *  - **paste** — print the same URL, the operator generates a code by hand and
- *    pastes it (the remote/headless-safe fallback).
+ * Paste-only authorize: the CLI prints the authorize URL, the operator logs in
+ * + consents in a browser, and pastes back whatever the login flow produced
+ * (the address-bar redirect URL carrying `?code=`, or the bare code). There is
+ * no browser auto-open and no loopback listener: that channel was removed in
+ * favour of the paste flow, which works on remote/headless machines where a
+ * browser cannot be opened next to the CLI.
  *
  * The authorize URL carries only `client_id` (no secret), so it is safe to
  * print; it is still run through the caller's stderr channel, never stdout.
  */
-
-/** Default registered loopback callback (design D13). */
-export const DEFAULT_LOOPBACK_URI = 'http://127.0.0.1:8732/callback';
-
-/** The host/port the loopback binds to, parsed from the registered callback. */
-export type LoopbackTarget = { host: string; port: number };
 
 /**
  * Build the authorize URL for a host + app client id.
@@ -54,143 +42,54 @@ export function oauthRootOf(host: string): string {
   return `${origin}/oauth2`;
 }
 
-/** Print the authorize URL to **stderr** (stdout stays JSON-only in `--json`). */
+/** Print the authorize URL + paste instructions to **stderr** (stdout stays JSON-only in `--json`). */
 export function printAuthorizeUrl(url: string): void {
   // The URL carries only `client_id`, but redactUrl is applied defensively so a
   // future param is never leaked (design §5.0, R9).
   errLine(`authorize URL: ${redactUrl(url)}`);
-  errLine('open it in a browser, log in, and consent to the requested access');
+  errLine('1. open it in a browser, log in, and consent to the requested access');
+  errLine('2. the browser then redirects to a URL containing ?code=... (the page may fail to load — that is fine)');
+  errLine('3. copy the full URL from the address bar, or just the code, and paste it below');
 }
 
 /**
- * Best-effort open the authorize URL in the default browser.
+ * Pull the authorization code out of whatever the operator pasted.
  *
- * Non-fatal and never awaited for correctness: the URL is always printed to
- * stderr as the fallback, so a remote/headless operator can open it by hand.
- * Errors (no browser, unsupported platform) are swallowed.
+ * The paste accepts either the full redirect URL (the address-bar URL after
+ * login, which carries ?code=...) or a bare code. A URL that carries an
+ * `error` (OAuth denial) is surfaced as an AuthError instead of being sent
+ * to the token endpoint, where it would fail opaquely.
  */
-export async function openBrowser(url: string): Promise<void> {
-  try {
-    const platform = process.platform;
-    if (platform === 'darwin') {
-      spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
-    } else if (platform === 'win32') {
-      spawn('cmd', ['/c', 'start', '', url], { stdio: 'ignore', detached: true }).unref();
-    } else {
-      spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();
-    }
-  } catch {
-    // Best effort — the printed URL is the fallback.
+export function extractCode(pasted: string): string {
+  const trimmed = pasted.trim();
+  if (trimmed === '') {
+    throw new UsageError('no authorization code entered', {
+      hint: 'paste the code from the authorize page, or the full URL it redirected to',
+    });
   }
-}
-
-/**
- * Parse the loopback host/port out of a registered callback URI.
- *
- * Defaults to `127.0.0.1:8732` (the `DEFAULT_LOOPBACK_URI`) when the URI is
- * missing or unparseable, so a missing config never blocks the browser channel.
- */
-export function parseLoopback(redirectUri: string | undefined): LoopbackTarget {
-  const fallback: LoopbackTarget = { host: '127.0.0.1', port: 8732 };
-  if (redirectUri === undefined || redirectUri === '') return fallback;
+  // Only scheme-prefixed input is treated as a URL; a bare code is never a URL.
+  if (!/^https?:\/\//i.test(trimmed)) return trimmed;
   let url: URL;
   try {
-    url = new URL(redirectUri);
+    url = new URL(trimmed);
   } catch {
-    return fallback;
+    throw new UsageError('the pasted text looks like a URL but could not be parsed', {
+      hint: 'copy the full address-bar URL after the login redirect, or paste just the code',
+    });
   }
-  const host = url.hostname === '' ? fallback.host : url.hostname;
-  const port = url.port === '' ? fallback.port : Number(url.port);
-  return { host, port: Number.isFinite(port) && port > 0 ? port : fallback.port };
-}
-
-export type CaptureOptions = {
-  /** How long to wait for the browser redirect before giving up. */
-  timeoutMs?: number | undefined;
-};
-
-/**
- * Listen on the loopback port and resolve with the `code` (and optional
- * `domain`) the browser redirects with (design D13).
- *
- * Binds to the host/port parsed from `ctx.oauth.redirectUri` (default
- * `127.0.0.1:8732`), answers exactly one `GET` carrying a `?code=` query param
- * with a short "you can close this tab" page, then shuts the server down. A
- * request without a `code` is answered `400` and ignored (the listener keeps
- * waiting).
- *
- * Failure modes:
- *  - **timeout** → `AuthError("authorization timed out")` (exit 3), hint → use
- *    the paste channel / re-run;
- *  - **port busy** (`EADDRINUSE`) → `UsageError` (exit 2) naming the configured
- *    `oauthRedirectUri` so the operator can pick a free port.
- */
-export function captureCodeFromLoopback(
-  ctx: Ctx,
-  options: CaptureOptions = {},
-): Promise<{ code: string; domain?: string }> {
-  const redirectUri = ctx.oauth.redirectUri ?? DEFAULT_LOOPBACK_URI;
-  const { host, port } = parseLoopback(ctx.oauth.redirectUri);
-  const timeoutMs = options.timeoutMs ?? 120_000;
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const done = (fn: () => void): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn();
-    };
-
-    const server: Server = createServer((req, res) => {
-      let requestUrl: URL;
-      try {
-        requestUrl = new URL(req.url ?? '/', redirectUri);
-      } catch {
-        res.statusCode = 400;
-        res.end('bad request');
-        return;
-      }
-      const code = requestUrl.searchParams.get('code');
-      if (code === null || code === '') {
-        res.statusCode = 400;
-        res.end('missing code');
-        return;
-      }
-      const domain = requestUrl.searchParams.get('domain') ?? undefined;
-      res.statusCode = 200;
-      res.setHeader('content-type', 'text/html; charset=utf-8');
-      res.end('<!doctype html><html><body>You can close this tab and return to the terminal.</body></html>');
-      server.close(() => done(() => resolve({ code, ...(domain === undefined ? {} : { domain }) })));
+  const error = url.searchParams.get('error');
+  if (error !== null) {
+    const description = url.searchParams.get('error_description');
+    const suffix = description === null ? '' : ` (${description})`;
+    throw new AuthError(`authorization was denied: ${error}${suffix}`, {
+      hint: 're-run `pingcode auth login` and approve the consent screen',
     });
-
-    server.once('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE') {
-        done(() =>
-          reject(
-            new UsageError(`the loopback port ${port} is already in use`, {
-              hint:
-                `another process is listening on ${redirectUri}; stop it, or set a free port in ` +
-                `${configFilePath(process.env)} as "oauthRedirectUri": "http://127.0.0.1:<free-port>/callback"`,
-            }),
-          ),
-        );
-        return;
-      }
-      done(() => reject(new AuthError(`could not start the OAuth loopback listener: ${error.message}`)));
+  }
+  const code = url.searchParams.get('code');
+  if (code === null || code === '') {
+    throw new UsageError('the pasted URL carries no `code` parameter', {
+      hint: 'copy the full address-bar URL after the login redirect, or paste just the code',
     });
-
-    const timer = setTimeout(() => {
-      server.close();
-      done(() =>
-        reject(
-          new AuthError('authorization timed out', {
-            hint: 're-run `pingcode auth login`, or choose the paste channel to enter the code manually',
-          }),
-        ),
-      );
-    }, timeoutMs);
-
-    server.listen(port, host);
-  });
+  }
+  return code;
 }

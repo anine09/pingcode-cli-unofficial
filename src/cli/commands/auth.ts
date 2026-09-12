@@ -20,12 +20,7 @@ import { clearMetadataCache } from '../../core/metadata';
 import { maskIdentifier } from '../../core/redact';
 import { addGlobalOptions } from '../globals';
 import { errLine, formatTimestamp, paint, printJson } from '../output';
-import {
-  buildAuthorizeUrl,
-  captureCodeFromLoopback,
-  openBrowser,
-  printAuthorizeUrl,
-} from './oauth';
+import { buildAuthorizeUrl, extractCode, printAuthorizeUrl } from './oauth';
 import { contextFor, modeOf, printFields } from './common';
 
 /**
@@ -47,16 +42,13 @@ import { contextFor, modeOf, printFields } from './common';
  */
 
 type AuthMode = 'enterprise' | 'user';
-type AuthorizeChannel = 'browser' | 'paste';
 
 type LoginFlags = {
   clientId?: string | undefined;
   clientSecret?: string | undefined;
   save?: boolean | undefined;
   mode?: string | undefined;
-  /** Authorize channel: browser (loopback) | paste (manual code). Omit → interactive prompt. */
-  channel?: string | undefined;
-  /** Authorization code (paste channel, or to skip the browser loopback entirely). */
+  /** Authorization code (skips the interactive paste). */
   code?: string | undefined;
 };
 
@@ -75,26 +67,14 @@ type StatusCheck =
 
 /**
  * Test seams for the interactive login steps (design D13). Production defaults
- * read from the terminal (stderr); tests stub these so no TTY or browser is
- * needed. `captureCode` defaults to the real loopback; the browser-channel
- * command test stubs it, while `captureCodeFromLoopback` itself is unit-tested
- * against a real `127.0.0.1` listener.
+ * read from the terminal (stderr); tests stub these so no TTY is needed.
  */
 export const loginHooks: {
   selectMode: (json: boolean) => Promise<AuthMode>;
-  selectChannel: (json: boolean) => Promise<AuthorizeChannel>;
-  openBrowser: (url: string) => void;
-  captureCode: (
-    ctx: import('../../core/context').Ctx,
-    opts?: { timeoutMs?: number },
-  ) => Promise<{ code: string; domain?: string }>;
-  readCode: (json: boolean) => Promise<string>;
+  readPaste: (json: boolean) => Promise<string>;
 } = {
   selectMode: defaultSelectMode,
-  selectChannel: defaultSelectChannel,
-  openBrowser,
-  captureCode: captureCodeFromLoopback,
-  readCode: readCodeFromTerminal,
+  readPaste: readPasteFromTerminal,
 };
 
 export function registerAuthCommands(program: Command): void {
@@ -113,8 +93,7 @@ export function registerAuthCommands(program: Command): void {
         '--mode <mode>',
         'auth mode: user (authorization_code, default) or enterprise (client_credentials)',
       )
-      .option('--channel <channel>', 'user authorize channel: browser (default) | paste')
-      .option('--code <code>', 'authorization code (paste channel, or to skip the browser loopback)'),
+      .option('--code <code>', 'authorization code (skips the interactive paste)'),
     { hidden: true },
   ).action(async (flags: LoginFlags, command: Command) => {
     await runLogin(flags, command);
@@ -206,20 +185,16 @@ async function runLogin(flags: LoginFlags, command: Command): Promise<void> {
   // --- user (authorization_code) path (design D12) ---
   const clientId = requireClientId(ctx.credentials.clientId);
 
-  // 1. channel: browser (loopback) or paste (manual code).
-  const channel = await resolveChannel(flags.channel, ctx.json);
-  // 2. build + print the authorize URL (stderr); best-effort open the browser.
+  // 1. build + print the authorize URL + paste instructions (stderr); no browser, no loopback.
   const authorizeUrl = buildAuthorizeUrl(settings.host, clientId);
   printAuthorizeUrl(authorizeUrl);
-  if (channel === 'browser') loginHooks.openBrowser(authorizeUrl);
 
-  // 3. obtain the code. An explicit --code skips the channel entirely (non-interactive).
+  // 2. obtain the code: an explicit --code skips the paste prompt entirely (non-interactive);
+  //    otherwise the operator pastes the redirect URL (or bare code) and extractCode parses it.
   const code =
     flags.code !== undefined && flags.code !== ''
       ? flags.code
-      : channel === 'paste'
-        ? await loginHooks.readCode(ctx.json)
-        : (await loginHooks.captureCode(ctx)).code;
+      : extractCode(await loginHooks.readPaste(ctx.json));
 
   // 4. exchange the code → user token (persists userToken + authMode='user').
   const token = await acquireUserToken(ctx, code);
@@ -354,15 +329,6 @@ async function resolveMode(flag: string | undefined, json: boolean): Promise<Aut
     throw new UsageError(`--mode must be "enterprise" or "user", got "${flag}"`);
   }
   return await loginHooks.selectMode(json);
-}
-
-/** Resolve the authorize channel: an explicit --channel wins, else the interactive hook. */
-async function resolveChannel(flag: string | undefined, json: boolean): Promise<AuthorizeChannel> {
-  if (flag === 'browser' || flag === 'paste') return flag;
-  if (flag !== undefined && flag !== '') {
-    throw new UsageError(`--channel must be "browser" or "paste", got "${flag}"`);
-  }
-  return await loginHooks.selectChannel(json);
 }
 
 function requireClientId(clientId: string | undefined): string {
@@ -570,22 +536,17 @@ async function promptHidden(question: string, json: boolean): Promise<string> {
   return trimmed;
 }
 
-/** Read the pasted authorization code (stderr prompt; never stdout). */
-async function readCodeFromTerminal(json: boolean): Promise<string> {
+/** Read the pasted authorization code or redirect URL (stderr prompt; never stdout). */
+async function readPasteFromTerminal(json: boolean): Promise<string> {
   if (json || process.stdin.isTTY !== true) {
     throw new UsageError('no authorization code available', {
-      hint: 'run from a terminal to paste the code, or use the browser channel',
+      hint: 'run from a terminal to paste the code or redirect URL, or pass --code <code>',
     });
   }
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
-    const answer = (await rl.question('authorization code: ')).trim();
-    if (answer === '') {
-      throw new UsageError('no authorization code entered', {
-        hint: 'paste the code from the authorize page',
-      });
-    }
-    return answer;
+    // The raw paste is returned (trimmed); extractCode decides what it means.
+    return (await rl.question('authorization code or redirect URL: ')).trim();
   } finally {
     rl.close();
   }
@@ -628,13 +589,4 @@ async function defaultSelectMode(json: boolean): Promise<AuthMode> {
     { key: 'user', label: 'authorization_code — acts as you (default)' },
     { key: 'enterprise', label: 'client_credentials — app/admin identity' },
   ], 'user');
-}
-
-/** Default channel prompt: pre-selects `browser` (design D12 step 4). */
-async function defaultSelectChannel(json: boolean): Promise<AuthorizeChannel> {
-  if (json || process.stdin.isTTY !== true) return 'browser';
-  return await promptChoice<AuthorizeChannel>('authorize via', [
-    { key: 'browser', label: 'open the URL, you log in + consent, CLI catches the redirect' },
-    { key: 'paste', label: 'print the URL, you paste the code you generated' },
-  ], 'browser');
 }

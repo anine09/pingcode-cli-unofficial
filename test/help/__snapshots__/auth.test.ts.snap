@@ -16,7 +16,7 @@ Commands:
 "
 `;
 
-exports[`auth login --help > pins the mode/channel/code flag surface (design D10/D12) 1`] = `
+exports[`auth login --help > pins the mode/code flag surface (design D10/D12) 1`] = `
 "Usage: pingcode auth login [options]
 
 acquire a token (user token by default) and verify it
@@ -27,8 +27,7 @@ Options:
   --save                    also store the client id/secret in the config file (mode 0600)
   --mode <mode>             auth mode: user (authorization_code, default) or enterprise
                             (client_credentials)
-  --channel <channel>       user authorize channel: browser (default) | paste
-  --code <code>             authorization code (paste channel, or to skip the browser loopback)
+  --code <code>             authorization code (skips the interactive paste)
   -h, --help                display help for command
 "
 `;

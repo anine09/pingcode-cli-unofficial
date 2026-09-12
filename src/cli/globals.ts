@@ -154,7 +154,6 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       clampWarned: false,
       mode,
     },
-    oauth: { redirectUri: settings.oauthRedirectUri },
     dryRun: input.globals.dryRun,
     json: input.globals.json,
     verbose: input.globals.verbose,

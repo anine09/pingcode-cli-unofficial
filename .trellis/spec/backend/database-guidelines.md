@@ -13,7 +13,7 @@ There is no ORM, no migrations, no SQL. Persistence is two things under `~/.ping
 
 | Path | Contents | Written by |
 |---|---|---|
-| `~/.pingcode/config.json` | `host`, `clientId`, `clientSecret` (only with `--save`), the active token slot + its `kind`, `authMode`, `oauthRedirectUri` | `core/config.ts` |
+| `~/.pingcode/config.json` | `host`, `clientId`, `clientSecret` (only with `--save`), the active token slot + its `kind`, `authMode` | `core/config.ts` |
 | `~/.pingcode/cache/<sha256>.json` | resolved metadata lists (types, states, priorities, sprints, users, projects) | `core/metadata.ts` |
 
 Nothing else in the codebase may read or write these files. `cli/` is forbidden from importing
@@ -47,7 +47,6 @@ type Config = {
   host?; apiBase?;
   clientId?; clientSecret?;         // ENTERPRISE app creds (client_credentials)
   userClientId?; userClientSecret?; // USER app creds (authorization_code) — a SEPARATE app
-  oauthRedirectUri?: string;        // registered loopback callback for the browser channel
   token?: TokenRecord;              // ENTERPRISE slot (legacy field name kept)
   userToken?: UserTokenRecord;      // USER slot
   authMode?: 'enterprise' | 'user'; // which slot is active
@@ -66,7 +65,7 @@ type Config = {
    requires `kind:'user'` + `refreshToken`) never matches it. `coerceUserToken` rejects a
    `userToken` whose `kind !== 'user'` or that lacks a `refreshToken`.
 3. **`coerceConfig` must coerce every known key.** It drops unknown keys; the NEW keys
-   (`userToken`, `authMode`, `oauthRedirectUri`, `kind`, `refreshToken`) are known and MUST be
+   (`userToken`, `authMode`, `kind`, `refreshToken`) are known and MUST be
    coerced or they vanish on the next save (silent data loss).
 4. **Mode-aware `persistToken`.** The single hook routes by `token.kind`: `kind==='user'`
    writes `{ userToken, authMode:'user' }`; otherwise `{ token, authMode:'enterprise' }`. Every
