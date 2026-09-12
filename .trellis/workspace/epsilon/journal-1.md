@@ -174,3 +174,39 @@ spec 七处过时点修复后发布 2.0.0（breaking: paste-only login 删 --cha
 ### Next Steps
 
 - monitor npm 2.0.0 安装反馈（paste-only login UX）
+
+
+## Session 5: bootstrap guidelines done
+
+**Date**: 2026-09-12
+**Task**: bootstrap guidelines done
+**Branch**: `main`
+
+### Summary
+
+00-bootstrap-guidelines 收尾：spec 已由历次任务填满，归档
+
+### Main Changes
+
+- backend spec 8 文件全部真实内容并持续同步；frontend 模板有意留空（无前端，index.md 已声明）；代码示例内嵌于各 spec
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `01cec6f` | (see git log) |
+| `689f89b` | (see git log) |
+| `7324707` | (see git log) |
+| `03b0d26` | (see git log) |
+
+### Testing
+
+- [OK] 无代码变更，仅 Trellis 流程收尾
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- join 任务将替代 bootstrap 任务作为新开发者入口
