@@ -31,6 +31,7 @@ import {
   resolveTicketTag,
   resolveTicketType,
   resolveUser,
+  type ResolveResult,
   type ShipLocator,
 } from '../../core/metadata';
 import { collect, type SearchPayload } from '../../core/paginate';
@@ -211,7 +212,7 @@ export function registerTicketCommands(parent: Command): void {
       .option('--description <text>', 'description')
       .option('--assignee <name|id>', 'assignee — must be a member of this product')
       .option('--priority <name|id>', 'priority')
-      .option('--channel <name|id>', 'submission channel — can only be set here, never patched')
+      .option('--channel <name|id>', 'submission channel — use "internal" for the web default (server-decided)')
       .option('--set <key=value>', SET_HELP, collectValue),
     { hidden: true },
   ).action(async (flags: CreateFlags, command: Command) => {
@@ -424,10 +425,22 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
       flags.priority === undefined
         ? undefined
         : await resolveTicketPriority(attemptCtx, product.id, flags.priority);
-    const channel =
-      flags.channel === undefined
-        ? undefined
-        : await resolveTicketChannel(attemptCtx, product.id, flags.channel);
+    let channel: ResolveResult | undefined;
+    if (flags.channel !== undefined) {
+      try {
+        channel = await resolveTicketChannel(attemptCtx, product.id, flags.channel);
+      } catch (raw) {
+        if (
+          raw instanceof UsageError &&
+          typeof flags.channel === 'string' &&
+          flags.channel.trim().toLowerCase() === 'internal'
+        ) {
+          errLine(paint.dim(`channel "internal" is the web default — letting the server decide`));
+        } else {
+          throw raw;
+        }
+      }
+    }
     const properties = await resolveProperties(attemptCtx, product.id, assignments);
 
     const input: CreateTicketInput = {

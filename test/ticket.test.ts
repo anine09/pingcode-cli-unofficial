@@ -489,6 +489,66 @@ describe('ticket create', () => {
     expect(run.stdout).toContain('SLC-8');
     expect(run.stderr).toContain('created SLC-8');
   });
+
+  it('drops channel_id from the dry-run plan when --channel internal is given and no tenant channel matches', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        'internal',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, propertiesPage],
+    );
+    expect(run.exit).toBe(0);
+    const plan = parseStdout(run) as { dry_run: boolean; request: { body: Record<string, unknown> } };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.body).toEqual({
+      product_id: 'prod-1',
+      title: 'x',
+      type_id: 'ty-fault',
+    });
+    expect(run.stderr).toContain('letting the server decide');
+  });
+
+  it('still resolves a real channel name and includes channel_id', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        '邮件',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, channelsPage, propertiesPage],
+    );
+    expect(run.exit).toBe(0);
+    const plan = parseStdout(run) as { dry_run: boolean; request: { body: Record<string, unknown> } };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.body).toEqual({
+      product_id: 'prod-1',
+      title: 'x',
+      type_id: 'ty-fault',
+      channel_id: 'ch-email',
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
