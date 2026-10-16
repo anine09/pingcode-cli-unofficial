@@ -412,6 +412,7 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
   const title = requireFlag(flags.title, '--title');
   const assignments = parseSetFlags(flags.set, SET_HINT);
+  let internalFallbackUsed = false;
 
   const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<CreateTicketInput>> => {
     const product = await resolveProduct(attemptCtx, flags.product);
@@ -430,12 +431,21 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
       try {
         channel = await resolveTicketChannel(attemptCtx, product.id, flags.channel);
       } catch (raw) {
-        if (
+        const isInternal =
           raw instanceof UsageError &&
           typeof flags.channel === 'string' &&
-          flags.channel.trim().toLowerCase() === 'internal'
-        ) {
-          errLine(paint.dim(`channel "internal" is the web default — letting the server decide`));
+          flags.channel.trim().toLowerCase() === 'internal';
+        // Narrow the fallback: only no-match becomes "server-decided". An
+        // ambiguous name (`matches N`) is actionable and must surface as-is.
+        // We use message-prefix matching because resolveWith throws plain
+        // UsageError for both cases; the no-match text is `no <label> matches "..."`.
+        const noMatch = isInternal && (raw as Error).message.startsWith('no ticket channel matches');
+        if (noMatch) {
+          channel = undefined;
+          if (!internalFallbackUsed) {
+            internalFallbackUsed = true;
+            errLine(paint.dim(`channel "internal" is the web default — letting the server decide`));
+          }
         } else {
           throw raw;
         }

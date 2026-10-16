@@ -48,6 +48,17 @@ const prioritiesPage = () =>
 const channelsPage = () =>
   jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'ch-email', name: '邮件' }] });
 
+const ambiguousChannelsPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 2,
+    values: [
+      { id: 'ch-internal-1', name: 'internal' },
+      { id: 'ch-internal-2', name: 'internal' },
+    ],
+  });
+
 const propertiesPage = () =>
   jsonResponse({
     page_index: 0,
@@ -548,6 +559,76 @@ describe('ticket create', () => {
       type_id: 'ty-fault',
       channel_id: 'ch-email',
     });
+  });
+
+  it('refuses a near-miss --channel value as exit 2 without the internal fallback', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        'internl',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, propertiesPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).not.toContain('letting the server decide');
+  });
+
+  it('surfaces a 500 from the channels list as exit 7 instead of swallowing it', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        'internal',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, () => jsonResponse({ code: '100000', message: 'err' }, { status: 500 }), propertiesPage],
+    );
+    expect(run.exit).toBe(7);
+    expect(run.stderr).not.toContain('letting the server decide');
+  });
+
+  it('surfaces an ambiguous channel name as exit 2 even when the value is "internal"', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        'internal',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, ambiguousChannelsPage, propertiesPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('matches 2');
+    expect(run.stderr).toContain('pass the id instead');
   });
 });
 
