@@ -59,6 +59,9 @@ const ambiguousChannelsPage = () =>
     ],
   });
 
+const customersPage = () =>
+  jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'cust-acme', name: '前阳二厂' }] });
+
 const propertiesPage = () =>
   jsonResponse({
     page_index: 0,
@@ -559,6 +562,59 @@ describe('ticket create', () => {
       type_id: 'ty-fault',
       channel_id: 'ch-email',
     });
+  });
+
+  it('includes customer_id in the dry-run plan when --customer resolves', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--customer',
+        '前阳二厂',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, customersPage, propertiesPage],
+    );
+    expect(run.exit).toBe(0);
+    const plan = parseStdout(run) as { dry_run: boolean; request: { body: Record<string, unknown> } };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.body).toEqual({
+      product_id: 'prod-1',
+      title: 'x',
+      type_id: 'ty-fault',
+      customer_id: 'cust-acme',
+    });
+  });
+
+  it('refuses an unknown customer name with exit 2 and a registry hint', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--customer',
+        'NoSuchCustomer',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, propertiesPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('ticket-customers');
   });
 
   it('refuses a near-miss --channel value as exit 2 without the internal fallback', async () => {
