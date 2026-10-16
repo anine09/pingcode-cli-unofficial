@@ -803,6 +803,27 @@ describe('product meta lookups', () => {
     expect(run.calls).toHaveLength(1);
     expect(run.stderr).toContain('matches 2');
   });
+
+  it('meta ticket-states surfaces a hint when the endpoint returns 500', async () => {
+    const run = await harness.run(
+      ['product', 'meta', 'ticket-states', '--product', IDENT, '--json'],
+      [
+        productsPage,
+        () =>
+          jsonResponse(
+            { code: '100000', message: 'Internal Server Error' },
+            { status: 500 },
+          ),
+      ],
+    );
+    expect(run.exit).toBe(7);
+    expect(run.calls).toHaveLength(2);
+    expect(run.stderr).toContain('hint');
+    expect(run.stderr).toContain('该端点当前不可用');
+    expect(run.stderr).toContain('ticket transition');
+    const payload = JSON.parse(run.stderr);
+    expect(payload.error.hint).toContain('该端点当前不可用');
+  });
 });
 
 // ---------------------------------------------------------------------------
