@@ -132,7 +132,15 @@ export type WorkItem = {
   assignee?: Ref | undefined;
   project?: Ref | undefined;
   parent?: Ref | undefined;
+  /**
+   * The work-item sprint. The wire also sends `sprint_id` as a scalar, but it is
+   * **`null` while `sprint` is a full object** on list responses in some tenants.
+   * We keep `sprint` as a parsed `Ref` and derive `sprint_id` from it when the
+   * scalar is missing, so `--json` consumers have a stable id to filter on.
+   */
   sprint?: Ref | undefined;
+  /** Derived from `sprint` when the wire sends `sprint_id: null` alongside a full sprint object. */
+  sprint_id?: string | undefined;
   board?: Ref | undefined;
   entry?: Ref | undefined;
   swimlane?: Ref | undefined;
