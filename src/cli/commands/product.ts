@@ -427,15 +427,17 @@ function registerProductMetaCommands(parent: Command): void {
     listTicketStates,
     SHIP_STATE_COLUMNS,
     async (raw) => {
-      if (raw instanceof ApiError) {
+      if (raw instanceof ApiError && raw.status !== undefined && raw.status >= 500) {
         throw new ApiError(raw.message, {
           code: raw.code,
           status: raw.status,
+          cause: raw,
           hint:
-            '该端点当前不可用（服务端错误）；创建工单不需要它——初始状态由服务端决定；' +
-            '只有 `ticket transition` 和 `list --state` 需要它。',
+            'The endpoint is currently unavailable (server error); creating a ticket does not need it — ' +
+            'the initial state is decided by the server; only `ticket transition` and `list --state` need it.',
         });
       }
+      throw raw;
     },
   );
   productScoped(

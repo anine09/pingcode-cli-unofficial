@@ -804,7 +804,7 @@ describe('product meta lookups', () => {
     expect(run.stderr).toContain('matches 2');
   });
 
-  it('meta ticket-states surfaces a hint when the endpoint returns 500', async () => {
+  it('meta ticket-states surfaces an English hint only on 5xx', async () => {
     const run = await harness.run(
       ['product', 'meta', 'ticket-states', '--product', IDENT, '--json'],
       [
@@ -819,10 +819,26 @@ describe('product meta lookups', () => {
     expect(run.exit).toBe(7);
     expect(run.calls).toHaveLength(2);
     expect(run.stderr).toContain('hint');
-    expect(run.stderr).toContain('该端点当前不可用');
+    expect(run.stderr).toContain('endpoint is currently unavailable');
     expect(run.stderr).toContain('ticket transition');
     const payload = JSON.parse(run.stderr);
-    expect(payload.error.hint).toContain('该端点当前不可用');
+    expect(payload.error.hint).toContain('endpoint is currently unavailable');
+  });
+
+  it('meta ticket-states does not attach the server-error hint to non-5xx failures', async () => {
+    const run = await harness.run(
+      ['product', 'meta', 'ticket-states', '--product', IDENT, '--json'],
+      [
+        productsPage,
+        () =>
+          jsonResponse(
+            { code: '100001', message: 'Bad Request' },
+            { status: 400 },
+          ),
+      ],
+    );
+    expect(run.exit).toBe(7);
+    expect(run.stderr).not.toContain('endpoint is currently unavailable');
   });
 });
 
