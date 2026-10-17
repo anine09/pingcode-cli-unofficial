@@ -129,6 +129,11 @@ describe('normalisation (design §8)', () => {
     const item = parseWorkItem({ id: 'w1' });
     expect(item.sprint_id).toBeUndefined();
   });
+
+  it('omits sprint_id when the wire sends sprint_id: null with no sprint object (issue #36)', () => {
+    const item = parseWorkItem({ id: 'w1', sprint_id: null });
+    expect(item.sprint_id).toBeUndefined();
+  });
 });
 
 describe('projects api', () => {
