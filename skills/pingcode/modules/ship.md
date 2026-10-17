@@ -129,7 +129,7 @@ pingcode product ticket transition SLC-7 --state 处理中 --json
 place ship demands a lookup (`pingcode product meta ticket-types --product SLC`) before a write can even be
 attempted. `--channel` can only be set at create time; there is no way to change it afterwards.
 `--customer` is scoped to the product; `PATCH /v1/ship/tickets/{id}` also accepts `customer_id`, so you
-can change the customer after creation (the `update` command exposes it once this is wired up).
+can change the customer after creation (the `update` command does not expose it yet).
 
 ## 4b. Ship rules that will bite you
 
