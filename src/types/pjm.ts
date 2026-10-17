@@ -127,7 +127,12 @@ export type WorkItem = {
    * `cli/commands/workItem.ts`.
    */
   type?: Ref | string | undefined;
-  state?: Ref | undefined;
+  /**
+   * The work-item state. Some tenants send it as a bare slug string on the wire
+   * (`"open"`, `"in_progress"`) instead of a reference object; `parseWorkItemStateField`
+   * keeps the string verbatim and still parses an object through `parseRef`.
+   */
+  state?: Ref | string | undefined;
   priority?: Ref | undefined;
   assignee?: Ref | undefined;
   project?: Ref | undefined;

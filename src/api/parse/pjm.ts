@@ -115,7 +115,7 @@ export function parseWorkItem(raw: unknown): WorkItem {
     title: asString(record.title),
     description: asString(record.description),
     type: parseWorkItemTypeField(record.type),
-    state: parseRef(record.state),
+    state: parseWorkItemStateField(record.state),
     priority: parseRef(record.priority),
     assignee: parseRef(record.assignee),
     project: parseRef(record.project),
@@ -165,6 +165,18 @@ export function parseWorkItemType(raw: unknown): WorkItemType {
  * one, still goes through `parseRef`.
  */
 export function parseWorkItemTypeField(raw: unknown): Ref | string | undefined {
+  if (typeof raw === 'string' && raw !== '') return raw;
+  return parseRef(raw);
+}
+
+/**
+ * A work item's `state` field, which may arrive as a **bare slug string** on the
+ * wire (`"open"`, `"in_progress"`) rather than a reference object.
+ *
+ * `parseRef` would turn that string into `undefined`, dropping the field from
+ * `--json`. Keep the string verbatim; an object still goes through `parseRef`.
+ */
+export function parseWorkItemStateField(raw: unknown): Ref | string | undefined {
   if (typeof raw === 'string' && raw !== '') return raw;
   return parseRef(raw);
 }

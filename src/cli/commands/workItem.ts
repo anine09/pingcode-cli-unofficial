@@ -214,11 +214,17 @@ export function typeLabelOf(type: Ref | string | undefined): string {
   return refName(type);
 }
 
+/** Like `typeLabelOf` but for the `state` field, which may also arrive as a bare slug string. */
+export function stateLabelOf(state: Ref | string | undefined): string {
+  if (typeof state === 'string') return state;
+  return refName(state);
+}
+
 export const WORK_ITEM_COLUMNS: Column<WorkItem>[] = [
   { header: 'IDENTIFIER', value: (item) => item.identifier ?? item.short_id ?? item.id },
   { header: 'TITLE', value: (item) => item.title ?? '', flex: true },
   { header: 'TYPE', value: (item) => typeLabelOf(item.type) },
-  { header: 'STATE', value: (item) => refName(item.state) },
+  { header: 'STATE', value: (item) => stateLabelOf(item.state) },
   { header: 'ASSIGNEE', value: (item) => refName(item.assignee) },
   { header: 'END', value: (item) => timestampCell(item.end_at) },
 ];
@@ -1551,7 +1557,7 @@ function printWorkItem(item: WorkItem, ctx: Ctx, verb?: string): void {
       ['id', item.id],
       ['title', item.title ?? ''],
       ['type', typeLabelOf(item.type)],
-      ['state', refName(item.state)],
+      ['state', stateLabelOf(item.state)],
       ['priority', refName(item.priority)],
       ['assignee', refName(item.assignee)],
       ['project', refName(item.project)],
