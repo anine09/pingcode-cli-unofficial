@@ -105,6 +105,8 @@ export function parseWorkItem(raw: unknown): WorkItem {
       ? (record.properties as Record<string, unknown>)
       : undefined;
 
+  const sprint = parseRef(record.sprint);
+
   return {
     ...record,
     id: asString(record.id) ?? '',
@@ -115,12 +117,12 @@ export function parseWorkItem(raw: unknown): WorkItem {
     title: asString(record.title),
     description: asString(record.description),
     type: parseWorkItemTypeField(record.type),
-    state: parseRef(record.state),
+    state: parseWorkItemStateField(record.state),
     priority: parseRef(record.priority),
     assignee: parseRef(record.assignee),
     project: parseRef(record.project),
     parent: parseRef(record.parent),
-    sprint: parseRef(record.sprint),
+    sprint: sprint,
     board: parseRef(record.board),
     entry: parseRef(record.entry),
     swimlane: parseRef(record.swimlane),
@@ -141,6 +143,7 @@ export function parseWorkItem(raw: unknown): WorkItem {
     properties,
     is_archived: asBooleanFlag(record.is_archived),
     is_deleted: asBooleanFlag(record.is_deleted),
+    sprint_id: asString(record.sprint_id) ?? sprint?.id,
   };
 }
 
@@ -165,6 +168,18 @@ export function parseWorkItemType(raw: unknown): WorkItemType {
  * one, still goes through `parseRef`.
  */
 export function parseWorkItemTypeField(raw: unknown): Ref | string | undefined {
+  if (typeof raw === 'string' && raw !== '') return raw;
+  return parseRef(raw);
+}
+
+/**
+ * A work item's `state` field, which may arrive as a **bare slug string** on the
+ * wire (`"open"`, `"in_progress"`) rather than a reference object.
+ *
+ * `parseRef` would turn that string into `undefined`, dropping the field from
+ * `--json`. Keep the string verbatim; an object still goes through `parseRef`.
+ */
+export function parseWorkItemStateField(raw: unknown): Ref | string | undefined {
   if (typeof raw === 'string' && raw !== '') return raw;
   return parseRef(raw);
 }

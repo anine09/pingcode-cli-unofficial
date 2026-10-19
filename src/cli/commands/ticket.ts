@@ -31,6 +31,7 @@ import {
   resolveTicketTag,
   resolveTicketType,
   resolveUser,
+  type ResolveResult,
   type ShipLocator,
 } from '../../core/metadata';
 import { collect, type SearchPayload } from '../../core/paginate';
@@ -117,6 +118,7 @@ type CreateFlags = {
   assignee?: string | undefined;
   priority?: string | undefined;
   channel?: string | undefined;
+  customer?: string | undefined;
   set?: string[] | undefined;
 };
 
@@ -211,7 +213,8 @@ export function registerTicketCommands(parent: Command): void {
       .option('--description <text>', 'description')
       .option('--assignee <name|id>', 'assignee — must be a member of this product')
       .option('--priority <name|id>', 'priority')
-      .option('--channel <name|id>', 'submission channel — can only be set here, never patched')
+      .option('--channel <name|id>', 'submission channel — use "internal" for the web default (server-decided)')
+      .option('--customer <name|id>', 'customer 客户 — scoped to this product')
       .option('--set <key=value>', SET_HELP, collectValue),
     { hidden: true },
   ).action(async (flags: CreateFlags, command: Command) => {
@@ -411,6 +414,7 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
   const { ctx } = contextFor(command);
   const title = requireFlag(flags.title, '--title');
   const assignments = parseSetFlags(flags.set, SET_HINT);
+  let internalFallbackUsed = false;
 
   const resolve = async (attemptCtx: Ctx): Promise<ResolvedWrite<CreateTicketInput>> => {
     const product = await resolveProduct(attemptCtx, flags.product);
@@ -424,10 +428,35 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
       flags.priority === undefined
         ? undefined
         : await resolveTicketPriority(attemptCtx, product.id, flags.priority);
-    const channel =
-      flags.channel === undefined
+    let channel: ResolveResult | undefined;
+    if (flags.channel !== undefined) {
+      try {
+        channel = await resolveTicketChannel(attemptCtx, product.id, flags.channel);
+      } catch (raw) {
+        const isInternal =
+          raw instanceof UsageError &&
+          typeof flags.channel === 'string' &&
+          flags.channel.trim().toLowerCase() === 'internal';
+        // Narrow the fallback: only no-match becomes "server-decided". An
+        // ambiguous name (`matches N`) is actionable and must surface as-is.
+        // We use message-prefix matching because resolveWith throws plain
+        // UsageError for both cases; the no-match text is `no <label> matches "..."`.
+        const noMatch = isInternal && (raw as Error).message.startsWith('no ticket channel matches');
+        if (noMatch) {
+          channel = undefined;
+          if (!internalFallbackUsed) {
+            internalFallbackUsed = true;
+            errLine(paint.dim(`channel "internal" is the web default — letting the server decide`));
+          }
+        } else {
+          throw raw;
+        }
+      }
+    }
+    const customer =
+      flags.customer === undefined
         ? undefined
-        : await resolveTicketChannel(attemptCtx, product.id, flags.channel);
+        : await resolveTicketCustomer(attemptCtx, product.id, flags.customer);
     const properties = await resolveProperties(attemptCtx, product.id, assignments);
 
     const input: CreateTicketInput = {
@@ -438,11 +467,12 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
       ...(assignee === undefined ? {} : { assignee_id: assignee.id }),
       ...(priority === undefined ? {} : { priority_id: priority.id }),
       ...(channel === undefined ? {} : { channel_id: channel.id }),
+      ...(customer === undefined ? {} : { customer_id: customer.id }),
       ...(properties.value === undefined ? {} : { properties: properties.value }),
     };
 
     return {
-      resolutions: present([product, type, assignee, priority, channel, ...properties.resolutions]),
+      resolutions: present([product, type, assignee, priority, channel, customer, ...properties.resolutions]),
       value: input,
     };
   };

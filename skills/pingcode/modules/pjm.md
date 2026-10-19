@@ -258,6 +258,12 @@ pingcode project work-item link delete SCR-5 <link_id> --yes
   the id `link list` printed for the item you are on — passing the other end's id answers
   `工作项或工作项关联不存在` → exit 5.
 - Links may cross projects, and a work item may be linked to itself.
+- The two families expose **different field names for the far end**:
+  - `link list` rows expose `origin_work_item` and `target_work_item` (both are parsed as rich
+    refs carrying `identifier`, `title`, `type`, `short_id`).
+  - `relation list` rows expose `target` (a parsed ref) and `target_type` (the string kind, e.g.
+    `idea`). Generic consumer code that walks either family must read **both** spellings
+    (`origin_work_item`/`target_work_item` vs `target` + `target_type`).
 
 #### `tag` — and the list that does not exist
 

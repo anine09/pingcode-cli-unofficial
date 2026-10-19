@@ -21,6 +21,8 @@ product DELETE at all, and `PATCH` only edits three cosmetic fields.
 
 ### `product meta` — mandatory before writing an idea or ticket
 
+`product meta ticket-states` is listed for completeness, but creating a ticket does **not** need it: `ticket create` has no `--state`, and the server picks the initial state. You only need it for `ticket transition` and `list --state`.
+
 ```bash
 pingcode product meta idea-states       --product SLC --json
 pingcode product meta idea-priorities   --product SLC --json
@@ -119,7 +121,7 @@ pingcode product ticket get SLC-7 --json
 
 pingcode product ticket create --product SLC --type 故障 --title "Cannot log in" --dry-run --json
 pingcode product ticket create --product SLC --type 故障 --title "Cannot log in" \
-  --assignee zhangsan --priority P1 --channel 邮件 --json
+  --assignee zhangsan --priority P1 --channel 邮件 --customer 前阳二厂 --json
 
 pingcode product ticket update SLC-7 --title "Cannot log in (iOS)" --json
 pingcode product ticket transition SLC-7 --state 处理中 --json
@@ -128,6 +130,8 @@ pingcode product ticket transition SLC-7 --state 处理中 --json
 `--type` is **required** on `product ticket create` — `type_id` is a required body field, which is the one
 place ship demands a lookup (`pingcode product meta ticket-types --product SLC`) before a write can even be
 attempted. `--channel` can only be set at create time; there is no way to change it afterwards.
+`--customer` is scoped to the product; `PATCH /v1/ship/tickets/{id}` also accepts `customer_id`, so you
+can change the customer after creation (the `update` command does not expose it yet).
 
 ## 4b. Ship rules that will bite you
 
