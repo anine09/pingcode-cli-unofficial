@@ -105,6 +105,8 @@ export function parseWorkItem(raw: unknown): WorkItem {
       ? (record.properties as Record<string, unknown>)
       : undefined;
 
+  const sprint = parseRef(record.sprint);
+
   return {
     ...record,
     id: asString(record.id) ?? '',
@@ -120,7 +122,7 @@ export function parseWorkItem(raw: unknown): WorkItem {
     assignee: parseRef(record.assignee),
     project: parseRef(record.project),
     parent: parseRef(record.parent),
-    sprint: parseRef(record.sprint),
+    sprint: sprint,
     board: parseRef(record.board),
     entry: parseRef(record.entry),
     swimlane: parseRef(record.swimlane),
@@ -141,6 +143,7 @@ export function parseWorkItem(raw: unknown): WorkItem {
     properties,
     is_archived: asBooleanFlag(record.is_archived),
     is_deleted: asBooleanFlag(record.is_deleted),
+    sprint_id: asString(record.sprint_id) ?? sprint?.id,
   };
 }
 

@@ -105,6 +105,35 @@ describe('normalisation (design §8)', () => {
     expect(parseUser({ id: 'a0417f68e846aae315c85d24643678a9' }).id).toHaveLength(32);
     expect(parseProject({ id: '5eb623f6a70571487ea47000' }).id).toHaveLength(24);
   });
+
+  it('derives sprint_id from the sprint object when the wire sends null (issue #36)', () => {
+    const item = parseWorkItem({
+      id: 'w1',
+      sprint: { id: 's1', name: 'Sprint 7' },
+      sprint_id: null,
+    });
+    expect(item.sprint_id).toBe('s1');
+    expect(item.sprint).toEqual({ id: 's1', name: 'Sprint 7' });
+  });
+
+  it('keeps an existing sprint_id verbatim and does not overwrite it (issue #36)', () => {
+    const item = parseWorkItem({
+      id: 'w1',
+      sprint: { id: 's1', name: 'Sprint 7' },
+      sprint_id: 's2',
+    });
+    expect(item.sprint_id).toBe('s2');
+  });
+
+  it('leaves sprint_id absent when both sprint and sprint_id are missing', () => {
+    const item = parseWorkItem({ id: 'w1' });
+    expect(item.sprint_id).toBeUndefined();
+  });
+
+  it('omits sprint_id when the wire sends sprint_id: null with no sprint object (issue #36)', () => {
+    const item = parseWorkItem({ id: 'w1', sprint_id: null });
+    expect(item.sprint_id).toBeUndefined();
+  });
 });
 
 describe('projects api', () => {
