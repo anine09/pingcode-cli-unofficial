@@ -24,6 +24,7 @@ import {
 } from '../../api/ship';
 import type { Ctx } from '../../core/context';
 import { resolveProduct } from '../../core/metadata';
+import { ApiError } from '../../core/errors';
 import { collect } from '../../core/paginate';
 import type {
   ShipChannel,
@@ -362,6 +363,7 @@ function registerProductMetaCommands(parent: Command): void {
     description: string,
     load: (ctx: Ctx, productId: string) => Promise<T[]>,
     columns: Column<T>[],
+    onError?: (error: unknown) => Promise<void>,
   ): void {
     addGlobalOptions(
       meta
@@ -372,7 +374,14 @@ function registerProductMetaCommands(parent: Command): void {
     ).action(async (flags: ProductFlag, command: Command) => {
       const { ctx } = contextFor(command);
       const resolved = await resolveProduct(ctx, flags.product);
-      printCollection(await load(ctx, resolved.id), columns, modeOf(ctx));
+      try {
+        printCollection(await load(ctx, resolved.id), columns, modeOf(ctx));
+      } catch (raw) {
+        if (onError !== undefined) {
+          await onError(raw);
+        }
+        throw raw;
+      }
     });
   }
 
@@ -417,6 +426,19 @@ function registerProductMetaCommands(parent: Command): void {
     'ticket states of a product (values for --state / state_id)',
     listTicketStates,
     SHIP_STATE_COLUMNS,
+    async (raw) => {
+      if (raw instanceof ApiError && raw.status !== undefined && raw.status >= 500) {
+        throw new ApiError(raw.message, {
+          code: raw.code,
+          status: raw.status,
+          cause: raw,
+          hint:
+            'The endpoint is currently unavailable (server error); creating a ticket does not need it — ' +
+            'the initial state is decided by the server; only `ticket transition` and `list --state` need it.',
+        });
+      }
+      throw raw;
+    },
   );
   productScoped(
     'ticket-priorities',

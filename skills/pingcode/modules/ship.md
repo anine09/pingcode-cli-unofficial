@@ -21,6 +21,8 @@ product DELETE at all, and `PATCH` only edits three cosmetic fields.
 
 ### `product meta` — mandatory before writing an idea or ticket
 
+`product meta ticket-states` is listed for completeness, but creating a ticket does **not** need it: `ticket create` has no `--state`, and the server picks the initial state. You only need it for `ticket transition` and `list --state`.
+
 ```bash
 pingcode product meta idea-states       --product SLC --json
 pingcode product meta idea-priorities   --product SLC --json

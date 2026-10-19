@@ -194,6 +194,7 @@ export type ErrorPayload = {
   message: string;
   code?: string;
   exit: number;
+  hint?: string;
 };
 
 export function errorPayload(error: unknown): ErrorPayload {
@@ -202,6 +203,7 @@ export function errorPayload(error: unknown): ErrorPayload {
   const message = error instanceof Error ? error.message : String(error);
   const payload: ErrorPayload = { kind, message: redactSnippet(redactUrl(message)), exit };
   if (error instanceof PingcodeError && error.code !== undefined) payload.code = error.code;
+  if (error instanceof PingcodeError && error.hint !== undefined) payload.hint = error.hint;
   return payload;
 }
 
