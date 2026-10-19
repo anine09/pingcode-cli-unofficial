@@ -180,9 +180,17 @@ from every URL, log line, dry-run plan and error message it emits.
   or as an empty string (a blank `description`) is simply missing from the JSON. It does **not**
   distinguish the two, and a missing key is never evidence that the field does not exist. Use
   `x?.y ?? fallback`, not `'y' in x`.
+- **Some fields change shape between endpoints.** A work item's `type` is a bare slug string
+  (`"task"`, `"epic"`), never a reference object, and its `state` is an object on most tenants
+  but a bare string on a few — the CLI keeps whichever shape the wire sent, so read both with
+  `x?.name ?? x`. A work item's `sprint_id` is filled in from its `sprint` object when the API
+  sends `sprint_id: null` beside a full object, so it is safe to filter on. `link` and `relation`
+  rows name the far end differently (`origin_work_item` / `target_work_item` vs `target`) — see
+  `modules/pjm.md`.
 - `--dry-run` on a mutating command prints `{"dry_run":true,"request":{…}}` to stdout and exits 0
   without sending anything. Read requests still run, so ids are really resolved.
-- Errors in `--json` mode go to **stderr** as `{"error":{"kind":…,"message":…,"code":…,"exit":…}}`.
+- Errors in `--json` mode go to **stderr** as `{"error":{"kind":…,"message":…,"code":…,"exit":…}}`,
+  plus an optional `"hint"` when the error carries one.
 - **`pingcode api` is the exception to the shapes above**: stdout is the API's raw JSON, so `--json`
   is a no-op on its five verbs and no key is normalised away. Its own `api list` / `api describe` are
   local catalog views and do honour `--json`.
