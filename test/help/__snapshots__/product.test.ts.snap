@@ -240,7 +240,7 @@ Options:
   --description <text>  description
   --assignee <name|id>  assignee — must be a member of this product
   --priority <name|id>  priority
-  --channel <name|id>   submission channel — can only be set here, never patched
+  --channel <name|id>   submission channel — use "internal" for the web default (server-decided)
   --set <key=value>     custom property, repeatable: --set key=value. Values for select-type
                         properties are option ids, not labels. Replaces, never merges
   -h, --help            display help for command

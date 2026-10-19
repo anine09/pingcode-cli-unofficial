@@ -48,6 +48,17 @@ const prioritiesPage = () =>
 const channelsPage = () =>
   jsonResponse({ page_index: 0, page_size: 100, total: 1, values: [{ id: 'ch-email', name: '邮件' }] });
 
+const ambiguousChannelsPage = () =>
+  jsonResponse({
+    page_index: 0,
+    page_size: 100,
+    total: 2,
+    values: [
+      { id: 'ch-internal-1', name: 'internal' },
+      { id: 'ch-internal-2', name: 'internal' },
+    ],
+  });
+
 const propertiesPage = () =>
   jsonResponse({
     page_index: 0,
@@ -488,6 +499,136 @@ describe('ticket create', () => {
     expect(mutations(run)[0]?.body).toEqual({ product_id: 'prod-1', title: 'x', type_id: 'ty-fault' });
     expect(run.stdout).toContain('SLC-8');
     expect(run.stderr).toContain('created SLC-8');
+  });
+
+  it('drops channel_id from the dry-run plan when --channel internal is given and no tenant channel matches', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        'internal',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, propertiesPage],
+    );
+    expect(run.exit).toBe(0);
+    const plan = parseStdout(run) as { dry_run: boolean; request: { body: Record<string, unknown> } };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.body).toEqual({
+      product_id: 'prod-1',
+      title: 'x',
+      type_id: 'ty-fault',
+    });
+    expect(run.stderr).toContain('letting the server decide');
+  });
+
+  it('still resolves a real channel name and includes channel_id', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        '邮件',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, channelsPage, propertiesPage],
+    );
+    expect(run.exit).toBe(0);
+    const plan = parseStdout(run) as { dry_run: boolean; request: { body: Record<string, unknown> } };
+    expect(plan.dry_run).toBe(true);
+    expect(plan.request.body).toEqual({
+      product_id: 'prod-1',
+      title: 'x',
+      type_id: 'ty-fault',
+      channel_id: 'ch-email',
+    });
+  });
+
+  it('refuses a near-miss --channel value as exit 2 without the internal fallback', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        'internl',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, propertiesPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).not.toContain('letting the server decide');
+  });
+
+  it('surfaces a 500 from the channels list as exit 7 instead of swallowing it', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        'internal',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, () => jsonResponse({ code: '100000', message: 'err' }, { status: 500 }), propertiesPage],
+    );
+    expect(run.exit).toBe(7);
+    expect(run.stderr).not.toContain('letting the server decide');
+  });
+
+  it('surfaces an ambiguous channel name as exit 2 even when the value is "internal"', async () => {
+    const run = await runCli(
+      [
+        'product',
+        'ticket',
+        'create',
+        '--product',
+        'SLC',
+        '--type',
+        '故障',
+        '--title',
+        'x',
+        '--channel',
+        'internal',
+        '--dry-run',
+        '--json',
+      ],
+      [productsPage, typesPage, ambiguousChannelsPage, propertiesPage],
+    );
+    expect(run.exit).toBe(2);
+    expect(run.stderr).toContain('matches 2');
+    expect(run.stderr).toContain('pass the id instead');
   });
 });
 
