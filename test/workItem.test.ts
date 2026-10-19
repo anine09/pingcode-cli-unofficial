@@ -602,6 +602,15 @@ describe('project work-item get', () => {
     expect(run.exit).toBe(2);
     expect(run.stderr).toContain('matched 2 work items');
   });
+
+  it('renders a bare string state verbatim in the detail view (issue #34)', async () => {
+    const run = await runCli(
+      ['project', 'work-item', 'get', WI],
+      [() => jsonResponse({ id: WI, identifier: 'SCR-5', title: 'Fix', state: 'open', is_archived: 0 })],
+    );
+    expect(run.exit).toBe(0);
+    expect(run.stdout).toContain('open');
+  });
 });
 
 // ---------------------------------------------------------------------------
