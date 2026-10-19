@@ -96,6 +96,21 @@ describe('normalisation (design §8)', () => {
     expect(parseRefList('nope')).toEqual([]);
   });
 
+  it('keeps a bare string state verbatim instead of dropping it (issue #34)', () => {
+    const item = parseWorkItem({ id: 'w1', state: 'in_progress' });
+    expect(item.state).toBe('in_progress');
+  });
+
+  it('parses an object state as a Ref (issue #34)', () => {
+    const item = parseWorkItem({ id: 'w1', state: { id: 's1', name: '进行中' } });
+    expect(item.state).toEqual({ id: 's1', name: '进行中' });
+  });
+
+  it('leaves state absent when neither string nor object is given (issue #34)', () => {
+    const item = parseWorkItem({ id: 'w1' });
+    expect(item.state).toBeUndefined();
+  });
+
   it('tolerates id shapes of every kind (research §6.8)', () => {
     // A work item's `type` arrives as a bare slug string on the live API (S2b, 2026-08-04)
     // and is kept verbatim; the object form the docs imply still parses to a `Ref`.
