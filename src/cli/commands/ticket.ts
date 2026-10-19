@@ -118,6 +118,7 @@ type CreateFlags = {
   assignee?: string | undefined;
   priority?: string | undefined;
   channel?: string | undefined;
+  customer?: string | undefined;
   set?: string[] | undefined;
 };
 
@@ -213,6 +214,7 @@ export function registerTicketCommands(parent: Command): void {
       .option('--assignee <name|id>', 'assignee — must be a member of this product')
       .option('--priority <name|id>', 'priority')
       .option('--channel <name|id>', 'submission channel — use "internal" for the web default (server-decided)')
+      .option('--customer <name|id>', 'customer 客户 — scoped to this product')
       .option('--set <key=value>', SET_HELP, collectValue),
     { hidden: true },
   ).action(async (flags: CreateFlags, command: Command) => {
@@ -451,6 +453,10 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
         }
       }
     }
+    const customer =
+      flags.customer === undefined
+        ? undefined
+        : await resolveTicketCustomer(attemptCtx, product.id, flags.customer);
     const properties = await resolveProperties(attemptCtx, product.id, assignments);
 
     const input: CreateTicketInput = {
@@ -461,11 +467,12 @@ async function runCreate(flags: CreateFlags, command: Command): Promise<void> {
       ...(assignee === undefined ? {} : { assignee_id: assignee.id }),
       ...(priority === undefined ? {} : { priority_id: priority.id }),
       ...(channel === undefined ? {} : { channel_id: channel.id }),
+      ...(customer === undefined ? {} : { customer_id: customer.id }),
       ...(properties.value === undefined ? {} : { properties: properties.value }),
     };
 
     return {
-      resolutions: present([product, type, assignee, priority, channel, ...properties.resolutions]),
+      resolutions: present([product, type, assignee, priority, channel, customer, ...properties.resolutions]),
       value: input,
     };
   };
