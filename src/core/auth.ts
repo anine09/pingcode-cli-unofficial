@@ -1,4 +1,4 @@
-import type { TokenRecord } from './config';
+import { normalizeToken, type TokenRecord } from './config';
 import type { Ctx } from './context';
 import { AuthError } from './errors';
 import { redactUrl } from './redact';
@@ -229,6 +229,64 @@ export async function refreshUserToken(ctx: Ctx, refreshToken: string): Promise<
   return token;
 }
 
+/** Hint shared by every "the PAT did not work" error path. */
+export const PAT_HINT =
+  'personal access tokens cannot be renewed by this CLI: check that it is not expired or revoked, ' +
+  'that its scopes cover this endpoint, or create a new token in PingCode personal settings and run ' +
+  '`pingcode auth login --mode pat --token <token>` (or set PINGCODE_TOKEN)';
+
+/**
+ * Install a personal access token (Design: PAT support).
+ *
+ * A PAT is minted in PingCode personal settings and pasted in; the CLI never
+ * exchanges or refreshes it, so it is stored as-is with `expiresAtMs: 0`
+ * (validity is server-side and unknown here) and flagged `unrefreshable`. The
+ * `Bearer ` prefix is stripped so both `Bearer <token>` and a bare token work.
+ */
+export function setPersonalAccessToken(
+  ctx: Ctx,
+  raw: string,
+  options: { persist?: boolean } = {},
+): TokenRecord {
+  const accessToken = normalizeToken(raw);
+  if (accessToken === '') {
+    throw new AuthError('the personal access token is empty', { hint: PAT_HINT });
+  }
+  const now = ctx.now();
+  const token: TokenRecord = {
+    accessToken,
+    expiresAtMs: 0,
+    obtainedAtMs: now,
+    kind: 'pat',
+    unrefreshable: true,
+  };
+  ctx.auth.token = token;
+  ctx.auth.mode = 'pat';
+  // `persist: false` lets the caller verify the token first, so a token that
+  // PingCode rejects with 401 never overwrites a working slot on disk.
+  if (options.persist !== false) ctx.persistToken?.(token);
+  return token;
+}
+
+/**
+ * A PAT itself, when one is stored for `pat` mode.
+ *
+ * Deliberately bypasses the freshness guard: `expiresAtMs` is unknown for a
+ * PAT, and a proactive "refresh" is impossible anyway. `force` means the
+ * previous request came back `401`, i.e. the token was rejected — retrying it
+ * would fail identically, so this is where the actionable error is raised.
+ */
+function personalAccessToken(ctx: Ctx, force: boolean): string {
+  const accessToken = ctx.auth.token?.accessToken ?? '';
+  if (accessToken === '') {
+    throw new AuthError('no personal access token configured', { hint: PAT_HINT });
+  }
+  if (force) {
+    throw new AuthError('PingCode rejected the personal access token (401)', { hint: PAT_HINT });
+  }
+  return accessToken;
+}
+
 /**
  * Return a usable access token, acquiring one if needed.
  *
@@ -238,6 +296,10 @@ export async function refreshUserToken(ctx: Ctx, refreshToken: string): Promise<
  *  2. reactive — `core/http.ts` calls this with `{force: true}` after a single
  *     `401`, and replays the request once. It never recurses.
  *
+ * `pat` mode short-circuits both: a personal access token is pasted in by the
+ * operator and cannot be minted or refreshed here, so it is returned as-is and a
+ * rejection surfaces as an actionable `AuthError` instead of a retry.
+ *
  * Re-acquisition is serialised behind one in-flight promise so concurrent calls
  * in a single process cannot stampede the token endpoint.
  */
@@ -246,6 +308,7 @@ export async function ensureFreshToken(
   options: { force?: boolean } = {},
 ): Promise<string> {
   const force = options.force === true;
+  if (ctx.auth.mode === 'pat') return personalAccessToken(ctx, force);
   if (force) {
     ctx.auth.inflight = undefined;
     // Enterprise re-acquires from the stored credentials, so the stale token can
@@ -277,6 +340,13 @@ export async function ensureFreshToken(
  * swallowed — it surfaces as an actionable `AuthError` (R5).
  */
 async function acquireForMode(ctx: Ctx): Promise<TokenRecord> {
+  if (ctx.auth.mode === 'pat') {
+    // Unreachable in practice (`ensureFreshToken` short-circuits pat mode); kept
+    // so the "no magic token endpoint for a PAT" contract is explicit.
+    throw new AuthError('a personal access token cannot be acquired or refreshed', {
+      hint: PAT_HINT,
+    });
+  }
   if (ctx.auth.mode === 'user') {
     const refreshToken = ctx.auth.token?.refreshToken;
     if (refreshToken === undefined) {

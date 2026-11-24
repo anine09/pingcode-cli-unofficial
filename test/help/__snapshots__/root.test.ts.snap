@@ -16,7 +16,8 @@ Options:
   -h, --help             display help for command
 
 Commands:
-  auth                   authenticate against PingCode (enterprise app or user token)
+  auth                   authenticate against PingCode (enterprise app, user token or personal
+                         access token)
   api                    通用逃生舱: call any documented v1 endpoint directly (catalog-checked
                          passthrough)
   resolve                name → id: resolve a name, alias or id for any of the CLI's lookup kinds
