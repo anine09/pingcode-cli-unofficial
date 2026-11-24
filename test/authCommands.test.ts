@@ -745,3 +745,52 @@ describe('auth status / logout — pat mode', () => {
     expect(out.check?.user).toBe('王五');
   });
 });
+
+describe('review fixes — credential hygiene', () => {
+  it('logout --all also removes the user-app credentials (they are separate fields)', async () => {
+    writeConfig({
+      ...baseConfig(),
+      userClientId: 'user-client',
+      userClientSecret: 'user-secret',
+      userToken: { accessToken: 'u', refreshToken: 'r', expiresAtMs: EXPIRES, obtainedAtMs: NOW, kind: 'user' },
+    });
+
+    const run = await runCli(['auth', 'logout', '--all', '--json'], []);
+    expect(run.exit).toBe(0);
+    const cleared = (JSON.parse(run.stdout) as { cleared: string[] }).cleared;
+    expect(cleared).toEqual(
+      expect.arrayContaining(['user_client_id', 'user_client_secret']),
+    );
+
+    const cfg = readConfig();
+    expect(cfg.userClientId).toBeUndefined();
+    expect(cfg.userClientSecret).toBeUndefined();
+    expect(cfg.userToken).toBeUndefined();
+    expect(cfg.clientId).toBeUndefined();
+    expect(cfg.host).toBe('https://open.pingcode.com');
+  });
+
+  it('login json reports the freshly acquired token as refreshable and stored', async () => {
+    writeConfig({ host: 'https://open.pingcode.com' }); // fresh machine: no token yet
+    const run = await runCli(
+      ['auth', 'login', '--mode', 'enterprise', '--client-id', 'c', '--client-secret', 's', '--json'],
+      [() => jsonResponse({ access_token: 'tok', expires_in: 2592000, token_type: 'Bearer' })],
+    );
+    expect(run.exit).toBe(0);
+    const out = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(out.token_source).toBe('file'); // it was just persisted
+    expect(out.token_refreshable).toBe(true); // not the stale pre-login false
+  });
+
+  it('a PINGCODE_TOKEN pasted as "Bearer <token>" is normalised exactly once', async () => {
+    process.env.PINGCODE_TOKEN = 'Bearer ENV-PAT';
+    try {
+      const run = await runCli(['auth', 'status', '--json'], []);
+      const out = JSON.parse(run.stdout) as Record<string, unknown>;
+      expect(out.auth_mode).toBe('pat');
+      expect(run.stdout).not.toContain('Bearer Bearer');
+    } finally {
+      delete process.env.PINGCODE_TOKEN;
+    }
+  });
+});

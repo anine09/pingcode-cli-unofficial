@@ -437,3 +437,26 @@ describe('coerceConfig — patToken slot', () => {
     expect(coerceConfig({ authMode: 'pat' })).toEqual({ authMode: 'pat' });
   });
 });
+
+describe('normalizeToken — pasted credentials', () => {
+  it('strips a Bearer prefix from PINGCODE_TOKEN so the wire header is not doubled', () => {
+    const resolved = resolveSettings({ env: { PINGCODE_TOKEN: '  Bearer abc  ' }, file: {} });
+    expect(resolved.token?.accessToken).toBe('abc');
+  });
+
+  it('normalises the on-disk pat slot too (hand-edited configs)', () => {
+    // On-disk values always pass through coerceConfig (loadConfig), which is
+    // where the normalisation happens.
+    const file = coerceConfig({
+      patToken: {
+        accessToken: 'Bearer abc',
+        expiresAtMs: 0,
+        obtainedAtMs: 0,
+        kind: 'pat',
+        unrefreshable: true,
+      },
+    });
+    const resolved = resolveSettings({ env: {}, file });
+    expect(resolved.token?.accessToken).toBe('abc');
+  });
+});

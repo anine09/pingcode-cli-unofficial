@@ -347,6 +347,18 @@ function asAuthMode(raw: unknown): TokenKind | undefined {
   return raw === 'enterprise' || raw === 'user' || raw === 'pat' ? raw : undefined;
 }
 
+/**
+ * Strip a pasted `Bearer ` prefix and surrounding whitespace from a token.
+ *
+ * Both entry points go through this: a token copied from documentation is often
+ * written `Bearer <token>`, and `Authorization: Bearer Bearer <token>` would fail
+ * with an unhelpful 401. Normalising once at the boundary keeps `PINGCODE_TOKEN`
+ * and `auth login --mode pat --token` behaving identically.
+ */
+export function normalizeToken(raw: string): string {
+  return raw.trim().replace(/^Bearer\s+/i, '').trim();
+}
+
 /** Coerce the personal-access-token slot: must be `kind:'pat'`, never refreshable. */
 function coercePatToken(raw: unknown): TokenRecord | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
@@ -354,7 +366,12 @@ function coercePatToken(raw: unknown): TokenRecord | undefined {
   if (asAuthMode(record.kind) !== 'pat') return undefined;
   const base = coerceTokenBase(record);
   if (base === undefined) return undefined;
-  const token: TokenRecord = { ...base, kind: 'pat', unrefreshable: true };
+  const token: TokenRecord = {
+    ...base,
+    accessToken: normalizeToken(base.accessToken),
+    kind: 'pat',
+    unrefreshable: true,
+  };
   const scope = asString(record.scope);
   if (scope !== undefined) token.scope = scope;
   return token;
@@ -442,7 +459,10 @@ export function resolveSettings(input: {
 
   // Personal access token: `PINGCODE_TOKEN` (env) is the CI/CD entry point and
   // needs no config file at all; the file slot serves `auth login --mode pat`.
-  const envToken = readEnv(env, ENV_TOKEN);
+  // Normalised at the boundary (a raw `Bearer <token>` copy-paste must not become
+  // `Bearer Bearer <token>` on the wire).
+  const envTokenRaw = readEnv(env, ENV_TOKEN);
+  const envToken = envTokenRaw === undefined ? undefined : normalizeToken(envTokenRaw);
 
   // Active-mode inference (D2): an env PAT always wins (flag → env → file precedence,
   // and its whole point is "run with nothing but the token on disk"), then an

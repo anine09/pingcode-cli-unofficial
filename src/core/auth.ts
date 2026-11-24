@@ -1,4 +1,4 @@
-import type { TokenRecord } from './config';
+import { normalizeToken, type TokenRecord } from './config';
 import type { Ctx } from './context';
 import { AuthError } from './errors';
 import { redactUrl } from './redact';
@@ -248,7 +248,7 @@ export function setPersonalAccessToken(
   raw: string,
   options: { persist?: boolean } = {},
 ): TokenRecord {
-  const accessToken = raw.trim().replace(/^Bearer\s+/i, '').trim();
+  const accessToken = normalizeToken(raw);
   if (accessToken === '') {
     throw new AuthError('the personal access token is empty', { hint: PAT_HINT });
   }

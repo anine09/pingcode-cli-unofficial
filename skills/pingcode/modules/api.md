@@ -107,10 +107,12 @@ the credentials from `pingcode auth login`.
 ## 5. Everything else behaves exactly as it does elsewhere
 
 `--dry-run` halts every write (search reads excepted, above) and prints the full request plan
-with the `Authorization` header and any `client_secret` redacted. A `401` re-acquires the token
-and replays once. A `429` honours `x-pc-retry-after` once. Any `2xx` is success. The exit-code
-table in [`../SKILL.md`](../SKILL.md) applies unchanged; on a `403` the scope the docs declare
-for that endpoint is printed to stderr (or an honest "the docs declare no scope" when they
+with the `Authorization` header and any `client_secret` redacted. A `401` on a **refreshable**
+token (enterprise or user) re-acquires it and replays once; with a **personal access token**
+there is nothing to re-acquire, so it fails immediately with exit `3` and tells you to replace
+the token (expired or revoked). A `429` honours `x-pc-retry-after` once. Any `2xx` is success. The
+exit-code table in [`../SKILL.md`](../SKILL.md) applies unchanged; on a `403` the scope the docs
+declare for that endpoint is printed to stderr (or an honest "the docs declare no scope" when they
 declare none).
 
 The rate limit is shared with everything else, so a `--all` sweep over a large collection spends

@@ -382,7 +382,14 @@ function finishLogin(
   const credentialsStored = alreadyInFile || (storeId && storeSecret);
 
   const mode = modeOf(built.ctx);
-  const effectiveSource = outcome.tokenSource ?? settings.tokenSource;
+  // Report the token this login just produced, not the pre-login snapshot in
+  // `settings`: a fresh `settings.token` is undefined/source-"none" before the
+  // first login, so reading it here would describe the old state (e.g.
+  // `token_refreshable: false` for a token the CLI can renew).
+  const effectiveSource: 'flag' | 'env' | 'file' | 'prompt' | 'none' = isPat
+    ? (outcome.tokenSource ?? 'none')
+    : 'file'; // the non-pat token was just written to its slot by persistToken
+  const refreshable = !isPat; // enterprise tokens are re-acquirable, user tokens refreshable
   if (isPat && outcome.verifiedWith === undefined) {
     // Machine-readable on stdout, human-readable on stderr — warnings never pollute
     // the JSON payload but must still reach a `--json` caller's terminal.
@@ -407,7 +414,7 @@ function finishLogin(
       // A PAT's validity is set in PingCode and unknown to us — never invent one.
       token_expires_at: isPat ? null : Math.floor(outcome.token.expiresAtMs / 1000),
       token_source: effectiveSource,
-      token_refreshable: isPat ? false : settings.tokenRefreshable,
+      token_refreshable: refreshable,
       verified_with: outcome.verifiedWith ?? null,
     });
     return;
@@ -589,11 +596,11 @@ function runLogout(flags: LogoutFlags, command: Command): void {
   // silently point a self-hosted user back at the public cloud.
   let cleared: string[];
   if (all) {
-    // Full wipe: all three token slots + the active mode + the app credentials.
-    // `host` survives (it is not a credential) and is re-stamped so the
-    // re-read+merge in saveConfig keeps it. This restores the original
-    // pre-feature `logout` semantics; the default (no --all) is the surgical
-    // "active slot only" path below (design D14).
+    // Full wipe: all three token slots, the active mode and BOTH app credential
+    // pairs (enterprise + user, which live in separate fields). `host` survives
+    // (it is not a credential) and is re-stamped so the re-read+merge in
+    // saveConfig keeps it. Anything omitted here would be merged back from the
+    // existing file, i.e. silently "logout" while the credentials stay usable.
     saveConfig(
       {
         host: settings.host,
@@ -603,6 +610,8 @@ function runLogout(flags: LogoutFlags, command: Command): void {
         authMode: null,
         clientId: null,
         clientSecret: null,
+        userClientId: null,
+        userClientSecret: null,
       },
       process.env,
     );
@@ -613,6 +622,8 @@ function runLogout(flags: LogoutFlags, command: Command): void {
       'auth_mode',
       'client_id',
       'client_secret',
+      'user_client_id',
+      'user_client_secret',
       'metadata_cache',
     ];
   } else {

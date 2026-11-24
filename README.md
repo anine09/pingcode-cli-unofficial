@@ -128,21 +128,23 @@ The CLI authenticates as an **application**, not as a user, using the OAuth
 
 Two kinds of credential are supported, and they are independent slots in the same config file:
 
-- **app credentials** (`client_id` + `client_secret`) — the enterprise app (`client_credentials`,
-  the default in the block below) or a user-bound OAuth app (`--mode user`, authorization code);
+- **app credentials** (`client_id` + `client_secret`) — the enterprise app
+  (`client_credentials`, `--mode enterprise`) or a user-bound OAuth app (`--mode user`,
+  authorization code). Without `--mode`, `auth login` defaults to `user`;
 - **a personal access token** — created in PingCode 个人设置, pasted in with `--mode pat`, or supplied
   as `PINGCODE_TOKEN`. No app registration, no browser, no refresh.
 
 ```bash
 # public cloud (default host: https://open.pingcode.com)
-pingcode auth login --client-id <id> --client-secret <secret> --save
+pingcode auth login --mode enterprise --client-id <id> --client-secret <secret> --save
 
 # self-hosted: pass your instance host, the API is served from <host>/open
-pingcode auth login --host https://pingcode.example.com \
+pingcode auth login --mode enterprise --host https://pingcode.example.com \
   --client-id <id> --client-secret <secret> --save
 
 pingcode auth status --check     # adds one live call: GET /v1/pjm/projects?page_size=1
-pingcode auth logout             # drops the active token slot, the credentials and the metadata cache
+pingcode auth logout             # drops the active token slot and the metadata cache
+pingcode auth logout --all       # additionally drops both app credential pairs and the other slots
 ```
 
 Credentials resolve in this precedence order: **CLI flags → environment
@@ -153,9 +155,10 @@ Credentials resolve in this precedence order: **CLI flags → environment
   log in again when it expires.
 - Storage is `~/.pingcode/config.json`, mode `0600` inside a `0700` directory (a no-op on Windows).
   `PINGCODE_CONFIG_DIR` relocates it.
-- Tokens are valid ~30 days and are re-acquired **transparently**: proactively 120 s before expiry,
-  and reactively once on a `401`, replaying the original request. You never have to re-run `login`
-  while the credentials are stored.
+- App-credential tokens are valid ~30 days and are re-acquired **transparently**: proactively 120 s
+  before expiry, and reactively once on a `401`, replaying the original request. You never have to
+  re-run `login` while the credentials are stored. A personal access token is the exception — it
+  cannot be renewed, see below.
 - Repeated logins do **not** invalidate previously issued tokens, so parallel invocations are safe.
 
 ### Personal access token (脚本 / CI/CD)
