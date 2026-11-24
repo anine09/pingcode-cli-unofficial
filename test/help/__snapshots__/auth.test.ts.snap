@@ -3,7 +3,7 @@
 exports[`auth --help > auth 1`] = `
 "Usage: pingcode auth [options] [command]
 
-authenticate against PingCode (enterprise app or user token)
+authenticate against PingCode (enterprise app, user token or personal access token)
 
 Options:
   -h, --help        display help for command
@@ -11,7 +11,7 @@ Options:
 Commands:
   login [options]   acquire a token (user token by default) and verify it
   status [options]  show host, masked client id and token state
-  logout [options]  clear the active token slot (both with --all) and the metadata cache
+  logout [options]  clear the active token slot (all three with --all) and the metadata cache
   help [command]    display help for command
 "
 `;
@@ -25,9 +25,11 @@ Options:
   --client-id <id>          app client id (or PINGCODE_CLIENT_ID)
   --client-secret <secret>  app client secret (or PINGCODE_CLIENT_SECRET)
   --save                    also store the client id/secret in the config file (mode 0600)
-  --mode <mode>             auth mode: user (authorization_code, default) or enterprise
-                            (client_credentials)
+  --mode <mode>             auth mode: user (authorization_code, default), enterprise
+                            (client_credentials) or pat (personal access token)
   --code <code>             authorization code (skips the interactive paste)
+  --token <token>           personal access token for --mode pat (or PINGCODE_TOKEN; skips the
+                            hidden prompt)
   -h, --help                display help for command
 "
 `;
@@ -35,10 +37,10 @@ Options:
 exports[`auth logout --help > pins the --all flag (design D14) 1`] = `
 "Usage: pingcode auth logout [options]
 
-clear the active token slot (both with --all) and the metadata cache
+clear the active token slot (all three with --all) and the metadata cache
 
 Options:
-  --all       clear both the enterprise and user token slots (and authMode)
+  --all       clear the enterprise, user and personal-token slots (and authMode)
   -h, --help  display help for command
 "
 `;

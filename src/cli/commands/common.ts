@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import type { TokenKind } from '../../core/config';
 import type { Ctx } from '../../core/context';
 import { UsageError } from '../../core/errors';
 import {
@@ -44,7 +45,7 @@ import {
 export function contextFor(
   command: Command,
   credentials?: { clientId?: string | undefined; clientSecret?: string | undefined } | undefined,
-  mode?: 'enterprise' | 'user' | undefined,
+  mode?: TokenKind | undefined,
 ): BuiltContext {
   const globals = readGlobalOptions(command);
   return buildContext({

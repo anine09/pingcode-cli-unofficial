@@ -566,7 +566,7 @@ describe('auth logout — human output', () => {
     expect(cfg.token).toBeUndefined();
   });
 
-  it('--all logout prints both token slots as cleared', async () => {
+  it('--all logout prints every token slot as cleared (enterprise, user, pat)', async () => {
     writeConfig({
       ...baseConfig(),
       authMode: 'user',
@@ -574,6 +574,174 @@ describe('auth logout — human output', () => {
     });
     const run = await runCli(['auth', 'logout', '--all'], []);
     expect(run.exit).toBe(0);
-    expect(run.stderr).toContain('cleared token, user_token, auth_mode');
+    expect(run.stderr).toContain('cleared token, user_token, pat_token, auth_mode');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// login — personal access token (pat)
+// ---------------------------------------------------------------------------
+
+const patLoginJson = (run: CliRun): Record<string, unknown> => JSON.parse(run.stdout) as Record<string, unknown>;
+
+describe('auth login — pat mode (personal access token)', () => {
+  it('stores the pasted token, verifies with /v1/myself and leaves the other slots intact', async () => {
+    const run = await runCli(['auth', 'login', '--mode', 'pat', '--token', 'PAT-ABC', '--json'], [() => myself('张三')]);
+
+    expect(run.exit).toBe(0);
+    const out = patLoginJson(run);
+    expect(out.mode).toBe('pat');
+    expect(out.kind).toBe('pat');
+    expect(out.verified_with).toBe('GET /v1/myself');
+    expect(out.token_expires_at).toBeNull(); // validity is server-side, never invented
+    expect(out.token_source).toBe('flag');
+    expect(out.token_refreshable).toBe(false);
+    expect((out.user as { display_name?: string }).display_name).toBe('张三');
+
+    // Exactly one call — the verification; no token exchange exists for a PAT.
+    expect(run.calls).toHaveLength(1);
+    expect(run.calls[0]?.url).toBe('https://open.pingcode.com/v1/myself');
+    expect(run.calls[0]?.headers.Authorization).toBe('Bearer PAT-ABC');
+
+    const cfg = readConfig();
+    expect(cfg.authMode).toBe('pat');
+    expect((cfg.patToken as { accessToken?: string }).accessToken).toBe('PAT-ABC');
+    expect((cfg.patToken as { unrefreshable?: boolean }).unrefreshable).toBe(true);
+    // The enterprise slot is untouched (coexistence).
+    expect((cfg.token as { accessToken?: string }).accessToken).toBe('test-token');
+  });
+
+  it('accepts a pasted "Bearer <token>" form', async () => {
+    const run = await runCli(['auth', 'login', '--mode', 'pat', '--token', 'Bearer PAT-X', '--json'], [() => myself()]);
+    expect(run.exit).toBe(0);
+    expect(run.calls[0]?.headers.Authorization).toBe('Bearer PAT-X');
+    expect((readConfig().patToken as { accessToken?: string }).accessToken).toBe('PAT-X');
+  });
+
+  it('falls back to one capability probe when the token has no personal-info scope (403)', async () => {
+    const run = await runCli(['auth', 'login', '--mode', 'pat', '--token', 'PAT-ABC', '--json'], [
+      () => jsonResponse({ code: '100403', message: 'no scope' }, { status: 403 }),
+      () => jsonResponse({ values: [{ id: 'p1' }], total: 1 }),
+    ]);
+
+    expect(run.exit).toBe(0);
+    const out = patLoginJson(run);
+    expect(out.mode).toBe('pat');
+    expect(out.verified_with).toBe('GET /v1/pjm/projects?page_size=1');
+    expect(out.projects_total).toBe(1);
+    expect(run.calls).toHaveLength(2);
+    expect((readConfig().patToken as { accessToken?: string }).accessToken).toBe('PAT-ABC');
+  });
+
+  it('stores the token unverified when neither probe is in scope (two 403s)', async () => {
+    const forbidden = (): Response => jsonResponse({ code: '100403', message: 'no scope' }, { status: 403 });
+    const run = await runCli(['auth', 'login', '--mode', 'pat', '--token', 'PAT-ABC', '--json'], [forbidden, forbidden]);
+
+    expect(run.exit).toBe(0);
+    const out = patLoginJson(run);
+    expect(out.verified_with).toBeNull();
+    expect(run.stderr).toContain('stored, but no granted scope');
+    expect((readConfig().patToken as { accessToken?: string }).accessToken).toBe('PAT-ABC');
+  });
+
+  it('fails hard (exit 3) when the token is rejected with 401 — it cannot be refreshed', async () => {
+    const run = await runCli(['auth', 'login', '--mode', 'pat', '--token', 'DEAD', '--json'], [
+      () => jsonResponse({ code: '100401', message: 'bad token' }, { status: 401 }),
+    ]);
+
+    expect(run.exit).toBe(3);
+    expect(run.stderr).toContain('PINGCODE_TOKEN');
+    // Nothing usable is stored: a dead token must not overwrite a working slot.
+    expect((readConfig().patToken as { accessToken?: string } | undefined)?.accessToken).toBeUndefined();
+  });
+
+  it('uses PINGCODE_TOKEN when no --token is given', async () => {
+    process.env.PINGCODE_TOKEN = 'ENV-PAT';
+    try {
+      const run = await runCli(['auth', 'login', '--mode', 'pat', '--json'], [() => myself()]);
+      expect(run.exit).toBe(0);
+      expect(run.calls[0]?.headers.Authorization).toBe('Bearer ENV-PAT');
+    } finally {
+      delete process.env.PINGCODE_TOKEN;
+    }
+  });
+
+  it('reads the token through the hidden-prompt seam when neither flag nor env supplies one', async () => {
+    loginHooks.readToken = async () => 'HOOK-PAT';
+    const run = await runCli(['auth', 'login', '--mode', 'pat', '--json'], [() => myself()]);
+    expect(run.exit).toBe(0);
+    expect(run.calls[0]?.headers.Authorization).toBe('Bearer HOOK-PAT');
+  });
+
+  it('refuses --json without any token source, before touching the network', async () => {
+    writeConfig({ host: 'https://open.pingcode.com' });
+    const run = await runCli(['auth', 'login', '--mode', 'pat', '--json'], []);
+    expect(run.exit).toBe(2);
+    expect(run.calls).toHaveLength(0);
+    expect(run.stderr).toContain('personal access token');
+  });
+});
+
+describe('auth status / logout — pat mode', () => {
+  it('status reports pat mode from PINGCODE_TOKEN: source env, not refreshable, freshness unknown', async () => {
+    process.env.PINGCODE_TOKEN = 'ENV-PAT';
+    try {
+      const run = await runCli(['auth', 'status', '--json'], []);
+      expect(run.exit).toBe(0);
+      const out = JSON.parse(run.stdout) as Record<string, unknown>;
+      expect(out.auth_mode).toBe('pat');
+      expect(out.token_kind).toBe('pat');
+      expect(out.token_present).toBe(true);
+      expect(out.token_source).toBe('env');
+      expect(out.token_refreshable).toBe(false);
+      expect(out.token_fresh).toBeNull();
+      expect(out.token_expires_at).toBeNull();
+      expect(out.env_token_present).toBe(true);
+      // Never the token itself (redaction).
+      expect(run.stdout).not.toContain('ENV-PAT');
+    } finally {
+      delete process.env.PINGCODE_TOKEN;
+    }
+  });
+
+  it('status shows the stored personal-token slot after a pat login', async () => {
+    writeConfig({
+      ...baseConfig(),
+      authMode: 'pat',
+      patToken: { accessToken: 'P', expiresAtMs: 0, obtainedAtMs: 0, kind: 'pat', unrefreshable: true },
+    });
+    const run = await runCli(['auth', 'status', '--json'], []);
+    const out = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(out.auth_mode).toBe('pat');
+    expect(out.token_source).toBe('file');
+    expect(out.pat_token_present).toBe(true);
+    expect(run.stdout).not.toContain('"P"');
+  });
+
+  it('logout clears only the active pat slot, keeping the enterprise slot', async () => {
+    writeConfig({
+      ...baseConfig(),
+      authMode: 'pat',
+      patToken: { accessToken: 'P', expiresAtMs: 0, obtainedAtMs: 0, kind: 'pat', unrefreshable: true },
+    });
+    const run = await runCli(['auth', 'logout', '--json'], []);
+    expect(run.exit).toBe(0);
+    expect((JSON.parse(run.stdout) as { cleared: string[] }).cleared).toContain('pat_token');
+    const cfg = readConfig();
+    expect(cfg.patToken).toBeUndefined();
+    expect(cfg.authMode).toBeUndefined();
+    expect((cfg.token as { accessToken?: string }).accessToken).toBe('test-token');
+  });
+
+  it('--check in pat mode verifies with /v1/myself', async () => {
+    writeConfig({
+      ...baseConfig(),
+      authMode: 'pat',
+      patToken: { accessToken: 'P', expiresAtMs: 0, obtainedAtMs: 0, kind: 'pat', unrefreshable: true },
+    });
+    const run = await runCli(['auth', 'status', '--check', '--json'], [() => myself('王五')]);
+    const out = JSON.parse(run.stdout) as { check?: { endpoint?: string; user?: string } };
+    expect(out.check?.endpoint).toBe('GET /v1/myself');
+    expect(out.check?.user).toBe('王五');
   });
 });

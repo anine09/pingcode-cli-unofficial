@@ -98,10 +98,11 @@ field that its `PATCH` sibling preserves. Unless you truly mean "replace everyth
 | a **user-token-only** endpoint | told this CLI holds an enterprise token |
 
 The seven user-token endpoints — `/v1/myself`, `/v1/permission/my/*` (3) and
-`/v1/permission/check/*` (3) — are the only part of the API this CLI cannot reach at all: they
-need the OAuth2 authorization-code flow, which is not implemented. Note that
-`GET /v1/permission/points` **does** work. Everything else, including all 61 enterprise-token-only
-DevOps endpoints, is reachable with the credentials from `pingcode auth login`.
+`/v1/permission/check/*` (3) — need a token bound to a human: either the OAuth2
+authorization-code flow (`pingcode auth login --mode user`) or a personal access token whose
+scopes cover them (`--mode pat` / `PINGCODE_TOKEN`). Note that `GET /v1/permission/points` **does**
+work. Everything else, including all 61 enterprise-token-only DevOps endpoints, is reachable with
+the credentials from `pingcode auth login`.
 
 ## 5. Everything else behaves exactly as it does elsewhere
 

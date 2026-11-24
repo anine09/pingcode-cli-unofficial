@@ -8,6 +8,7 @@ import {
   ensureFreshToken,
   normalizeExpiry,
   refreshUserToken,
+  setPersonalAccessToken,
   tokenIsFresh,
 } from '../src/core/auth';
 import type { TokenRecord } from '../src/core/config';
@@ -522,5 +523,69 @@ describe('ensureFreshToken', () => {
       expect(fake.calls).toHaveLength(1);
       expect(fake.urls()[0]).toContain('grant_type=refresh_token');
     });
+  });
+});
+
+/**
+ * Personal access token (pat) mode. The defining property is that the CLI
+ * **cannot** mint or refresh one: a stored PAT is handed out verbatim, and a
+ * rejection is an actionable error rather than another token-endpoint round-trip.
+ */
+describe('personal access token (pat mode)', () => {
+  const patToken: TokenRecord = {
+    accessToken: 'pat-tok',
+    expiresAtMs: 0, // unknown: validity is set in PingCode personal settings
+    obtainedAtMs: NOW,
+    kind: 'pat',
+    unrefreshable: true,
+  };
+
+  function patContext(fake = createFakeFetch(() => jsonResponse({}))) {
+    const ctx = createTestContext({ fetch: fake.fetch, now: NOW, token: patToken });
+    ctx.auth.mode = 'pat';
+    return { ctx, fake };
+  }
+
+  it('returns the stored PAT verbatim — no network call, even with expiresAtMs 0', async () => {
+    const { ctx, fake } = patContext();
+    expect(await ensureFreshToken(ctx)).toBe('pat-tok');
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('refuses to invent a token when none is stored, pointing at PINGCODE_TOKEN', async () => {
+    const ctx = createTestContext({});
+    ctx.auth.mode = 'pat';
+    await expect(ensureFreshToken(ctx)).rejects.toBeInstanceOf(AuthError);
+    await expect(ensureFreshToken(ctx)).rejects.toThrow(/no personal access token/);
+  });
+
+  it('raises an actionable AuthError on force (the 401 path) instead of retrying', async () => {
+    const { ctx, fake } = patContext();
+    const error = await ensureFreshToken(ctx, { force: true }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AuthError);
+    expect((error as AuthError).hint).toContain('PINGCODE_TOKEN');
+    expect(fake.calls).toHaveLength(0); // never hits /v1/auth/token
+    expect(ctx.auth.token).toEqual(patToken); // the stored PAT survives the 401
+  });
+
+  it('setPersonalAccessToken strips a pasted Bearer prefix and persists it as unrefreshable', () => {
+    const persisted: TokenRecord[] = [];
+    const ctx = createTestContext({
+      now: NOW,
+      persistToken: (token) => {
+        persisted.push(token);
+      },
+    });
+    const token = setPersonalAccessToken(ctx, '  Bearer   abc-123  ');
+    expect(token.accessToken).toBe('abc-123');
+    expect(token.kind).toBe('pat');
+    expect(token.unrefreshable).toBe(true);
+    expect(persisted).toEqual([token]);
+    expect(ctx.auth.mode).toBe('pat');
+  });
+
+  it('rejects an empty token', () => {
+    const ctx = createTestContext({ now: NOW });
+    expect(() => setPersonalAccessToken(ctx, '   ')).toThrow(/empty/);
   });
 });

@@ -126,6 +126,13 @@ The CLI authenticates as an **application**, not as a user, using the OAuth
 
 ## Log in
 
+Two kinds of credential are supported, and they are independent slots in the same config file:
+
+- **app credentials** (`client_id` + `client_secret`) — the enterprise app (`client_credentials`,
+  the default in the block below) or a user-bound OAuth app (`--mode user`, authorization code);
+- **a personal access token** — created in PingCode 个人设置, pasted in with `--mode pat`, or supplied
+  as `PINGCODE_TOKEN`. No app registration, no browser, no refresh.
+
 ```bash
 # public cloud (default host: https://open.pingcode.com)
 pingcode auth login --client-id <id> --client-secret <secret> --save
@@ -135,12 +142,12 @@ pingcode auth login --host https://pingcode.example.com \
   --client-id <id> --client-secret <secret> --save
 
 pingcode auth status --check     # adds one live call: GET /v1/pjm/projects?page_size=1
-pingcode auth logout             # drops the token, the credentials and the metadata cache
+pingcode auth logout             # drops the active token slot, the credentials and the metadata cache
 ```
 
 Credentials resolve in this precedence order: **CLI flags → environment
-(`PINGCODE_CLIENT_ID`, `PINGCODE_CLIENT_SECRET`, `PINGCODE_HOST`) → `~/.pingcode/config.json`**.
-With a TTY attached, `auth login` prompts for anything missing.
+(`PINGCODE_CLIENT_ID`, `PINGCODE_CLIENT_SECRET`, `PINGCODE_TOKEN`, `PINGCODE_HOST`) →
+`~/.pingcode/config.json`**. With a TTY attached, `auth login` prompts for anything missing.
 
 - `--save` is what persists the client id/secret. Without it only the token is stored, so you must
   log in again when it expires.
@@ -150,6 +157,32 @@ With a TTY attached, `auth login` prompts for anything missing.
   and reactively once on a `401`, replaying the original request. You never have to re-run `login`
   while the credentials are stored.
 - Repeated logins do **not** invalidate previously issued tokens, so parallel invocations are safe.
+
+### Personal access token (脚本 / CI/CD)
+
+```bash
+# token created in PingCode 个人设置 (validity + scopes chosen there, shown only once)
+pingcode auth login --mode pat --token <token>     # store it (mode 0600, in its own slot)
+PINGCODE_TOKEN=<token> pingcode project list       # or use it for one process, no login at all
+pingcode auth status --check                       # verifies with GET /v1/myself
+```
+
+Use it when the OAuth dance is impractical — a cron job, a CI runner, a shared machine, or when you
+simply do not want to register an app. Things worth knowing:
+
+- it is **not refreshable**. There is no token endpoint to call and no `refresh_token` to exchange:
+  an expired or revoked token fails with exit code `3` (`auth:`) and points you at `auth login --mode
+  pat`, which is also what `--check` proves. The CLI never silently retries a rejected PAT.
+- its reach is whatever `scopes` you granted. Because it acts as you it can call the seven
+  user-token-only endpoints (`/v1/myself`, `/v1/permission/my/*`, `/v1/permission/check/*`), and
+  `auth login --mode pat` verifies tolerantly: `/v1/myself`, then one capability probe, then "stored
+  but unverified" when the token has no probeable scope. A `401` always fails hard — a dead token is
+  never written over a working one.
+- `PINGCODE_TOKEN` wins over the config file, so a CI job can override a developer's local login
+  without touching it. `auth status` reports which slot is active (`auth_mode`), where it came from
+  (`token_source`) and whether the CLI can renew it (`token_refreshable`).
+- `auth logout` clears only the active slot; `--all` clears the enterprise, user and pat slots plus
+  both app credential pairs, keeping `host`.
 
 ---
 
@@ -165,8 +198,9 @@ layers whose costs are completely different, and it is worth knowing which one y
 
 "Complete" (完全体) refers to **Reach**, and Reach is finished: every documented endpoint is
 invocable today. Seven of the 459 need a user token (`/v1/myself`, `/v1/permission/my/*`,
-`/v1/permission/check/*`) — run `pingcode auth login --mode user` to obtain one (it prints an
-authorize URL; paste the redirect URL back, or pass `--code`) and all 459 become callable. On the
+`/v1/permission/check/*`) — run `pingcode auth login --mode user` (it prints an authorize URL; paste
+the redirect URL back, or pass `--code`), or use a personal access token whose scopes cover them,
+and all 459 become callable. On the
 default 企业令牌 alone they are refused *before any request*, which leaves 452 actually callable.
 Ergonomics is a
 **curation backlog, not a finish line**: an endpoint earns a named command by being run against a

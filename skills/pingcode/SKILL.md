@@ -158,6 +158,21 @@ pingcode auth status --check
   served from `<host>/open` there.
 - `pingcode auth logout` removes the token, the stored credentials and the metadata cache.
 
+**No app? Use a personal access token.** If you cannot register an OAuth app — a script, a CI job,
+someone else's machine — create a token in PingCode 个人设置 (validity and `scopes` are chosen there,
+shown once) and either paste it or export it. It acts as you, needs no `client_id`/`client_secret`,
+and `PINGCODE_TOKEN` alone is enough to run any command:
+
+```bash
+PINGCODE_TOKEN=<token> pingcode project list      # no login, no config file
+pingcode auth login --mode pat --token <token>    # store it in the config file
+```
+
+A PAT cannot be refreshed: an expired or revoked token fails with exit 3 (`auth:`) and tells you to
+mint a new one. It also carries the same identity-based reach as a user token, so the seven
+user-token-only endpoints (`/v1/myself`, `/v1/permission/my/*`, `/v1/permission/check/*`) work
+whenever the token's scopes cover them.
+
 **Security:** a Client Credentials token has organisation-wide system-administrator authority and is
 valid for 30 days. It is not tied to a user. Never print it, never copy it into a file in a
 repository, and treat `~/.pingcode/config.json` as a secret. The CLI redacts the secret and the token
@@ -246,6 +261,10 @@ pingcode auth login --client-id <id> --client-secret <secret> --save
 pingcode auth status
 pingcode auth status --check      # adds one live API call: GET /v1/pjm/projects?page_size=1
 pingcode auth logout
+
+# personal access token — no OAuth app needed (scripts, CI, shared machines)
+pingcode auth login --mode pat --token <token>
+PINGCODE_TOKEN=<token> pingcode project list
 ```
 
 ### Settings — 后台设置
