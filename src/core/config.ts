@@ -29,13 +29,22 @@ export const ENV_CLIENT_SECRET = 'PINGCODE_CLIENT_SECRET';
 /** User-token app credentials (authorization_code). Separate from the enterprise app. */
 export const ENV_USER_CLIENT_ID = 'PINGCODE_USER_CLIENT_ID';
 export const ENV_USER_CLIENT_SECRET = 'PINGCODE_USER_CLIENT_SECRET';
+/** Personal access token, created in PingCode personal settings (no app, no refresh). */
+export const ENV_TOKEN = 'PINGCODE_TOKEN';
 
 /**
- * The grant a token came from. `enterprise` = `client_credentials` (app/admin,
- * no refresh); `user` = `authorization_code` (human-bound, refreshable). A
- * legacy on-disk token with no `kind` coerces to `enterprise` (R6).
+ * Which credential produced the active token.
+ *
+ * - `enterprise` = `client_credentials` (app/admin, no refresh);
+ * - `user` = `authorization_code` (human-bound, refreshable);
+ * - `pat` = a personal access token minted in PingCode personal settings, pasted
+ *   into the CLI or supplied through `PINGCODE_TOKEN`. It carries the user's
+ *   identity and its own `scopes`, but **cannot be refreshed or re-acquired** —
+ *   only the operator can issue a new one.
+ *
+ * A legacy on-disk token with no `kind` coerces to `enterprise` (R6).
  */
-export type TokenKind = 'enterprise' | 'user';
+export type TokenKind = 'enterprise' | 'user' | 'pat';
 
 /**
  * A token as stored locally. `expiresAtMs` is **always** an absolute local
@@ -51,15 +60,22 @@ export type TokenRecord = {
   kind?: TokenKind | undefined;
   /** Only `user` tokens carry a refresh token (design D1). */
   refreshToken?: string | undefined;
+  /**
+   * `true` for a token the CLI cannot renew (personal access token). Its
+   * validity is decided in PingCode personal settings, so `expiresAtMs` is only
+   * informational and the proactive freshness guard is skipped for it.
+   */
+  unrefreshable?: boolean | undefined;
 };
 
 /** A user-slot token: always `kind:'user'` and always refreshable (design D1). */
 export type UserTokenRecord = TokenRecord & { kind: 'user'; refreshToken: string };
 
 /**
- * On-disk config shape (design §3). Two token slots coexist: `token` is the
- * enterprise slot (existing), `userToken` is the user slot (new). `authMode`
- * says which is active. A legacy file has only `token` + no `authMode` (D2).
+ * On-disk config shape (design §3). Three token slots coexist: `token` is the
+ * enterprise slot (existing), `userToken` is the user slot, and `patToken` is
+ * the personal-access-token slot. `authMode` says which is active. A legacy file
+ * has only `token` + no `authMode` (D2).
  */
 export type Config = {
   host?: string | undefined;
@@ -74,6 +90,8 @@ export type Config = {
   userClientSecret?: string | undefined;
   /** User slot (authorization_code / refresh_token). */
   userToken?: UserTokenRecord | undefined;
+  /** Personal access token slot (pasted token, no app, no refresh). */
+  patToken?: TokenRecord | undefined;
   /** Which slot is active; absent → inferred (D2). */
   authMode?: TokenKind | undefined;
 };
@@ -101,8 +119,14 @@ export type ResolvedSettings = {
   /** User-token app credentials (authorization_code). Separate app. */
   userClientId: string | undefined;
   userClientSecret: string | undefined;
-  /** The active slot's token (user slot when `authMode==='user'`, else enterprise). */
+  /** The active slot's token (`patToken` for pat mode, `userToken` for user, else `token`). */
   token: TokenRecord | undefined;
+  /** The effective personal access token: `PINGCODE_TOKEN` if set, else the file slot. */
+  patToken: TokenRecord | undefined;
+  /** Where the active token came from: `PINGCODE_TOKEN` counts as `env`. */
+  tokenSource: SettingSource | 'none';
+  /** Whether the active token can be renewed by the CLI itself. */
+  tokenRefreshable: boolean;
   /** Which slot is active, inferred per D2 when the config does not state it. */
   authMode: TokenKind;
   sources: {
@@ -312,13 +336,45 @@ export function coerceConfig(raw: unknown): Config {
   if (token !== undefined) config.token = token;
   const userToken = coerceUserToken(record.userToken);
   if (userToken !== undefined) config.userToken = userToken;
+  const patToken = coercePatToken(record.patToken);
+  if (patToken !== undefined) config.patToken = patToken;
   const authMode = asAuthMode(record.authMode);
   if (authMode !== undefined) config.authMode = authMode;
   return config;
 }
 
 function asAuthMode(raw: unknown): TokenKind | undefined {
-  return raw === 'enterprise' || raw === 'user' ? raw : undefined;
+  return raw === 'enterprise' || raw === 'user' || raw === 'pat' ? raw : undefined;
+}
+
+/**
+ * Strip a pasted `Bearer ` prefix and surrounding whitespace from a token.
+ *
+ * Both entry points go through this: a token copied from documentation is often
+ * written `Bearer <token>`, and `Authorization: Bearer Bearer <token>` would fail
+ * with an unhelpful 401. Normalising once at the boundary keeps `PINGCODE_TOKEN`
+ * and `auth login --mode pat --token` behaving identically.
+ */
+export function normalizeToken(raw: string): string {
+  return raw.trim().replace(/^Bearer\s+/i, '').trim();
+}
+
+/** Coerce the personal-access-token slot: must be `kind:'pat'`, never refreshable. */
+function coercePatToken(raw: unknown): TokenRecord | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (asAuthMode(record.kind) !== 'pat') return undefined;
+  const base = coerceTokenBase(record);
+  if (base === undefined) return undefined;
+  const token: TokenRecord = {
+    ...base,
+    accessToken: normalizeToken(base.accessToken),
+    kind: 'pat',
+    unrefreshable: true,
+  };
+  const scope = asString(record.scope);
+  if (scope !== undefined) token.scope = scope;
+  return token;
 }
 
 /** Coerce a user-slot token: must be `kind:'user'` and carry a refresh token. */
@@ -401,11 +457,52 @@ export function resolveSettings(input: {
     file.userClientSecret,
   ).value;
 
-  // Active-mode inference (D2): an explicit authMode wins; otherwise userToken→user,
-  // token→enterprise (legacy), neither→user (brand-new default).
-  const authMode = inferAuthMode(file);
-  // The active slot's token: the user slot when in user mode, else the enterprise slot.
-  const activeToken = authMode === 'user' ? file.userToken : file.token;
+  // Personal access token: `PINGCODE_TOKEN` (env) is the CI/CD entry point and
+  // needs no config file at all; the file slot serves `auth login --mode pat`.
+  // Normalised at the boundary (a raw `Bearer <token>` copy-paste must not become
+  // `Bearer Bearer <token>` on the wire).
+  const envTokenRaw = readEnv(env, ENV_TOKEN);
+  const envToken = envTokenRaw === undefined ? undefined : normalizeToken(envTokenRaw);
+
+  // Active-mode inference (D2): an env PAT always wins (flag → env → file precedence,
+  // and its whole point is "run with nothing but the token on disk"), then an
+  // explicit authMode, otherwise patToken→pat, userToken→user, token→enterprise
+  // (legacy), neither→user (brand-new default).
+  const authMode: TokenKind = envToken !== undefined ? 'pat' : inferAuthMode(file);
+
+  // The active slot's token, plus where it came from. An env PAT is materialised
+  // as an unrefreshable `pat` record so the core layer treats it identically to
+  // one stored by `auth login --mode pat`.
+  let activeToken: TokenRecord | undefined;
+  let tokenSource: SettingSource | 'none';
+  const envPatToken: TokenRecord | undefined = envToken === undefined
+    ? undefined
+    : {
+        accessToken: envToken,
+        expiresAtMs: 0,
+        obtainedAtMs: 0,
+        kind: 'pat',
+        unrefreshable: true,
+      };
+  if (envPatToken !== undefined) {
+    activeToken = envPatToken;
+    tokenSource = 'env';
+  } else if (authMode === 'pat') {
+    activeToken = file.patToken;
+    tokenSource = activeToken === undefined ? 'none' : 'file';
+  } else if (authMode === 'user') {
+    activeToken = file.userToken;
+    tokenSource = activeToken === undefined ? 'none' : 'file';
+  } else {
+    activeToken = file.token;
+    tokenSource = activeToken === undefined ? 'none' : 'file';
+  }
+
+  const tokenRefreshable =
+    activeToken !== undefined &&
+    activeToken.unrefreshable !== true &&
+    activeToken.kind !== 'pat' &&
+    authMode !== 'pat';
 
   return {
     host,
@@ -415,6 +512,9 @@ export function resolveSettings(input: {
     userClientId,
     userClientSecret,
     token: activeToken,
+    patToken: envPatToken ?? file.patToken,
+    tokenSource,
+    tokenRefreshable,
     authMode,
     sources: {
       host: hostSource,
@@ -427,11 +527,14 @@ export function resolveSettings(input: {
 
 /**
  * Infer the active mode when the config does not state it (D2, R6):
- * `userToken` present → `user`; else `token` present → `enterprise` (legacy,
- * never flipped on upgrade); else neither → `user` (brand-new default, R2).
+ * `patToken` present → `pat`; `userToken` present → `user`; else `token` present
+ * → `enterprise` (legacy, never flipped on upgrade); else neither → `user`
+ * (brand-new default, R2). `PINGCODE_TOKEN` is handled by the caller, which has
+ * the env at hand.
  */
 function inferAuthMode(file: Config): TokenKind {
   if (file.authMode !== undefined) return file.authMode;
+  if (file.patToken !== undefined) return 'pat';
   if (file.userToken !== undefined) return 'user';
   if (file.token !== undefined) return 'enterprise';
   return 'user';

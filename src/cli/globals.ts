@@ -144,11 +144,14 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       : override?.clientSecret ?? settings.clientSecret;
   // The token for the effective mode (may differ from settings.token when a login
   // is switching mode — `auth login` clears it anyway, but keep them consistent).
-  const activeToken = mode === 'user' ? file.userToken : file.token;
+  // `pat` mode reads the effective PAT (`PINGCODE_TOKEN` first, then the file slot);
+  // it needs no app credentials at all.
+  const activeToken =
+    mode === 'pat' ? settings.patToken : mode === 'user' ? file.userToken : file.token;
 
   const ctx = createContext({
     apiBase: settings.apiBase,
-    credentials: { clientId: activeClientId, clientSecret: activeClientSecret },
+    credentials: mode === 'pat' ? {} : { clientId: activeClientId, clientSecret: activeClientSecret },
     auth: {
       token: activeToken,
       clampWarned: false,
@@ -162,7 +165,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     env,
     // Mode-aware persist (D5): route by the token's kind to the right slot and
     // stamp the active mode. saveConfig re-reads + merges, so this writes only
-    // the owned field (never a whole stale Config).
+    // the owned field (never a whole stale Config). A PAT is never refreshed, so
+    // this only ever fires from `auth login --mode pat`.
     persistToken: (token: TokenRecord) => {
       if (token.kind === 'user') {
         saveConfig(
@@ -172,6 +176,8 @@ export function buildContext(input: BuildContextInput): BuiltContext {
           },
           env,
         );
+      } else if (token.kind === 'pat') {
+        saveConfig({ patToken: { ...token, kind: 'pat', unrefreshable: true }, authMode: 'pat' }, env);
       } else {
         saveConfig({ token, authMode: 'enterprise' }, env);
       }

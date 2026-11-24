@@ -515,14 +515,15 @@ function refuseUserTokenEndpoint(ctx: Ctx, candidates: readonly CatalogEntry[]):
   // Not a USER-only call: an absent tokenType, or a path where some candidate
   // accepts another token, is reachable regardless of the held kind (design D8.5).
   if (!candidates.every((entry) => entry.tokenType === 'USER')) return;
-  // A user token CAN call these (R7). `ctx.auth.mode` may be undefined for a
-  // context built with no token — treat that as enterprise (refuse), the safe
-  // default (design D9).
-  if (ctx.auth.mode === 'user') return;
+  // A user token (or a personal access token, which is also human-bound and
+  // carries the same identity) CAN call these (R7). `ctx.auth.mode` may be undefined
+  // for a context built with no token — treat that as enterprise (refuse), the
+  // safe default (design D9).
+  if (ctx.auth.mode === 'user' || ctx.auth.mode === 'pat') return;
   const entry = candidates[0];
   if (entry === undefined) return;
   throw new UsageError(
-    `${entry.method} ${entry.path} requires a 用户令牌 (user token), but the active token is an 企业令牌 (enterprise) — run \`pingcode auth login --mode user\` to hold a user token`,
+    `${entry.method} ${entry.path} requires a 用户令牌 (user token), but the active token is an 企业令牌 (enterprise) — run \`pingcode auth login --mode user\`, or use a personal access token with --mode pat / PINGCODE_TOKEN`,
     {
       hint:
         'seven endpoints are user-token-only — /v1/myself, /v1/permission/my/* and /v1/permission/check/*. ' +
