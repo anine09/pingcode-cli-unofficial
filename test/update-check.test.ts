@@ -11,7 +11,7 @@ vi.mock('../src/core/config', async (importOriginal) => {
 });
 
 // Must import after mock setup.
-const { checkForUpdate, ENV_NO_UPDATE_CHECK } = await import('../src/core/update-check');
+const { checkForUpdate, ENV_NO_UPDATE_CHECK, isNewerVersion } = await import('../src/core/update-check');
 
 const TEMP_CONFIG_DIR = path.join(import.meta.dirname ?? '.', '.tmp-update-check');
 const CACHE_FILE = path.join(TEMP_CONFIG_DIR, 'update-check.json');
@@ -167,6 +167,44 @@ describe('checkForUpdate — network failures', () => {
 // ---------------------------------------------------------------------------
 // version comparison
 // ---------------------------------------------------------------------------
+
+describe('isNewerVersion', () => {
+  it('accepts only strictly newer valid versions', () => {
+    expect(isNewerVersion('2.3.1', '2.3.0')).toBe(true);
+    expect(isNewerVersion('2.3.0', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.2.9', '2.3.0')).toBe(false);
+    expect(isNewerVersion('not-a-version', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.3.1', 'not-a-version')).toBe(false);
+  });
+
+  it('follows the SemVer prerelease precedence chain', () => {
+    const precedence = [
+      '1.0.0-alpha',
+      '1.0.0-alpha.1',
+      '1.0.0-alpha.beta',
+      '1.0.0-beta',
+      '1.0.0-beta.2',
+      '1.0.0-beta.11',
+      '1.0.0-rc.1',
+      '1.0.0',
+    ];
+
+    for (let index = 1; index < precedence.length; index += 1) {
+      const lower = precedence[index - 1]!;
+      const higher = precedence[index]!;
+      expect(isNewerVersion(higher, lower), `${higher} > ${lower}`).toBe(true);
+      expect(isNewerVersion(lower, higher), `${lower} < ${higher}`).toBe(false);
+    }
+  });
+
+  it('ignores build metadata and rejects invalid identifiers', () => {
+    expect(isNewerVersion('2.3.1+build.2', '2.3.1+build.1')).toBe(false);
+    expect(isNewerVersion('2.3.1-01', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.3.1-alpha..1', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.3.1+build..1', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.3.1+build+extra', '2.3.0')).toBe(false);
+  });
+});
 
 describe('checkForUpdate — version comparison', () => {
   it('detects newer remote version', async () => {

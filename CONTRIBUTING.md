@@ -120,7 +120,7 @@ Every commit that adds or changes user-visible capability MUST include a version
 | Removed/renamed command, changed flag, changed exit code | **MAJOR** | 1.2.1 → 2.0.0 |
 | Docs / tests / refactor only | **No bump** | — |
 
-Files to bump: `package.json` (`version` field) + `src/version.ts` (`VERSION` constant).
+File to bump: `package.json` (`version` field). The CLI reads that value from the running package at runtime; do not add a second version constant.
 
 ## Security
 

@@ -26,20 +26,27 @@ Requires **Node.js >= 20**. The package is published to **npm** as [`pingcode-cl
 npm install -g pingcode-cli-unofficial
 ```
 
-That puts `pingcode` on your `PATH`, and it is the only install path. Self-update is
-automatic: the CLI checks npm for new versions on startup and installs them with
-`npm i -g`, so the box needs an `npm` alongside the `node` running the CLI.
+That puts `pingcode` on your `PATH`, and it is the only install path. npm owns the
+installation lifecycle: version selection, extraction, replacement, executable links,
+and rollback. The CLI only consumes that installation and reads its version from the
+running package. Self-update invokes `npm i -g`, so the box needs an `npm` alongside
+the `node` running the CLI.
 
-### From source
+A retired standalone copy under `~/.local/share/pingcode-cli` is never used for
+version, package, or skill resolution. `pingcode self-update` prints a one-line
+notice when that directory exists; it can be deleted.
 
-Build from a checkout when you want the latest code between releases, or want to edit/extend the CLI:
+### Development from source
+
+Build from a checkout when you want the latest code between releases, or want to edit/extend the CLI.
+This is a development workflow, not a second installation mechanism:
 
 ```bash
 git clone https://github.com/anine09/pingcode-cli-unofficial.git
 cd pingcode-cli-unofficial
 npm install
 npm run build            # → dist/bin/pingcode.js
-npm link                 # then just: pingcode --help
+node dist/bin/pingcode.js --help
 ```
 
 Development commands:
@@ -51,6 +58,8 @@ npm run dev              # tsup --watch
 npm run skill:install    # build, then copy skills/pingcode into the agent skill dirs
 npm run scan:secrets     # credential / tenant-identifier scan
 npm run check:commits    # commit-message gate
+npm run check:npm-ownership # reject CLI-owned install paths/version literals
+npm run smoke:npm-package   # after build: verify built and packed tarball execution
 ```
 
 ---
@@ -920,7 +929,7 @@ in `scripts/` for one reason: `prepare` runs during `npm ci`, including on the N
 **`.github/workflows/release.yml`** — on tags matching `v*`. To cut a release:
 
 ```bash
-# 1. bump the version in package.json (src/version.ts is asserted to match by test/version.test.ts)
+# 1. bump the version in package.json (the CLI reads this running-package value at runtime)
 # 2. commit it, and make sure main is green
 git tag -a v0.2.0 -m 'v0.2.0'
 git push origin v0.2.0
