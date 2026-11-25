@@ -5,15 +5,16 @@ import { printDryRun, printError, errLine, paint } from '../cli/output';
 import { buildProgram, type RawGlobalOptions } from '../cli/program';
 import { DryRunHalt, exitCodeFor } from '../core/errors';
 import { configDir } from '../core/config';
-import { ENV_NO_UPDATE_CHECK } from '../core/update-check';
+import { ENV_NO_UPDATE_CHECK, isNewerVersion } from '../core/update-check';
 import { isCooldownActive, readHint, removeHint, runAutoUpdate } from '../core/update';
+import { existingLegacyStandalone } from '../core/legacy-standalone';
 import { VERSION } from '../version';
 
 /**
  * Background update check. On every CLI startup:
  *
- * 1. If a hint file exists (left by a previous failed auto-update), print
- *    the update message to stderr and remove the hint.
+ * 1. If a hint file exists (left by a previous failed auto-update), print the
+ *    update message only when it names a newer version, then remove the hint.
  * 2. Unless disabled or on cooldown, spawn a detached `__auto-update` child
  *    process that checks for + installs updates in the background.
  *
@@ -27,11 +28,15 @@ function notifyUpdateCheck(jsonMode: boolean): void {
 
   const dir = configDir();
 
-  // a) Check hint file — if a previous auto-update failed, tell the user.
+  // a) Check hint file — if a previous auto-update failed, tell the user only
+  //    when the hinted version is actually newer. Equal/older stale hints are
+  //    consumed silently so `self-update --help` cannot claim a no-op update.
   const hint = readHint(dir);
   if (hint !== undefined) {
-    errLine(paint.yellow(`Update available: ${VERSION} → ${hint.version}`));
-    errLine(paint.dim('Run: pingcode self-update'));
+    if (isNewerVersion(hint.version, VERSION)) {
+      errLine(paint.yellow(`Update available: ${VERSION} → ${hint.version}`));
+      errLine(paint.dim('Run: pingcode self-update'));
+    }
     try { removeHint(dir); } catch { /* best-effort */ }
   }
 
@@ -55,9 +60,19 @@ function detectJsonMode(program: Command, argv: string[]): boolean {
   return argv.includes('--json');
 }
 
+function warnLegacyStandalone(): void {
+  const legacy = existingLegacyStandalone();
+  if (legacy !== undefined) {
+    errLine(paint.yellow(
+      `Deprecated standalone installation found at ${legacy}; it is ignored and can be deleted.`,
+    ));
+  }
+}
+
 async function main(argv: string[]): Promise<number> {
   const program = buildProgram();
   const jsonMode = argv.includes('--json');
+  if (argv.slice(2).includes('self-update')) warnLegacyStandalone();
   notifyUpdateCheck(jsonMode);
   try {
     await program.parseAsync(argv);

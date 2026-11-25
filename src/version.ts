@@ -1,4 +1,2 @@
-/**
- * CLI version. Keep in sync with `package.json` — `test/version.test.ts` asserts it.
- */
-export const VERSION = '2.3.0';
+/** The version declared by the package that is currently running. */
+export { VERSION } from './core/package-version';

@@ -142,7 +142,7 @@ When you are asked to implement a feature or fix:
 - New command/flag → MINOR bump
 - Bug fix → PATCH bump
 - Breaking change → MAJOR bump
-- Bump `package.json` + `src/version.ts` in a separate `chore:` commit
+- Bump `package.json` in a separate `chore:` commit; `src/version.ts` reads the running package at runtime
 
 **Common mistake**: committing feature work directly on `main` without a feature branch. This bypasses CI and breaks the GitFlow model. Always use `feature/*` branches off `develop`.
 

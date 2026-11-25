@@ -50,11 +50,10 @@ jobs:
       - name: build
         run: npm run build
 
-      # The bundle is what users actually run; `tsc` passing does not prove it boots.
-      - name: smoke the built binary
-        run: |
-          node dist/bin/pingcode.js --version
-          node dist/bin/pingcode.js --help
+      # The bundle and npm tarball are what users actually run; `tsc` passing
+      # does not prove either boots without a standalone installer.
+      - name: smoke the npm package
+        run: npm run smoke:npm-package
 
       # Non-TTY path: lists every global target and writes nothing.
       - name: skill installer dry run
@@ -62,8 +61,8 @@ jobs:
 
   checks:
     # Repository hygiene, once per run rather than once per matrix leg (D5).
-    # No `npm ci`: both scripts are `node:`-builtin-only, so there is nothing to
-    # install. Node 24 because they are type-stripped TypeScript (see above).
+    # Node 24 because the commit/secret checks are type-stripped TypeScript;
+    # npm ci supplies the TypeScript parser used by the ownership guard.
     name: secret scan and commit gate
     runs-on: ubuntu-latest
     steps:
@@ -75,6 +74,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: install
+        run: npm ci
+
+      - name: check npm installation ownership
+        run: npm run check:npm-ownership
 
       - name: resolve the commit range
         id: range

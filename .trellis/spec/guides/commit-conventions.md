@@ -159,6 +159,6 @@ Every commit that adds or changes user-visible capability MUST include a version
 | Removed/renamed command, changed flag, changed exit code | **MAJOR** | `feat(cli)!: rename --state-id` → 1.2.1 → 2.0.0 |
 | Docs / tests / refactor only | **No bump** | `docs: update README` |
 
-Files to bump: `package.json` (`version` field, no leading `v`) + `src/version.ts` (`VERSION` constant).
+File to bump: `package.json` (`version` field, no leading `v`). `src/version.ts` re-exports the version read from the running package; do not add a literal `VERSION` constant.
 
 **Common mistake**: completing a feature, committing the code, and forgetting to bump the version. The next person (or AI) sees new capability at the old version number and cannot tell what changed. Always ask "does this diff add or change user-visible behavior?" before committing.
