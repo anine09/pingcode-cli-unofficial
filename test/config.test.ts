@@ -339,3 +339,124 @@ describe('resolveSettings auth-mode inference (D2)', () => {
     expect(resolved.token?.accessToken).toBe('ent'); // active slot = enterprise
   });
 });
+
+/**
+ * Personal access tokens: a third slot + a third mode. The env var is the CI/CD
+ * entry point, so it must win over anything on disk (flag → env → file), and the
+ * token it produces is explicitly flagged as unrefreshable.
+ */
+describe('resolveSettings — personal access token (pat)', () => {
+  const patRecord = {
+    accessToken: 'from-file',
+    expiresAtMs: 0,
+    obtainedAtMs: 0,
+    kind: 'pat' as const,
+    unrefreshable: true as const,
+  };
+
+  it('lets PINGCODE_TOKEN win over the config file, even with an explicit authMode', () => {
+    const file = {
+      authMode: 'enterprise' as const,
+      token: { accessToken: 'ent', expiresAtMs: 5, obtainedAtMs: 1, kind: 'enterprise' as const },
+    };
+    const resolved = resolveSettings({ env: { PINGCODE_TOKEN: 'env-pat' }, file });
+    expect(resolved.authMode).toBe('pat');
+    expect(resolved.token?.accessToken).toBe('env-pat');
+    expect(resolved.token?.unrefreshable).toBe(true);
+    expect(resolved.tokenSource).toBe('env');
+    expect(resolved.tokenRefreshable).toBe(false);
+    // The file slots are untouched, so a later logout/switch restores them.
+    expect(resolved.patToken?.accessToken).toBe('env-pat');
+  });
+
+  it('infers pat mode from a stored patToken when no authMode is stated', () => {
+    const resolved = resolveSettings({ env: {}, file: { patToken: patRecord } });
+    expect(resolved.authMode).toBe('pat');
+    expect(resolved.token?.accessToken).toBe('from-file');
+    expect(resolved.tokenSource).toBe('file');
+    expect(resolved.tokenRefreshable).toBe(false);
+  });
+
+  it('prefers the pat slot over the user slot when neither mode is stated', () => {
+    const resolved = resolveSettings({
+      env: {},
+      file: {
+        patToken: patRecord,
+        userToken: {
+          accessToken: 'usr',
+          refreshToken: 'rt',
+          expiresAtMs: 6,
+          obtainedAtMs: 2,
+          kind: 'user' as const,
+        },
+      },
+    });
+    expect(resolved.authMode).toBe('pat');
+    expect(resolved.token?.accessToken).toBe('from-file');
+  });
+
+  it('keeps a stated enterprise mode active but still exposes the pat slot', () => {
+    const resolved = resolveSettings({
+      env: {},
+      file: {
+        authMode: 'enterprise' as const,
+        token: { accessToken: 'ent', expiresAtMs: 5, obtainedAtMs: 1, kind: 'enterprise' as const },
+        patToken: patRecord,
+      },
+    });
+    expect(resolved.authMode).toBe('enterprise');
+    expect(resolved.token?.accessToken).toBe('ent');
+    expect(resolved.tokenRefreshable).toBe(true);
+    expect(resolved.patToken?.accessToken).toBe('from-file');
+  });
+
+  it('ignores a blank PINGCODE_TOKEN', () => {
+    const resolved = resolveSettings({ env: { PINGCODE_TOKEN: '   ' }, file: { patToken: patRecord } });
+    expect(resolved.authMode).toBe('pat');
+    expect(resolved.tokenSource).toBe('file');
+  });
+});
+
+describe('coerceConfig — patToken slot', () => {
+  it('keeps a pat token and forces unrefreshable', () => {
+    const base = { accessToken: 'p', expiresAtMs: 0, obtainedAtMs: 1, kind: 'pat' };
+    expect(coerceConfig({ patToken: base })).toEqual({
+      patToken: { ...base, unrefreshable: true },
+    });
+  });
+
+  it('drops a pat slot whose kind is not pat (no smuggling a user token into it)', () => {
+    expect(
+      coerceConfig({
+        patToken: { accessToken: 'p', expiresAtMs: 0, obtainedAtMs: 1, kind: 'user', refreshToken: 'rt' },
+      }),
+    ).toEqual({});
+  });
+
+  it('accepts authMode "pat"', () => {
+    expect(coerceConfig({ authMode: 'pat' })).toEqual({ authMode: 'pat' });
+  });
+});
+
+describe('normalizeToken — pasted credentials', () => {
+  it('strips a Bearer prefix from PINGCODE_TOKEN so the wire header is not doubled', () => {
+    const resolved = resolveSettings({ env: { PINGCODE_TOKEN: '  Bearer abc  ' }, file: {} });
+    expect(resolved.token?.accessToken).toBe('abc');
+  });
+
+  it('normalises the on-disk pat slot too (hand-edited configs)', () => {
+    // On-disk values always pass through coerceConfig (loadConfig), which is
+    // where the normalisation happens.
+    const file = coerceConfig({
+      patToken: {
+        accessToken: 'Bearer abc',
+        expiresAtMs: 0,
+        obtainedAtMs: 0,
+        kind: 'pat',
+        unrefreshable: true,
+      },
+    });
+    const resolved = resolveSettings({ env: {}, file });
+    expect(resolved.token?.accessToken).toBe('abc');
+  });
+});

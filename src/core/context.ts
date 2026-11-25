@@ -11,7 +11,7 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
  * (the safe process default, when no auth is supplied, is `enterprise`).
  */
 export type AuthSession = {
-  mode?: 'enterprise' | 'user' | undefined;
+  mode?: 'enterprise' | 'user' | 'pat' | undefined;
   token?: TokenRecord | undefined;
   inflight?: Promise<TokenRecord> | undefined;
   /** The past-expiry clamp warns once per process (design §4.1). */
