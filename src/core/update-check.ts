@@ -90,6 +90,15 @@ export function compareSemver(
   return 0;
 }
 
+/** True only when `candidate` is a valid semver strictly newer than `current`. */
+export function isNewerVersion(candidate: string, current: string): boolean {
+  const candidateParts = parseSemver(candidate);
+  const currentParts = parseSemver(current);
+  return candidateParts !== undefined
+    && currentParts !== undefined
+    && compareSemver(currentParts, candidateParts) < 0;
+}
+
 // ---------------------------------------------------------------------------
 // cache helpers
 // ---------------------------------------------------------------------------
@@ -235,12 +244,7 @@ export async function checkForUpdate(
  * Compare a remote version string against the local VERSION.
  */
 function compareVersions(remote: string): CheckResult {
-  const localParts = parseSemver(VERSION);
-  const remoteParts = parseSemver(remote);
-  if (localParts === undefined || remoteParts === undefined) {
-    return { status: 'up-to-date' };
-  }
-  if (compareSemver(localParts, remoteParts) < 0) {
+  if (isNewerVersion(remote, VERSION)) {
     return { status: 'update-available', current: VERSION, latest: remote };
   }
   return { status: 'up-to-date' };

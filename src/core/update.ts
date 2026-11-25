@@ -32,6 +32,7 @@ import { TransportError } from './errors';
 import type { FetchLike } from './context';
 import { parseSemver, compareSemver } from './update-check';
 import { VERSION } from '../version';
+import { readPackageVersion } from './package-version';
 import type { SkillTarget } from './paths';
 import { skillTargets } from './paths';
 
@@ -274,15 +275,7 @@ export async function installViaNpm(exec: ExecFn, version: string): Promise<void
  * @returns The version string, or `undefined` when it cannot be read.
  */
 export function readInstalledVersion(): string | undefined {
-  try {
-    const raw = readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8');
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return undefined;
-    const version = (parsed as Record<string, unknown>).version;
-    return typeof version === 'string' ? version : undefined;
-  } catch {
-    return undefined;
-  }
+  return readPackageVersion();
 }
 
 /** npm's exit status from a thrown `execFileSync` error, as a display string. */

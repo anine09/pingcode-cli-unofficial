@@ -35,10 +35,9 @@ import { contextFor, modeOf } from './common';
  * `packageSkillDir()` rather than re-deriving the URL keeps the two consumers
  * provably on the same directory.
  *
- * The old `installDir()` layout — `~/.local/share/pingcode-cli`, which the standalone
- * installer used to populate — is deliberately *not* the source: nothing creates that
- * directory any more, so reading it made `skill install` report `not-found` for every
- * target while an older copy sat there untouched.
+ * The retired standalone-installer layout is deliberately *not* the source:
+ * nothing creates it any more, so reading it made `skill install` report
+ * `not-found` for every target while an older copy sat there untouched.
  */
 function packageSkillRoot(): string {
   return path.dirname(path.dirname(packageSkillDir()));

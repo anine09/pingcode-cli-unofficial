@@ -39,7 +39,7 @@ const pkg = JSON.parse(read('package.json')) as {
 
 function npmScriptsUsedIn(workflow: string): string[] {
   const used = new Set<string>();
-  const re = /npm run ([a-z:]+)/g;
+  const re = /npm run ([a-z0-9:_-]+)/g;
   for (let match = re.exec(workflow); match !== null; match = re.exec(workflow)) {
     const name = match[1];
     if (name !== undefined) used.add(name);
@@ -135,6 +135,8 @@ describe('workflows', () => {
     // suite cannot see would be governed by nothing.
     expect(npmScriptsUsedIn(catalogCheck)).toContain('catalog:check');
     expect(npmScriptsUsedIn(ci)).toContain('typecheck');
+    expect(npmScriptsUsedIn(ci)).toContain('check:npm-ownership');
+    expect(npmScriptsUsedIn(ci)).toContain('smoke:npm-package');
     expect(npmScriptsUsedIn(publish)).toContain('build');
     expect(npmScriptsUsedIn(release)).toContain('build');
   });
@@ -142,12 +144,11 @@ describe('workflows', () => {
   it('smoke the binary at the path package.json declares', () => {
     const binary = pkg.bin['pingcode'];
     expect(binary).toBe('dist/bin/pingcode.js');
-    // The drift watch is excluded on purpose: it never installs dependencies and
-    // never builds, so there is no bundle for it to smoke.
-    for (const workflow of [ci, release]) {
-      expect(workflow).toContain(`node ${binary} --version`);
-      expect(workflow).toContain(`node ${binary} --help`);
-    }
+    // CI delegates built and packed-package checks to the smoke script; release
+    // still invokes the built binary directly.
+    expect(ci).toContain('npm run smoke:npm-package');
+    expect(release).toContain(`node ${binary} --version`);
+    expect(release).toContain(`node ${binary} --help`);
   });
 
   it('pin every action to a major tag', () => {

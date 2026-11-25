@@ -11,7 +11,7 @@ vi.mock('../src/core/config', async (importOriginal) => {
 });
 
 // Must import after mock setup.
-const { checkForUpdate, ENV_NO_UPDATE_CHECK } = await import('../src/core/update-check');
+const { checkForUpdate, ENV_NO_UPDATE_CHECK, isNewerVersion } = await import('../src/core/update-check');
 
 const TEMP_CONFIG_DIR = path.join(import.meta.dirname ?? '.', '.tmp-update-check');
 const CACHE_FILE = path.join(TEMP_CONFIG_DIR, 'update-check.json');
@@ -167,6 +167,16 @@ describe('checkForUpdate — network failures', () => {
 // ---------------------------------------------------------------------------
 // version comparison
 // ---------------------------------------------------------------------------
+
+describe('isNewerVersion', () => {
+  it('accepts only strictly newer valid versions', () => {
+    expect(isNewerVersion('2.3.1', '2.3.0')).toBe(true);
+    expect(isNewerVersion('2.3.0', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.2.9', '2.3.0')).toBe(false);
+    expect(isNewerVersion('not-a-version', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.3.1', 'not-a-version')).toBe(false);
+  });
+});
 
 describe('checkForUpdate — version comparison', () => {
   it('detects newer remote version', async () => {

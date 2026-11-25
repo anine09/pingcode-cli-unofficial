@@ -98,7 +98,7 @@ Before tagging a release, ALL of:
 - [ ] `rtk npm test` — green (the suite gates behavior, and a MINOR/MAJOR must not regress).
 - [ ] `rtk npm run build` — succeeds; `dist/bin/pingcode.js --version` prints the new version.
 - [ ] `package.json` `version` equals the intended release number (no leading `v`).
-- [ ] `src/version.ts` `VERSION` constant matches `package.json`.
+- [ ] `src/version.ts` re-exports the version read from the running package's `package.json`; no literal version constant exists.
 - [ ] The tagged commit is on `main` and `origin/main` is in sync before tagging.
 - [ ] Tag pushed: `git push origin vX.Y.Z`.
 - [ ] GitHub Release created (automatically by tag push via `.github/workflows/release.yml`).
