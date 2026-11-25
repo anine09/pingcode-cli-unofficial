@@ -206,6 +206,8 @@ function smokePackedRuntimeVersionReadback(entry, sandbox) {
   const runtimeVersion = '9.9.9-runtime-readback';
   manifest.version = runtimeVersion;
   writeFileSync(packagePath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const packageRoot = path.dirname(packagePath);
+  const before = snapshotTree(packageRoot);
 
   const result = runCli(entry, ['--version'], sandbox);
   expectSuccess(result, 'packed runtime package.json readback --version');
@@ -215,6 +217,11 @@ function smokePackedRuntimeVersionReadback(entry, sandbox) {
     'packed CLI did not read the mutated package.json version at runtime',
   );
   assertNoInstallDirectories(sandbox, 'packed runtime package.json readback');
+  assert.deepEqual(
+    snapshotTree(packageRoot),
+    before,
+    'runtime package.json readback modified the unpacked package',
+  );
 }
 
 let tempRoot;
@@ -234,7 +241,14 @@ try {
   mkdirSync(packDirectory, { recursive: true });
   const packedEntry = unpackTarball(packedTarball(packDirectory), extractDirectory);
   const packedSandbox = createSandbox(tempRoot, 'packed');
+  const packedRoot = path.resolve(path.dirname(packedEntry), '..', '..');
+  const beforeDirectCommands = snapshotTree(packedRoot);
   smokeDirectCommands(packedEntry, packedSandbox, 'packed package');
+  assert.deepEqual(
+    snapshotTree(packedRoot),
+    beforeDirectCommands,
+    'direct packed-package commands modified the unpacked package',
+  );
   smokePackedRuntimeVersionReadback(packedEntry, packedSandbox);
   process.stdout.write(
     `packed package: version ${expectedVersion}; --help/auth status passed; runtime package.json readback passed; no installation directories created\n`,

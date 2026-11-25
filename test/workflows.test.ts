@@ -218,6 +218,12 @@ describe('ci.yml', () => {
     }
     expect(ci).toContain('npm run scan:secrets -- "$RANGE"');
     expect(ci).toContain('npm run check:commits -- "$RANGE"');
+
+    const checksJob = ci.split('  checks:')[1] ?? '';
+    expect(checksJob.indexOf('npm ci')).toBeGreaterThanOrEqual(0);
+    expect(checksJob.indexOf('npm run check:npm-ownership')).toBeGreaterThan(
+      checksJob.indexOf('npm ci'),
+    );
   });
 
   it('passes untrusted PR input through env, never into the shell', () => {

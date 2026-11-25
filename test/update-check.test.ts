@@ -176,6 +176,34 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('not-a-version', '2.3.0')).toBe(false);
     expect(isNewerVersion('2.3.1', 'not-a-version')).toBe(false);
   });
+
+  it('follows the SemVer prerelease precedence chain', () => {
+    const precedence = [
+      '1.0.0-alpha',
+      '1.0.0-alpha.1',
+      '1.0.0-alpha.beta',
+      '1.0.0-beta',
+      '1.0.0-beta.2',
+      '1.0.0-beta.11',
+      '1.0.0-rc.1',
+      '1.0.0',
+    ];
+
+    for (let index = 1; index < precedence.length; index += 1) {
+      const lower = precedence[index - 1]!;
+      const higher = precedence[index]!;
+      expect(isNewerVersion(higher, lower), `${higher} > ${lower}`).toBe(true);
+      expect(isNewerVersion(lower, higher), `${lower} < ${higher}`).toBe(false);
+    }
+  });
+
+  it('ignores build metadata and rejects invalid identifiers', () => {
+    expect(isNewerVersion('2.3.1+build.2', '2.3.1+build.1')).toBe(false);
+    expect(isNewerVersion('2.3.1-01', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.3.1-alpha..1', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.3.1+build..1', '2.3.0')).toBe(false);
+    expect(isNewerVersion('2.3.1+build+extra', '2.3.0')).toBe(false);
+  });
 });
 
 describe('checkForUpdate — version comparison', () => {

@@ -61,9 +61,8 @@ jobs:
 
   checks:
     # Repository hygiene, once per run rather than once per matrix leg (D5).
-    # No `npm ci`: the repository checks use builtins or dependencies supplied
-    # by Node. Node 24 because the commit/secret checks are type-stripped
-    # TypeScript; the npm-ownership guard itself is Node 20-compatible.
+    # Node 24 because the commit/secret checks are type-stripped TypeScript;
+    # npm ci supplies the TypeScript parser used by the ownership guard.
     name: secret scan and commit gate
     runs-on: ubuntu-latest
     steps:
@@ -75,6 +74,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: install
+        run: npm ci
 
       - name: check npm installation ownership
         run: npm run check:npm-ownership

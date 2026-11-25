@@ -90,13 +90,97 @@ export function compareSemver(
   return 0;
 }
 
-/** True only when `candidate` is a valid semver strictly newer than `current`. */
+type ComparableVersion = {
+  core: [bigint, bigint, bigint];
+  /** Undefined denotes a stable release, which outranks every prerelease. */
+  prerelease: string[] | undefined;
+};
+
+const SEMVER_IDENTIFIER = /^[0-9A-Za-z-]+$/;
+
+/** Parse the precedence-bearing parts of SemVer 2.0.0; build metadata is ignored. */
+function parseComparableVersion(raw: string): ComparableVersion | undefined {
+  let version = raw.startsWith('v') ? raw.slice(1) : raw;
+
+  const buildIndex = version.indexOf('+');
+  if (buildIndex !== -1) {
+    const build = version.slice(buildIndex + 1);
+    if (
+      build.includes('+') ||
+      !build.split('.').every((identifier) => SEMVER_IDENTIFIER.test(identifier))
+    ) {
+      return undefined;
+    }
+    version = version.slice(0, buildIndex);
+  }
+
+  const prereleaseIndex = version.indexOf('-');
+  const coreText = prereleaseIndex === -1 ? version : version.slice(0, prereleaseIndex);
+  const prereleaseText = prereleaseIndex === -1 ? undefined : version.slice(prereleaseIndex + 1);
+  const parts = coreText.split('.');
+  if (
+    parts.length !== 3 ||
+    !SEMVER_COMPONENT.test(parts[0]!) ||
+    !SEMVER_COMPONENT.test(parts[1]!) ||
+    !SEMVER_COMPONENT.test(parts[2]!)
+  ) {
+    return undefined;
+  }
+
+  let prerelease: string[] | undefined;
+  if (prereleaseText !== undefined) {
+    prerelease = prereleaseText.split('.');
+    const valid = prerelease.every((identifier) =>
+      SEMVER_IDENTIFIER.test(identifier) &&
+      (!/^\d+$/.test(identifier) || SEMVER_COMPONENT.test(identifier)));
+    if (!valid) return undefined;
+  }
+
+  return {
+    core: [BigInt(parts[0]!), BigInt(parts[1]!), BigInt(parts[2]!)],
+    prerelease,
+  };
+}
+
+function comparePrerelease(left: string[], right: string[]): number {
+  const sharedLength = Math.min(left.length, right.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const leftIdentifier = left[index]!;
+    const rightIdentifier = right[index]!;
+    if (leftIdentifier === rightIdentifier) continue;
+
+    const leftNumeric = /^\d+$/.test(leftIdentifier);
+    const rightNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftNumeric && rightNumeric) {
+      return BigInt(leftIdentifier) < BigInt(rightIdentifier) ? -1 : 1;
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftIdentifier < rightIdentifier ? -1 : 1;
+  }
+  return left.length - right.length;
+}
+
+function compareComparableVersions(left: ComparableVersion, right: ComparableVersion): number {
+  for (let index = 0; index < left.core.length; index += 1) {
+    const leftPart = left.core[index]!;
+    const rightPart = right.core[index]!;
+    if (leftPart !== rightPart) return leftPart < rightPart ? -1 : 1;
+  }
+
+  if (left.prerelease === undefined || right.prerelease === undefined) {
+    if (left.prerelease === right.prerelease) return 0;
+    return left.prerelease === undefined ? 1 : -1;
+  }
+  return comparePrerelease(left.prerelease, right.prerelease);
+}
+
+/** True only when `candidate` is a valid SemVer strictly newer than `current`. */
 export function isNewerVersion(candidate: string, current: string): boolean {
-  const candidateParts = parseSemver(candidate);
-  const currentParts = parseSemver(current);
-  return candidateParts !== undefined
-    && currentParts !== undefined
-    && compareSemver(currentParts, candidateParts) < 0;
+  const candidateVersion = parseComparableVersion(candidate);
+  const currentVersion = parseComparableVersion(current);
+  return candidateVersion !== undefined
+    && currentVersion !== undefined
+    && compareComparableVersions(currentVersion, candidateVersion) < 0;
 }
 
 // ---------------------------------------------------------------------------

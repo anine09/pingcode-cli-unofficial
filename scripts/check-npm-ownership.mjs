@@ -4,12 +4,13 @@
  *
  * The CLI may read its running package and warn about an old standalone
  * directory, but it must never carry that installer forward or replace its own
- * executable. This check is deliberately dependency-free so it can run in CI
- * before npm ci.
+ * executable. TypeScript's parser keeps comments and literals separate from
+ * executable template substitutions and regular expressions.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = path.join(repoRoot, 'src');
@@ -49,11 +50,12 @@ const FIRST_ARGUMENT_MUTATIONS = new Set([
   'writeFile', 'writeFileSync',
 ]);
 
+const RENAME_MUTATIONS = new Set(['rename', 'renameSync']);
+
 const SECOND_ARGUMENT_MUTATIONS = new Set([
   'copyFile', 'copyFileSync',
   'cp', 'cpSync',
   'link', 'linkSync',
-  'rename', 'renameSync',
   'symlink', 'symlinkSync',
 ]);
 
@@ -72,75 +74,6 @@ function typescriptFiles(directory) {
   return files;
 }
 
-/** Hide comments and string bodies without changing offsets or line numbers. */
-function maskCommentsAndStrings(source) {
-  const masked = source.split('');
-  let state = 'code';
-  let escaped = false;
-
-  const hide = (index) => {
-    if (source[index] !== '\n' && source[index] !== '\r') masked[index] = ' ';
-  };
-
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index];
-    const next = source[index + 1];
-
-    if (state === 'line-comment') {
-      hide(index);
-      if (char === '\n') state = 'code';
-      continue;
-    }
-    if (state === 'block-comment') {
-      hide(index);
-      if (char === '*' && next === '/') {
-        hide(index + 1);
-        index += 1;
-        state = 'code';
-      }
-      continue;
-    }
-    if (state === 'single' || state === 'double' || state === 'template') {
-      hide(index);
-      if (escaped) {
-        escaped = false;
-      } else if (char === '\\') {
-        escaped = true;
-      } else if (
-        (state === 'single' && char === "'") ||
-        (state === 'double' && char === '"') ||
-        (state === 'template' && char === '`')
-      ) {
-        state = 'code';
-      }
-      continue;
-    }
-
-    if (char === '/' && next === '/') {
-      hide(index);
-      hide(index + 1);
-      index += 1;
-      state = 'line-comment';
-    } else if (char === '/' && next === '*') {
-      hide(index);
-      hide(index + 1);
-      index += 1;
-      state = 'block-comment';
-    } else if (char === "'") {
-      hide(index);
-      state = 'single';
-    } else if (char === '"') {
-      hide(index);
-      state = 'double';
-    } else if (char === '`') {
-      hide(index);
-      state = 'template';
-    }
-  }
-
-  return masked.join('');
-}
-
 /** Resolve named node:fs imports such as `writeFileSync as write`. */
 function filesystemAliases(source) {
   const aliases = new Map();
@@ -154,76 +87,6 @@ function filesystemAliases(source) {
     }
   }
   return aliases;
-}
-
-/** Split a call's arguments while ignoring commas in nested syntax and strings. */
-function callArguments(source, openParen) {
-  const args = [];
-  const stack = ['('];
-  let start = openParen + 1;
-  let state = 'code';
-  let escaped = false;
-
-  for (let index = openParen + 1; index < source.length; index += 1) {
-    const char = source[index];
-    const next = source[index + 1];
-
-    if (state === 'line-comment') {
-      if (char === '\n') state = 'code';
-      continue;
-    }
-    if (state === 'block-comment') {
-      if (char === '*' && next === '/') {
-        index += 1;
-        state = 'code';
-      }
-      continue;
-    }
-    if (state === 'single' || state === 'double' || state === 'template') {
-      if (escaped) {
-        escaped = false;
-      } else if (char === '\\') {
-        escaped = true;
-      } else if (
-        (state === 'single' && char === "'") ||
-        (state === 'double' && char === '"') ||
-        (state === 'template' && char === '`')
-      ) {
-        state = 'code';
-      }
-      continue;
-    }
-
-    if (char === '/' && next === '/') {
-      state = 'line-comment';
-      index += 1;
-      continue;
-    }
-    if (char === '/' && next === '*') {
-      state = 'block-comment';
-      index += 1;
-      continue;
-    }
-    if (char === "'" || char === '"' || char === '`') {
-      state = char === "'" ? 'single' : char === '"' ? 'double' : 'template';
-      continue;
-    }
-
-    if (char === '(' || char === '[' || char === '{') {
-      stack.push(char);
-    } else if (char === ')' || char === ']' || char === '}') {
-      stack.pop();
-      if (stack.length === 0) {
-        args.push(source.slice(start, index));
-        return args;
-      }
-    } else if (char === ',' && stack.length === 1) {
-      args.push(source.slice(start, index));
-      start = index + 1;
-    }
-  }
-
-  return [];
 }
 
 function isRunningExecutable(argument) {
@@ -258,29 +121,28 @@ function scanSource(file) {
     }
   }
 
-  const code = maskCommentsAndStrings(source);
+  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const aliases = filesystemAliases(source);
-  const callPattern = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
-  for (const match of code.matchAll(callPattern)) {
-    const localName = match[1] ?? '';
-    const method = aliases.get(localName) ?? localName;
-    const argumentIndex = FIRST_ARGUMENT_MUTATIONS.has(method)
-      ? 0
-      : SECOND_ARGUMENT_MUTATIONS.has(method)
-        ? 1
-        : -1;
-    if (argumentIndex === -1) continue;
-
-    const openParen = (match.index ?? 0) + match[0].lastIndexOf('(');
-    const args = callArguments(source, openParen);
-    if (isRunningExecutable(args[argumentIndex] ?? '')) {
-      const offset = match.index ?? 0;
-      violations.push({
-        line: lineNumber(source, offset),
-        message: `direct ${method} mutation of the running executable is forbidden; npm must own CLI replacement`,
-      });
+  function visit(node) {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const localName = node.expression.text;
+      const method = aliases.get(localName) ?? localName;
+      const argumentIndexes = FIRST_ARGUMENT_MUTATIONS.has(method)
+        ? [0]
+        : RENAME_MUTATIONS.has(method)
+          ? [0, 1]
+          : SECOND_ARGUMENT_MUTATIONS.has(method) ? [1] : [];
+      if (argumentIndexes.some((index) =>
+        isRunningExecutable(node.arguments[index]?.getText(sourceFile) ?? ''))) {
+        violations.push({
+          line: lineNumber(source, node.getStart(sourceFile)),
+          message: `direct ${method} mutation of the running executable is forbidden; npm must own CLI replacement`,
+        });
+      }
     }
+    ts.forEachChild(node, visit);
   }
+  visit(sourceFile);
 
   return violations.map((violation) => ({ file: relativePath, ...violation }));
 }
