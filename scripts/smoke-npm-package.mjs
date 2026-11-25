@@ -172,18 +172,17 @@ function smokeLegacyWarning(entry, sandbox) {
 }
 
 function packedTarball(packDirectory) {
-  const result = run('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', packDirectory], {
+  const result = run('npm', ['pack', '--ignore-scripts', '--pack-destination', packDirectory], {
     env: process.env,
     timeout: 120_000,
   });
-  expectSuccess(result, 'npm pack --json --ignore-scripts');
+  expectSuccess(result, 'npm pack --ignore-scripts');
 
-  const manifest = JSON.parse(result.stdout);
-  assert.ok(Array.isArray(manifest) && manifest.length === 1, 'npm pack did not return exactly one package');
-  assert.equal(manifest[0]?.version, expectedVersion, 'npm pack returned an unexpected package version');
-  const filename = manifest[0]?.filename;
-  assert.equal(typeof filename, 'string', 'npm pack did not return a tarball filename');
-  const tarball = path.join(packDirectory, filename);
+  // npm 10/11 can prefix `--json` output with lifecycle notices. The packed
+  // directory is authoritative and avoids parsing version-dependent stdout.
+  const tarballs = readdirSync(packDirectory).filter((name) => name.endsWith('.tgz')).sort();
+  assert.equal(tarballs.length, 1, 'npm pack did not produce exactly one tarball');
+  const tarball = path.join(packDirectory, tarballs[0]);
   assert.ok(existsSync(tarball), `npm pack tarball is missing: ${tarball}`);
   return tarball;
 }
